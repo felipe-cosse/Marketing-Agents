@@ -1,0 +1,43 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SRC-01",
+  "matrix_statement_sha256": "5f5a68f9025e45f0202d612c42e66a5f24bb75dac85574fa48995464705e113d",
+  "evidence_class": "source_boundary",
+  "legacy_bootstrap": true,
+  "legacy_manifest_added_at": "DEL-08",
+  "scope": {
+    "allowed_path_globs": [
+      "docs/design/**",
+      "docs/implementation/requirement-branch-workflow.md",
+      "scripts/verify_requirement_history.py"
+    ],
+    "required_path_groups": [
+      {"kind": "source", "one_of": ["docs/design/README.md", "docs/design/concepts/**"]},
+      {"kind": "test", "one_of": ["tests/source/test_src_01_design_evidence.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "accepted-concepts-exist",
+      "type": "documentation",
+      "statement": "Accepted desktop and mobile concept PNGs exist with the recorded dimensions and source corrections.",
+      "test_refs": ["tests/source/test_src_01_design_evidence.py::DesignEvidenceTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "src-01-design",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_src_01_design_evidence"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["accepted-concepts-exist"]
+    }
+  ],
+  "limitations": [
+    "This legacy manifest was added by DEL-08; it was not present in the original SRC-01 feature commit.",
+    "Concept verification is design evidence, not proof of final browser fidelity or accessibility."
+  ]
+}

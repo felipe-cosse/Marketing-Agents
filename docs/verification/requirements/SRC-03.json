@@ -1,0 +1,49 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SRC-03",
+  "matrix_statement_sha256": "4136c68910852bc8a174c14ededfc874e260a8da6250ba40cdf393b831d15981",
+  "evidence_class": "decision_record",
+  "legacy_bootstrap": true,
+  "legacy_manifest_added_at": "DEL-08",
+  "scope": {
+    "allowed_path_globs": [
+      "docs/assumptions.md",
+      "docs/verification/requirements/SRC-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "tests/source/test_src_03_assumption_register.py"
+    ],
+    "required_path_groups": [
+      {"kind": "decision", "one_of": ["docs/assumptions.md"]},
+      {"kind": "test", "one_of": ["tests/source/test_src_03_assumption_register.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-assumption-register",
+      "type": "documentation",
+      "statement": "The register contains exactly ASM-001 through ASM-024 with statuses and nonempty review triggers.",
+      "test_refs": ["tests/source/test_src_03_assumption_register.py::AssumptionRegisterTests"]
+    },
+    {
+      "id": "assumption-references-resolve",
+      "type": "contract",
+      "statement": "Every assumption reference used by an accepted ADR resolves to the material assumption register.",
+      "test_refs": ["tests/source/test_src_03_assumption_register.py::AssumptionRegisterTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "src-03-register",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_src_03_assumption_register"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["complete-assumption-register", "assumption-references-resolve"]
+    }
+  ],
+  "limitations": [
+    "This legacy manifest was added by DEL-08; it was not present in the original SRC-03 feature commit."
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-08",
+  "matrix_statement_sha256": "7f371e346a98dc0c7f4cabe8d09f9a69271acebffc0f15167df0c7f51bf0438c",
+  "evidence_class": "tooling_control",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "docs/adr/decision-gates.json",
+      "docs/implementation/repository-inspection.json",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/**",
+      "scripts/verify_requirement_evidence.py",
+      "scripts/verify_requirement_history.py",
+      "scripts/verify_source_evidence.py",
+      "tests/source/**",
+      "tests/tooling/**"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "Makefile",
+          "scripts/verify_requirement_evidence.py",
+          "docs/verification/requirement-policy.json",
+          "docs/verification/schema/requirement-evidence.schema.json"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/tooling/test_verify_requirement_evidence.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "topology-bound-history",
+      "type": "negative_control",
+      "statement": "History validation binds each ID to one direct feature commit and one two-parent, tree-equal merge.",
+      "test_refs": ["tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests"]
+    },
+    {
+      "id": "safe-executable-evidence",
+      "type": "negative_control",
+      "statement": "Evidence rejects no-op, shell, failing, timeout, uncovered, evidence-only, and unauthorized protocol changes.",
+      "test_refs": ["tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests"]
+    },
+    {
+      "id": "real-task-runner-targets",
+      "type": "contract",
+      "statement": "Root task-runner targets execute explicit source, tooling, source-evidence, branch, and history validation commands.",
+      "test_refs": ["tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-08-tooling",
+      "runner": "argv",
+      "argv": ["make", "test-tooling"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["topology-bound-history", "safe-executable-evidence", "real-task-runner-targets"]
+    },
+    {
+      "id": "del-08-source-regression",
+      "runner": "argv",
+      "argv": ["make", "test-source"],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_enforced",
+      "covers": ["real-task-runner-targets"]
+    },
+    {
+      "id": "del-08-history",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_requirement_evidence.py", "history", "--ref", "main", "--allow-incomplete", "--check-branches"],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_enforced",
+      "covers": ["topology-bound-history"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "Makefile",
+      "scripts/verify_requirement_evidence.py",
+      "docs/verification/requirement-policy.json",
+      "docs/verification/schema/**"
+    ],
+    "gate_id": "del-08-tooling"
+  },
+  "limitations": [
+    "Backend and frontend formatter, linter, static-type, and full-test targets are not yet verified because their pinned toolchains land in later architecture branches.",
+    "Bootstrap gates do not enforce kernel-level network denial; SAFE-11 owns that cross-language and container control.",
+    "SRC-01, SRC-02, SRC-03, EXEC-01, and EXEC-02 are explicitly identified as legacy manifest backfills."
+  ]
+}
