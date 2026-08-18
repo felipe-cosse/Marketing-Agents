@@ -28,6 +28,7 @@ def _input_schema(template: dict[str, Any]) -> dict[str, Any]:
             "request_id": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+                "maxLength": 80,
             },
             "source_content": {
                 "type": "string",
@@ -40,6 +41,7 @@ def _input_schema(template: dict[str, Any]) -> dict[str, Any]:
             "locale": {
                 "type": "string",
                 "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+                "maxLength": 12,
             },
         },
     }
@@ -58,6 +60,7 @@ def _output_schema(template: dict[str, Any]) -> dict[str, Any]:
             "artifact_id": {
                 "type": "string",
                 "pattern": "^artifact_[A-Za-z0-9_-]{1,72}$",
+                "maxLength": 81,
             },
             "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
             "artifact": {"type": "string", "minLength": 1, "maxLength": 20000},
@@ -72,6 +75,7 @@ def _output_schema(template: dict[str, Any]) -> dict[str, Any]:
                         "action_type": {
                             "type": "string",
                             "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$",
+                            "maxLength": 120,
                         },
                         "destination": {"type": "string", "minLength": 1, "maxLength": 300},
                         "payload_preview": {"type": "string", "maxLength": 2000},

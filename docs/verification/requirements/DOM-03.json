@@ -1,0 +1,66 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DOM-03",
+  "matrix_statement_sha256": "a540d8b28e5fc1448f2c01da482e34b6db6252c9322a6c0ce6e8f390f7b56379",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "scripts/generate_catalog_assets.py",
+      "catalog/v1/schemas/**",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_dom_03_template_io_schemas.py",
+      "docs/verification/requirements/DOM-03.json",
+      "docs/verification/requirements/DOM-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "scripts/generate_catalog_assets.py",
+          "catalog/v1/schemas/**",
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_dom_03_template_io_schemas.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "seventy-two-typed-schemas",
+      "type": "contract",
+      "statement": "Every one of the 36 role templates resolves one stable Draft 2020-12 input schema and one stable output schema.",
+      "test_refs": ["tests/catalog/test_dom_03_template_io_schemas.py::test_dom_03_all_72_schemas_compile_and_are_recursively_bounded"]
+    },
+    {
+      "id": "schema-boundary-fails-closed",
+      "type": "negative_control",
+      "statement": "Wrong schema identities, open objects, unbounded arrays or strings, extra input fields, and missing output fields are rejected.",
+      "test_refs": ["tests/catalog/test_dom_03_template_io_schemas.py::test_dom_03_schema_identity_shape_and_bounds_drift_is_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "dom-03-schema-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_dom_03_template_io_schemas.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["seventy-two-typed-schemas", "schema-boundary-fails-closed"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "scripts/generate_catalog_assets.py",
+      "catalog/v1/schemas/**",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "dom-03-schema-tests"
+  },
+  "limitations": []
+}

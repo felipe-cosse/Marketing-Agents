@@ -61,7 +61,7 @@ Allowed status values:
 | ORCH-09 | Persist auditable state for every step. | 04, 05, 13 | Transition/audit tables/services | Timeline completeness/fault tests | planned |
 | DOM-01 | Model all named core entities. | 03 | Domain entity modules | Entity/invariant tests | planned |
 | DOM-02 | Every template has ID/name/department/function/purpose/instructions. | 02 | Template schema/files | Completeness test | verified |
-| DOM-03 | Every template has typed input/output schemas. | 02 | Per-template JSON Schemas | Compilation/fixture tests | planned |
+| DOM-03 | Every template has typed input/output schemas. | 02 | Per-template JSON Schemas | Compilation/fixture tests | verified |
 | DOM-04 | Every template has tools/triggers/classification/approval/retry/timeout/budget/source notes. | 02 | Template schema/files | Completeness/policy tests | planned |
 | DOM-05 | Every instance references one template and adds deployment fields only. | 02, 04 | Instance schema/config split | Field-ownership/config tests | planned |
 

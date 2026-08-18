@@ -15,7 +15,8 @@
   "properties": {
     "artifact_id": {
       "type": "string",
-      "pattern": "^artifact_[A-Za-z0-9_-]{1,72}$"
+      "pattern": "^artifact_[A-Za-z0-9_-]{1,72}$",
+      "maxLength": 81
     },
     "summary": {
       "type": "string",
@@ -41,7 +42,8 @@
         "properties": {
           "action_type": {
             "type": "string",
-            "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$"
+            "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$",
+            "maxLength": 120
           },
           "destination": {
             "type": "string",

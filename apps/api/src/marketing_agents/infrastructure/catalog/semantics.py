@@ -120,6 +120,131 @@ def template_core_issues(
     return tuple(sorted(issues))
 
 
+def _bounded_schema_issues(
+    schema: Mapping[str, Any],
+    *,
+    pointer: str,
+    related_id: str,
+    source_path: str,
+) -> list[CatalogIssue]:
+    issues: list[CatalogIssue] = []
+    schema_type = schema.get("type")
+    if schema_type == "object" and schema.get("additionalProperties") is not False:
+        issues.append(
+            CatalogIssue(
+                source_path,
+                pointer,
+                "schema-unbounded-object",
+                "object schemas must set additionalProperties to false",
+                related_id,
+            )
+        )
+    if schema_type == "array" and not isinstance(schema.get("maxItems"), int):
+        issues.append(
+            CatalogIssue(
+                source_path,
+                pointer,
+                "schema-unbounded-array",
+                "array schemas must declare a finite maxItems",
+                related_id,
+            )
+        )
+    if (
+        schema_type == "string"
+        and "const" not in schema
+        and "enum" not in schema
+        and not isinstance(schema.get("maxLength"), int)
+    ):
+        issues.append(
+            CatalogIssue(
+                source_path,
+                pointer,
+                "schema-unbounded-string",
+                "string schemas must declare maxLength or a finite constant/enum",
+                related_id,
+            )
+        )
+    properties = schema.get("properties")
+    if isinstance(properties, Mapping):
+        for name, child in properties.items():
+            if isinstance(child, Mapping):
+                issues.extend(
+                    _bounded_schema_issues(
+                        child,
+                        pointer=f"{pointer}/properties/{name}",
+                        related_id=related_id,
+                        source_path=source_path,
+                    )
+                )
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        issues.extend(
+            _bounded_schema_issues(
+                items,
+                pointer=f"{pointer}/items",
+                related_id=related_id,
+                source_path=source_path,
+            )
+        )
+    return issues
+
+
+def template_io_schema_issues(
+    templates: Sequence[AgentTemplateRecord],
+    input_schemas: Mapping[str, Mapping[str, Any]],
+    output_schemas: Mapping[str, Mapping[str, Any]],
+) -> tuple[CatalogIssue, ...]:
+    """Require one stable, object-shaped, recursively bounded schema pair per template."""
+
+    issues: list[CatalogIssue] = []
+    dialect = "https://json-schema.org/draft/2020-12/schema"
+    for template in templates:
+        for direction, schemas in (("input", input_schemas), ("output", output_schemas)):
+            schema = schemas.get(template.id)
+            source_path = getattr(template, f"{direction}_schema_ref")
+            if schema is None:
+                issues.append(
+                    CatalogIssue(
+                        source_path,
+                        "",
+                        "template-schema-missing",
+                        f"template is missing its {direction} schema",
+                        template.id,
+                    )
+                )
+                continue
+            expected_id = f"urn:marketing-agents:catalog:v1:{template.id}:{direction}"
+            if schema.get("$schema") != dialect or schema.get("$id") != expected_id:
+                issues.append(
+                    CatalogIssue(
+                        source_path,
+                        "",
+                        "template-schema-identity",
+                        "schema dialect and stable identity must match the template and direction",
+                        template.id,
+                    )
+                )
+            if schema.get("type") != "object" or not schema.get("required"):
+                issues.append(
+                    CatalogIssue(
+                        source_path,
+                        "",
+                        "template-schema-shape",
+                        "template schemas must be object-shaped with explicit required fields",
+                        template.id,
+                    )
+                )
+            issues.extend(
+                _bounded_schema_issues(
+                    schema,
+                    pointer="",
+                    related_id=template.id,
+                    source_path=source_path,
+                )
+            )
+    return tuple(sorted(issues))
+
+
 def instance_field_ownership_issues(
     records: Sequence[Mapping[str, Any]], source_path: str
 ) -> tuple[CatalogIssue, ...]:
