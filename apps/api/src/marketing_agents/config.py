@@ -11,6 +11,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from marketing_agents.domain.retention import RetentionPolicy
+from marketing_agents.infrastructure.db.url import parse_database_url, safe_database_url
 from marketing_agents.security.network_policy import AdapterNetworkPolicy, NetworkPolicyError
 from marketing_agents.security.secret_config import redact_config
 
@@ -27,7 +28,10 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "production"] = "local"
     auth_mode: Literal["local"] = "local"
-    database_url: str = "sqlite+aiosqlite:///./data/marketing_agents.db"
+    database_url: str = Field(
+        default="sqlite+aiosqlite:///./data/marketing_agents.db",
+        repr=False,
+    )
     catalog_root: Path = Path("catalog/v1")
     llm_provider: str = "mock"
     connector_mode: str = "mock"
@@ -48,9 +52,7 @@ class Settings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
-        allowed = ("sqlite+aiosqlite://", "postgresql+asyncpg://")
-        if not value.startswith(allowed):
-            raise ValueError("database URL must use sqlite+aiosqlite or postgresql+asyncpg")
+        parse_database_url(value)
         return value
 
     @field_validator("api_host")
@@ -87,7 +89,9 @@ class Settings(BaseSettings):
         return ("127.0.0.1", "localhost", "testserver", "[::1]")
 
     def safe_snapshot(self) -> dict[str, object]:
-        return cast(dict[str, object], redact_config(self.model_dump(mode="json")))
+        values = self.model_dump(mode="json")
+        values["database_url"] = safe_database_url(self.database_url)
+        return cast(dict[str, object], redact_config(values))
 
     @property
     def retention_policy(self) -> RetentionPolicy:

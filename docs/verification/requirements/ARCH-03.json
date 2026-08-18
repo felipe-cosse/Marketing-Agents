@@ -1,0 +1,90 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-03",
+  "matrix_statement_sha256": "6abf10950e549cfb2bb113839e75719ccc3d1a44c85d6d6880d4eebf60bbc1de",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "pyproject.toml",
+      "uv.lock",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/infrastructure/db/**",
+      "tests/integration/db/test_arch_03_portable_database.py",
+      "docs/verification/requirements/ARCH-03.json",
+      "docs/verification/requirements/ARCH-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/config.py",
+          "apps/api/src/marketing_agents/infrastructure/db/**"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/integration/db/test_arch_03_portable_database.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "portable-sqlite-runtime",
+      "type": "contract",
+      "statement": "The default async SQLite runtime applies foreign-key, WAL, and bounded busy-timeout policy per connection, normalizes aware timestamps to UTC, and provides an explicit repository-injected transaction boundary.",
+      "test_refs": [
+        "tests/integration/db/test_arch_03_portable_database.py::test_arch_03_sqlite_runtime_enforces_pragmas_and_aware_utc",
+        "tests/integration/db/test_arch_03_portable_database.py::test_arch_03_repository_injected_unit_of_work_commits_or_rolls_back",
+        "tests/integration/db/test_arch_03_portable_database.py::test_arch_03_base_exposes_portable_naming_convention"
+      ]
+    },
+    {
+      "id": "configurable-lazy-postgresql",
+      "type": "negative_control",
+      "statement": "Only the exact asynchronous SQLite and PostgreSQL drivers are accepted, database credentials and query values are absent from diagnostics, and PostgreSQL engine construction performs no connection or fallback.",
+      "test_refs": [
+        "tests/integration/db/test_arch_03_portable_database.py::test_arch_03_postgresql_driver_is_lazy_and_safe_without_network",
+        "tests/integration/db/test_arch_03_portable_database.py::test_arch_03_rejects_sync_unsupported_and_network_sqlite_urls"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-03-portable-database",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "--extra",
+        "postgresql",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/db/test_arch_03_portable_database.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "portable-sqlite-runtime",
+        "configurable-lazy-postgresql"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "pyproject.toml",
+      "uv.lock",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/infrastructure/db/**"
+    ],
+    "gate_id": "arch-03-portable-database"
+  },
+  "limitations": [
+    "The gate constructs the optional PostgreSQL dialect and driver without contacting a server; a live compatibility job remains optional.",
+    "DEL-04 owns data-bearing ORM records, Alembic revisions, concrete repositories, catalog seeding, and persistence concurrency behavior."
+  ]
+}
