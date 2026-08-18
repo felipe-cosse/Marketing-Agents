@@ -13,9 +13,8 @@ from marketing_agents.domain.action_hash import (
     ExternalActionKeyMaterial,
     canonical_action_hash,
 )
-from marketing_agents.domain.entities._validation import require_digest, require_id, require_utc
 from marketing_agents.domain.enums import ApprovalStatus
-from marketing_agents.security.redaction import redact
+from marketing_agents.domain.validation import require_digest, require_id, require_utc
 
 
 class ApprovalBindingError(ValueError):
@@ -70,6 +69,11 @@ class ProposedExternalAction:
         redacted_destination: str,
         payload_schema: Mapping[str, Any],
     ) -> ProposedExternalAction:
+        # Import only when constructing the projection. Eagerly importing the
+        # security package here makes the framework-independent domain modules
+        # depend on package import order through the admission digest exports.
+        from marketing_agents.security.redaction import redact
+
         if not redacted_destination or redacted_destination != redacted_destination.strip():
             raise ValueError("redacted destination must be a nonempty bounded summary")
         if len(redacted_destination) > 300:

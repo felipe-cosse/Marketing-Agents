@@ -7,6 +7,8 @@ from typing import Protocol
 
 from marketing_agents.application.ports.repositories import (
     AuditRepository,
+    ConnectorReceiptRepository,
+    ExternalActionRepository,
     RunRepository,
     WorkRepository,
 )
@@ -21,6 +23,12 @@ class UnitOfWork(Protocol):
 
     @property
     def audits(self) -> AuditRepository: ...
+
+    @property
+    def external_actions(self) -> ExternalActionRepository: ...
+
+    @property
+    def connector_receipts(self) -> ConnectorReceiptRepository: ...
 
     async def __aenter__(self) -> UnitOfWork: ...
 

@@ -1,0 +1,163 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-05",
+  "matrix_statement_sha256": "f3b13cad5ee6709d852479035267bd715453e3b4ada53b5d734af1073847f22f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/action_hash.py",
+      "apps/api/src/marketing_agents/domain/action_idempotency.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/domain/validation.py",
+      "apps/api/src/marketing_agents/domain/entities/__init__.py",
+      "apps/api/src/marketing_agents/domain/entities/_validation.py",
+      "apps/api/src/marketing_agents/domain/entities/external_action.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/enums.py",
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/application/ports/external_writes.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/external_action_registration.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/**",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/**",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/**",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "tests/unit/application/test_run_02_effect_aware_planning.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_run_05_action_idempotency.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "docs/verification/requirements/RUN-05.json",
+      "docs/verification/requirements/RUN-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/domain/test_run_05_action_idempotency.py",
+          "tests/integration/db/test_run_05_external_action_idempotency.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "stable-seven-field-action-key",
+      "type": "contract",
+      "statement": "Every planned write derives one domain-separated restart-stable key from the complete seven-field semantic material, persists it with the immutable exact action, and passes that same key through authorization to the connector.",
+      "test_refs": [
+        "tests/unit/domain/test_run_05_action_idempotency.py::test_run_05_key_is_domain_separated_restart_stable_and_golden",
+        "tests/unit/domain/test_run_05_action_idempotency.py::test_run_05_every_stable_material_field_changes_the_key",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_three_phase_dispatch_commits_one_receipt_and_replays_after_restart"
+      ]
+    },
+    {
+      "id": "atomic-authoritative-action-set",
+      "type": "contract",
+      "statement": "A multi-write proposal epoch is inserted atomically in stable step order or replayed as its authoritative original identities; concurrent, partial, changed, and caller-rollback cases never create a mixed or partial set.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_atomic_set_replay_returns_original_exact_identity_after_restart",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_set_registration_race_is_all_created_or_authoritative_replay",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_outer_rollback_removes_the_entire_registered_set",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_preexisting_partial_set_fails_closed_without_filling_members"
+      ]
+    },
+    {
+      "id": "durable-receipt-and-three-phase-dispatch",
+      "type": "positive",
+      "statement": "The dispatcher commits claim and call-start fences before invoking a durable connector ledger outside its transaction, then completes only from the exact persisted receipt; concurrent workers and restarts produce one effect and one receipt.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_two_dispatch_workers_make_exactly_one_connector_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_connector_await_has_no_dispatcher_transaction_open",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_completion_uses_authoritative_receipt_metadata",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_durable_receipt_race_restart_and_collision_guards",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_receipt_replay_requires_exact_result_projection"
+      ]
+    },
+    {
+      "id": "bounded-classified-recovery-no-blind-retry",
+      "type": "negative_control",
+      "statement": "Recovery is bounded by an absolute ten-attempt persisted limit, reconciles exact durable receipts before retry or unknown classification, retries only proven provider-idempotent calls with the same key, and never blindly retries unavailable providers.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_attempt_bound_is_enforced_by_domain_and_database",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_final_attempt_lost_response_reconciles_durable_receipt",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_stale_crash_after_receipt_reconciles_without_provider_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_exhausted_pre_call_claim_fails_without_connector_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_unavailable_post_call_stale_never_blind_retries",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_stale_attempt_cannot_overwrite_new_lease_generation",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_cancelled_parent_blocks_claim_and_pre_call_marker"
+      ]
+    },
+    {
+      "id": "fail-closed-redacted-dispatch-boundary",
+      "type": "negative_control",
+      "statement": "Dispatch rejects process-local receipt ledgers, persistence identity drift, reservation rewrites, and raw connector failures before another effect; safe failures suppress provider payload and exception causes across completion faults.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_dispatch_gateway_rejects_process_local_receipt_ledger",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_gateway_suppresses_validation_and_provider_secret_causes",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_provider_secret_is_not_context_for_completion_fault",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_mapper_rejects_scalar_identity_drift",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_reservation_snapshot_blocks_action_hash_rewrite"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-05-durable-action-idempotency",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/domain/test_run_05_action_idempotency.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "deny",
+      "covers": [
+        "stable-seven-field-action-key",
+        "atomic-authoritative-action-set",
+        "durable-receipt-and-three-phase-dispatch",
+        "bounded-classified-recovery-no-blind-retry",
+        "fail-closed-redacted-dispatch-boundary"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/action_idempotency.py",
+      "apps/api/src/marketing_agents/domain/entities/external_action.py",
+      "apps/api/src/marketing_agents/application/services/external_action_registration.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/durable.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+    ],
+    "gate_id": "run-05-durable-action-idempotency"
+  },
+  "limitations": [
+    "RUN-08 and ORCH-08 own persisted approval requests, decisions, expiry, and foreign-key authenticity for reservation identifiers; RUN-05 persists the exact immutable reservation snapshot consumed by SAFE-02.",
+    "ORCH-09 owns the broader redacted audit timeline; RUN-05 persists action, delivery-attempt, receipt, safe-result, and terminal evidence required for exact dispatch and recovery.",
+    "The durable mock proves restart and concurrency semantics locally; external providers without idempotency support remain outcome-unknown after a call marker and are never automatically retried.",
+    "DEL-04 owns Alembic revisions and upgrade or downgrade verification for the data-bearing external-action, attempt, and receipt tables."
+  ]
+}

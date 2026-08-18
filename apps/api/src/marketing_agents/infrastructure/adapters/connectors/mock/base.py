@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast
 
 from pydantic import BaseModel, JsonValue
 
@@ -31,8 +31,57 @@ MOCK_CONNECTOR_DOMAIN = b"marketing-agents:mock-connector:v1\x00"
 
 @dataclass(frozen=True, slots=True)
 class _StoredMockReceipt:
+    external_action_id: str
     action_hash: str
+    capability_id: str
     result: ConnectorWriteResult
+
+
+class MockReceiptLedger(Protocol):
+    @property
+    def durable(self) -> bool: ...
+
+    @property
+    def side_effect_count(self) -> int: ...
+
+    async def record(
+        self,
+        *,
+        external_action_id: str,
+        binding_id: str,
+        idempotency_key: str,
+        action_hash: str,
+        capability_id: str,
+    ) -> ConnectorWriteResult: ...
+
+
+def build_mock_write_result(
+    *,
+    binding_id: str,
+    idempotency_key: str,
+    action_hash: str,
+    capability_id: str,
+) -> ConnectorWriteResult:
+    receipt_digest = hashlib.sha256(
+        MOCK_CONNECTOR_DOMAIN
+        + canonical_json_bytes(
+            {
+                "binding_id": binding_id,
+                "idempotency_key": idempotency_key,
+                "action_hash": action_hash,
+                "capability_id": capability_id,
+            }
+        )
+    ).hexdigest()
+    return ConnectorWriteResult(
+        receipt_id=f"mock-receipt:{receipt_digest[:32]}",
+        status="mock_succeeded",
+        safe_metadata={
+            "mode": "mock",
+            "external_side_effect": False,
+            "capability_id": capability_id,
+        },
+    )
 
 
 class InMemoryMockReceiptLedger:
@@ -45,12 +94,17 @@ class InMemoryMockReceiptLedger:
         self._side_effect_count = 0
 
     @property
+    def durable(self) -> bool:
+        return False
+
+    @property
     def side_effect_count(self) -> int:
         return self._side_effect_count
 
-    def record(
+    async def record(
         self,
         *,
+        external_action_id: str,
         binding_id: str,
         idempotency_key: str,
         action_hash: str,
@@ -59,34 +113,29 @@ class InMemoryMockReceiptLedger:
         key = (binding_id, idempotency_key)
         existing = self._receipts.get(key)
         if existing is not None:
-            if existing.action_hash != action_hash:
+            if (
+                existing.external_action_id != external_action_id
+                or existing.action_hash != action_hash
+                or existing.capability_id != capability_id
+            ):
                 raise ConnectorPortError(
                     "idempotency_conflict",
                     "mock connector idempotency key is bound to another exact action",
                 )
             return existing.result
 
-        receipt_digest = hashlib.sha256(
-            MOCK_CONNECTOR_DOMAIN
-            + canonical_json_bytes(
-                {
-                    "binding_id": binding_id,
-                    "idempotency_key": idempotency_key,
-                    "action_hash": action_hash,
-                    "capability_id": capability_id,
-                }
-            )
-        ).hexdigest()
-        result = ConnectorWriteResult(
-            receipt_id=f"mock-receipt:{receipt_digest[:32]}",
-            status="mock_succeeded",
-            safe_metadata={
-                "mode": "mock",
-                "external_side_effect": False,
-                "capability_id": capability_id,
-            },
+        result = build_mock_write_result(
+            binding_id=binding_id,
+            idempotency_key=idempotency_key,
+            action_hash=action_hash,
+            capability_id=capability_id,
         )
-        self._receipts[key] = _StoredMockReceipt(action_hash=action_hash, result=result)
+        self._receipts[key] = _StoredMockReceipt(
+            external_action_id=external_action_id,
+            action_hash=action_hash,
+            capability_id=capability_id,
+            result=result,
+        )
         self._side_effect_count += 1
         return result
 
@@ -142,10 +191,10 @@ def build_read_observation[ParametersT: BaseModel, PayloadT: RecordsPayload](
     )
 
 
-def execute_mock_write[CommandT: BaseModel](
+async def execute_mock_write[CommandT: BaseModel](
     registration: ConnectorOperationRegistration,
     request: AuthorizedConnectorCommand[CommandT],
-    ledger: InMemoryMockReceiptLedger,
+    ledger: MockReceiptLedger,
 ) -> ConnectorWriteResult:
     metadata = registration.metadata
     if not metadata.enabled:
@@ -176,7 +225,8 @@ def execute_mock_write[CommandT: BaseModel](
         if not valid:
             raise ConnectorPortError(code, "connector command does not match its exact proof")
 
-    return ledger.record(
+    return await ledger.record(
+        external_action_id=action.action_id,
         binding_id=action.binding_id,
         idempotency_key=authorization.idempotency_key,
         action_hash=authorization.action_hash,

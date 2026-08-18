@@ -6,6 +6,16 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    SemanticExternalAction,
+    canonical_action_hash,
+    semantic_action_hash,
+)
+from marketing_agents.domain.approval import (
+    ApprovalPolicySnapshot,
+    ProposedExternalAction,
+)
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import (
     AgentInstance,
@@ -16,6 +26,7 @@ from marketing_agents.domain.entities import (
     Artifact,
     AuditEvent,
     CampaignBrief,
+    DeliveryContractSnapshot,
     Department,
     ExternalAction,
     FunctionTeam,
@@ -31,7 +42,6 @@ from marketing_agents.domain.enums import (
     ApprovalDecisionKind,
     ApprovalStatus,
     Effect,
-    ExternalActionState,
     MisfirePolicy,
     OccurrenceState,
     RunState,
@@ -131,14 +141,62 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         DataClassification.INTERNAL,
         NOW,
     )
-    action = ExternalAction(
-        "action.1",
-        run.id,
-        step.id,
-        DIGEST,
-        "idempotency.00000001",
-        "binding.mock.newsletter",
-        ExternalActionState.PROPOSED,
+    semantic_action = SemanticExternalAction(
+        template_id=template.id,
+        instance_id=instance.id,
+        action_type="newsletter.subscribe",
+        capability_id=capability.id,
+        connector_family="newsletter",
+        binding_id="mock.newsletter.default",
+        destination="newsletter:list.demo",
+        payload_schema_id=capability.request_schema_id,
+        minimized_payload={"email": "person@example.test"},
+    )
+    action_envelope = CanonicalExternalAction(
+        action_id="action.1",
+        authorization_set_id="authorization-set.1",
+        run_id=run.id,
+        plan_hash="e" * 64,
+        proposal_revision=1,
+        step_id=step.id,
+        step_key=step.key,
+        template_id=template.id,
+        instance_id=instance.id,
+        action_type=semantic_action.action_type,
+        capability_id=capability.id,
+        connector_family=semantic_action.connector_family,
+        binding_id=semantic_action.binding_id,
+        destination=semantic_action.destination,
+        payload_schema_id=semantic_action.payload_schema_id,
+        minimized_payload=semantic_action.minimized_payload,
+        semantic_action_hash=semantic_action_hash(semantic_action),
+    )
+    proposed_action = ProposedExternalAction(
+        envelope=action_envelope,
+        action_hash=canonical_action_hash(action_envelope),
+        redacted_projection={
+            "destination": "newsletter list",
+            "payload": {"email": "[REDACTED]"},
+        },
+    )
+    action = ExternalAction.proposed(
+        proposed_action,
+        ApprovalPolicySnapshot(
+            policy_id=policy.id,
+            required_roles=frozenset({"role.operator"}),
+            required_scopes=frozenset({"scope.external-write"}),
+            expires_after_seconds=1_800,
+            allow_self_approval=False,
+        ),
+        DeliveryContractSnapshot(
+            capability_id=capability.id,
+            connector_family="newsletter",
+            binding_id="mock.newsletter.default",
+            binding_configuration_revision=1,
+            request_schema_id=capability.request_schema_id,
+            idempotency_support="required",
+            timeout_seconds=30,
+        ),
         NOW,
     )
     request = ApprovalRequest(

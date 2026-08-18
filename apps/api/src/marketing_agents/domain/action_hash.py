@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from marketing_agents.domain.canonical_json import canonical_json_bytes
-from marketing_agents.domain.entities._validation import (
+from marketing_agents.domain.validation import (
     frozen_json_mapping,
     require_digest,
     require_id,
