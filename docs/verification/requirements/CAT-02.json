@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-02",
+  "matrix_statement_sha256": "33c8c4d0d0bcb9732bbc4ca5037514dc392902bebe20aa0e91f48f0ac5281f51",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_cat_02_community_multiplicity.py",
+      "docs/verification/requirements/CAT-02.json",
+      "docs/verification/requirements/CAT-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_02_community_multiplicity.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "community-seven-fourteen-contract",
+      "type": "contract",
+      "statement": "The production compiler requires seven Community templates and fourteen instances distributed as events six, education six, and discussion two.",
+      "test_refs": ["tests/catalog/test_cat_02_community_multiplicity.py::test_cat_02_authoritative_community_multiplicity_is_valid"]
+    },
+    {
+      "id": "multiplicity-drift-rejected",
+      "type": "negative_control",
+      "statement": "Missing, extra, duplicated, reassigned, cross-function, or non-Community duplicate deployments fail the multiplicity contract.",
+      "test_refs": ["tests/catalog/test_cat_02_community_multiplicity.py::test_cat_02_missing_or_extra_community_ordinal_is_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-02-multiplicity-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_02_community_multiplicity.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["community-seven-fourteen-contract", "multiplicity-drift-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "cat-02-multiplicity-tests"
+  },
+  "limitations": []
+}

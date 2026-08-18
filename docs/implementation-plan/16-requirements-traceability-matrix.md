@@ -30,7 +30,7 @@ Allowed status values:
 | OBJ-05 | Allow later real adapters without redesigning core. | 03, 10 | Ports/registry/layer boundaries | Architecture + adapter-contract tests | planned |
 | OBJ-06 | Org chart is configuration/control surface, not a static diagram. | 09, 12 | Details/config/forms/approvals/timeline | Browser acceptance | planned |
 | CAT-01 | Seed exactly 5 departments, 12 functions, 36 templates, 43 instances. | 02 | `catalog/v1`, compiler/seeder | `test_exact_counts.py` | planned |
-| CAT-02 | Community has 7 templates and 14 instances. | 02, 12 | Shared template refs + ordinal instances | Multiplicity/API/UI tests | planned |
+| CAT-02 | Community has 7 templates and 14 instances. | 02, 12 | Shared template refs + ordinal instances | Multiplicity/API/UI tests | verified |
 | CAT-03 | Stable unique instance IDs and no invented duplicate purpose. | 00, 02 | ID convention/instance YAML | Stable-ID/field-ownership tests | planned |
 | CAT-04 | Preserve every named Social media role and function/count. | 02 | Social media template/instance files | Function distribution/inventory test | verified |
 | CAT-05 | Preserve every named Blog & SEO role and function/count. | 02 | Blog & SEO files | Function distribution/inventory test | verified |
