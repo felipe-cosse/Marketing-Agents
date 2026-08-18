@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.10.7
+          enable-cache: true
+      - name: Acquire pinned Python dependencies
+        run: uv sync --frozen --python 3.12
+      - name: Verify hash-pinned authoritative catalog
+        run: make verify-catalog-release
+      - name: Run complete catalog contract suite
+        run: uv run pytest -q tests/catalog
+
+  backend:
+    needs: catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.10.7
+          enable-cache: true
+      - name: Acquire pinned Python dependencies
+        run: uv sync --frozen --python 3.12
+      - name: Verify backend
+        run: make verify-backend
+
+  governance:
+    needs: catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.10.7
+          enable-cache: true
+      - name: Acquire pinned Python dependencies
+        run: uv sync --frozen --python 3.12
+      - name: Verify source and requirement governance
+        run: make verify-governance

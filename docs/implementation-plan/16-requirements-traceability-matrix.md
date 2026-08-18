@@ -172,7 +172,7 @@ Allowed status values:
 |---|---|---|---|
 | EXEC-01 | Inspect references/guidance. | Plan 00 evidence inventory | verified |
 | EXEC-02 | Write architecture decision/assumptions before broad implementation. | M0 ADR/document gate | verified |
-| EXEC-03 | Catalog schema/seed/count tests first. | M2 hard gate | planned |
+| EXEC-03 | Catalog schema/seed/count tests first. | M2 hard gate | verified |
 | EXEC-04 | State machine/approval/mocks next. | M3–M5 gates | planned |
 | EXEC-05 | APIs and org-chart control surface. | M7–M8 | planned |
 | EXEC-06 | Demos/tooling/docs. | M8–M9 | planned |
