@@ -115,15 +115,36 @@ class InstanceVariant(FrozenModel):
     variant_label: str | None = Field(default=None, max_length=100)
 
 
+class TriggerBinding(FrozenModel):
+    type: Literal["manual", "webhook", "schedule"]
+    enabled: bool = True
+    event_source: str | None = Field(default=None, max_length=100)
+    cron: str | None = Field(default=None, max_length=100)
+    timezone: str | None = Field(default=None, max_length=100)
+    misfire_policy: Literal["skip", "run_once"] | None = None
+
+
+class ConnectorBinding(FrozenModel):
+    connector_family: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    binding_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9._-]+$")
+    enabled: bool = True
+
+
+class ScheduleBinding(FrozenModel):
+    cron: str = Field(min_length=1, max_length=100)
+    timezone: str = Field(min_length=1, max_length=100)
+    misfire_policy: Literal["skip", "run_once"]
+
+
 class AgentInstanceRecord(FrozenModel):
     id: str
     template_id: str
     display_order: int = Field(ge=1, le=10000)
     enabled: bool
     variant: InstanceVariant | None
-    trigger_bindings: tuple[dict[str, Any], ...]
-    connector_bindings: dict[str, Any]
-    schedule: dict[str, Any] | None
+    trigger_bindings: tuple[TriggerBinding, ...]
+    connector_bindings: dict[str, ConnectorBinding]
+    schedule: ScheduleBinding | None
     configuration_revision: int = Field(ge=1)
 
 

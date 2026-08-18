@@ -1,0 +1,66 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DOM-05",
+  "matrix_statement_sha256": "2fef533437568fa89ce0393b80decc32067c2c0ed46582eb779cae47ae2a8929",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/schema/instance.schema.json",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_dom_05_instance_deployment_boundary.py",
+      "docs/verification/requirements/DOM-05.json",
+      "docs/verification/requirements/DOM-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/schema/instance.schema.json",
+          "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_dom_05_instance_deployment_boundary.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "one-template-deployment-only",
+      "type": "contract",
+      "statement": "Every one of 43 instances references one template and contains only stable identity plus typed deployment configuration fields.",
+      "test_refs": ["tests/catalog/test_dom_05_instance_deployment_boundary.py::test_dom_05_all_43_instances_are_deployment_only_and_reference_one_template"]
+    },
+    {
+      "id": "unsupported-bindings-rejected",
+      "type": "negative_control",
+      "statement": "Copied template fields, untyped connectors, unsupported triggers or connector families, and schedules without one enabled trigger are rejected.",
+      "test_refs": ["tests/catalog/test_dom_05_instance_deployment_boundary.py::test_dom_05_unsupported_trigger_or_connector_binding_is_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "dom-05-instance-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_dom_05_instance_deployment_boundary.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["one-template-deployment-only", "unsupported-bindings-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/schema/instance.schema.json",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "dom-05-instance-tests"
+  },
+  "limitations": []
+}

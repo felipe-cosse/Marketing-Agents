@@ -63,7 +63,7 @@ Allowed status values:
 | DOM-02 | Every template has ID/name/department/function/purpose/instructions. | 02 | Template schema/files | Completeness test | verified |
 | DOM-03 | Every template has typed input/output schemas. | 02 | Per-template JSON Schemas | Compilation/fixture tests | verified |
 | DOM-04 | Every template has tools/triggers/classification/approval/retry/timeout/budget/source notes. | 02 | Template schema/files | Completeness/policy tests | verified |
-| DOM-05 | Every instance references one template and adds deployment fields only. | 02, 04 | Instance schema/config split | Field-ownership/config tests | planned |
+| DOM-05 | Every instance references one template and adds deployment fields only. | 02, 04 | Instance schema/config split | Field-ownership/config tests | verified |
 
 ## Lifecycle, approval, idempotency, and scheduling
 

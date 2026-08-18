@@ -15,9 +15,52 @@
         {"type": "object", "additionalProperties": false, "required": ["source_ordinal", "variant_label"], "properties": {"source_ordinal": {"type": "integer", "minimum": 1, "maximum": 99}, "variant_label": {"type": ["string", "null"], "maxLength": 100}}}
       ]
     },
-    "trigger_bindings": {"type": "array", "maxItems": 16, "items": {"type": "object"}},
-    "connector_bindings": {"type": "object", "maxProperties": 16},
-    "schedule": {"type": ["object", "null"]},
+    "trigger_bindings": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "enabled"],
+        "properties": {
+          "type": {"enum": ["manual", "webhook", "schedule"]},
+          "enabled": {"type": "boolean"},
+          "event_source": {"type": ["string", "null"], "maxLength": 100},
+          "cron": {"type": ["string", "null"], "maxLength": 100},
+          "timezone": {"type": ["string", "null"], "maxLength": 100},
+          "misfire_policy": {"enum": ["skip", "run_once", null]}
+        }
+      }
+    },
+    "connector_bindings": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["connector_family", "binding_id", "enabled"],
+        "properties": {
+          "connector_family": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "binding_id": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[A-Za-z0-9._-]+$"},
+          "enabled": {"type": "boolean"}
+        }
+      }
+    },
+    "schedule": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cron", "timezone", "misfire_policy"],
+          "properties": {
+            "cron": {"type": "string", "minLength": 1, "maxLength": 100},
+            "timezone": {"type": "string", "minLength": 1, "maxLength": 100},
+            "misfire_policy": {"enum": ["skip", "run_once"]}
+          }
+        }
+      ]
+    },
     "configuration_revision": {"type": "integer", "minimum": 1}
   }
 }
