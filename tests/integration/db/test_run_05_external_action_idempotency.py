@@ -1,4 +1,4 @@
-"""RUN-05: durable exact-action registration, dispatch, and recovery."""
+"""RUN-05 durable dispatch; ORCH-07 receipt-first recovery connection witness."""
 
 from __future__ import annotations
 

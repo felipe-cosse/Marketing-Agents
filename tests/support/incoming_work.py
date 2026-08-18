@@ -63,7 +63,11 @@ def _guard() -> RuntimePolicyGuard:
     )
 
 
-def validate_incoming_for_test(envelope: AdmissionEnvelope) -> ValidatedIncomingWork:
+def validate_incoming_for_test(
+    envelope: AdmissionEnvelope,
+    *,
+    catalog_hash: str = TEST_CATALOG_HASH,
+) -> ValidatedIncomingWork:
     """Validate one synthetic trusted binding without exposing a production bypass."""
 
     brief_revisions = (
@@ -72,7 +76,7 @@ def validate_incoming_for_test(envelope: AdmissionEnvelope) -> ValidatedIncoming
         else (CampaignBriefRevision(envelope.brief_id, envelope.brief_revision),)
     )
     validator = IncomingWorkValidator(
-        catalog_hash=TEST_CATALOG_HASH,
+        catalog_hash=catalog_hash,
         templates=(_Template(),),
         instances=(
             _Instance(
