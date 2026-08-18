@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DOM-04",
+  "matrix_statement_sha256": "29fa397d796642b94c4793ae2842561879c476bf663f31234c672035e8ce1c38",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_dom_04_template_runtime_policy.py",
+      "docs/verification/requirements/DOM-04.json",
+      "docs/verification/requirements/DOM-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_dom_04_template_runtime_policy.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-template-runtime-policy",
+      "type": "contract",
+      "statement": "All 36 templates declare bounded tools, triggers, classification, approval, retry, timeout, budget, rate limit, source references, and implementation notes.",
+      "test_refs": ["tests/catalog/test_dom_04_template_runtime_policy.py::test_dom_04_all_36_templates_have_complete_runtime_policy"]
+    },
+    {
+      "id": "unsafe-template-authority-rejected",
+      "type": "negative_control",
+      "statement": "Unapproved writes, mutating roles without writes, blind write retries, generic authority, bad timeouts, and missing source notes fail compilation.",
+      "test_refs": ["tests/catalog/test_dom_04_template_runtime_policy.py::test_dom_04_mutating_without_write_and_blind_write_retry_are_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "dom-04-runtime-policy-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_dom_04_template_runtime_policy.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["complete-template-runtime-policy", "unsafe-template-authority-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "dom-04-runtime-policy-tests"
+  },
+  "limitations": []
+}

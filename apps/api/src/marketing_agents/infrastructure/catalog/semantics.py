@@ -7,7 +7,12 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .errors import CatalogIssue
-from .models import AgentInstanceRecord, AgentTemplateRecord
+from .models import (
+    AgentInstanceRecord,
+    AgentTemplateRecord,
+    ApprovalPolicyRecord,
+    ToolCapabilityRecord,
+)
 
 COMMUNITY_DEPARTMENT = "dept.community"
 COMMUNITY_FUNCTION_TEMPLATE_COUNTS = {
@@ -240,6 +245,126 @@ def template_io_schema_issues(
                     pointer="",
                     related_id=template.id,
                     source_path=source_path,
+                )
+            )
+    return tuple(sorted(issues))
+
+
+def template_runtime_policy_issues(
+    templates: Sequence[AgentTemplateRecord],
+    capabilities: Sequence[ToolCapabilityRecord],
+    policies: Sequence[ApprovalPolicyRecord],
+) -> tuple[CatalogIssue, ...]:
+    """Validate each role's maximum authority and finite runtime policy as one contract."""
+
+    issues: list[CatalogIssue] = []
+    capability_by_id = {item.id: item for item in capabilities}
+    policy_by_id = {item.id: item for item in policies}
+    forbidden_families = {"browser", "generic-http", "shell", "sql"}
+    for template in templates:
+        selected = [
+            capability_by_id[item]
+            for item in template.allowed_tool_capability_ids
+            if item in capability_by_id
+        ]
+        policy = policy_by_id.get(template.approval_policy_id)
+        if not template.allowed_tool_capability_ids:
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-capabilities-empty",
+                    "every template must declare its bounded maximum capability set",
+                    template.id,
+                )
+            )
+        if any(item.connector_family in forbidden_families for item in selected):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-generic-authority",
+                    "generic browser, HTTP, shell, and SQL authority is forbidden",
+                    template.id,
+                )
+            )
+        writes = [item for item in selected if item.effect == "write"]
+        if writes and (
+            template.operation_classification != "mutating"
+            or policy is None
+            or policy.kind != "human_external_write"
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-write-approval",
+                    "write capabilities require mutating classification and human approval",
+                    template.id,
+                )
+            )
+        if template.operation_classification == "mutating" and not writes:
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-mutating-without-write",
+                    "mutating classification requires at least one explicit write capability",
+                    template.id,
+                )
+            )
+        if writes and (
+            template.retry_policy.max_attempts != 1 or template.retry_policy.backoff != "none"
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-write-retry",
+                    "catalog write actions cannot enable blind automatic retries",
+                    template.id,
+                )
+            )
+        if any(item.idempotency_support != "required" for item in writes):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-write-idempotency",
+                    "assigned write capabilities must require connector idempotency",
+                    template.id,
+                )
+            )
+        if template.timeout_policy.step_seconds > template.timeout_policy.run_seconds:
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-timeout-order",
+                    "step timeout cannot exceed the whole run timeout",
+                    template.id,
+                )
+            )
+        if "cap.model.generate-structured" in template.allowed_tool_capability_ids and (
+            template.budget_policy.max_model_calls < 1
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-model-budget",
+                    "templates with model authority require a finite positive model-call budget",
+                    template.id,
+                )
+            )
+        if not template.source_references or not template.implementation_notes.strip():
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-source-notes",
+                    "source references and separate implementation notes are required",
+                    template.id,
                 )
             )
     return tuple(sorted(issues))
