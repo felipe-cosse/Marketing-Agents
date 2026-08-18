@@ -33,6 +33,7 @@ EXPECTED_SUBJECTS = [
     "Community frame",
     "Partnerships frame",
 ]
+IGNORED_SCAN_PARTS = {".cache", ".git", ".venv", "data", "dist", "node_modules"}
 EXPECTED_FRAMES = {
     "linkedin-ai-agents-org-chart-overview.png",
     "linkedin-ai-agents-org-chart-social-media.png",
@@ -59,7 +60,7 @@ def _discover_guidance(root: Path) -> list[str]:
     directory_names = set(EXPECTED_GUIDANCE_NAMES[4:])
     for path in root.rglob("*"):
         relative = path.relative_to(root)
-        if ".git" in relative.parts:
+        if IGNORED_SCAN_PARTS.intersection(relative.parts):
             continue
         if path.is_file() and path.name in file_names:
             discovered.add(relative.as_posix())

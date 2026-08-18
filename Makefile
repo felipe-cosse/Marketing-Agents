@@ -1,11 +1,28 @@
 PYTHON ?= python3
+UV ?= uv
+UV_CACHE_DIR ?= .cache/uv
+export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: format-check test test-network test-source test-tooling verify-source verify-history verify-requirement verify-governance
+.PHONY: bootstrap format format-check lint typecheck test test-backend test-network test-source test-tooling verify-backend verify-source verify-history verify-requirement verify-governance
+
+bootstrap:
+	$(UV) sync --frozen --python 3.12
+
+format:
+	$(UV) run ruff format apps/api/src tests/unit tests/integration
+	$(UV) run ruff check --fix apps/api/src tests/unit tests/integration
 
 format-check:
 	git diff --check
+	$(UV) run ruff format --check apps/api/src tests/unit tests/integration
+
+lint:
+	$(UV) run ruff check apps/api/src tests/unit tests/integration
+
+typecheck:
+	$(UV) run mypy apps/api/src/marketing_agents
 
 test-source:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest \
@@ -17,6 +34,9 @@ test-source:
 
 test-tooling:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.tooling.test_verify_requirement_evidence
+
+test-backend:
+	$(UV) run pytest -q
 
 test-network:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.network.test_safe_11_network_isolation
@@ -34,3 +54,5 @@ verify-requirement:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_requirement_evidence.py branch --id "$(REQUIREMENT)" --base "$(BASE)" --head "$(HEAD)" --run --witness
 
 verify-governance: format-check verify-source test-source test-tooling verify-history
+
+verify-backend: format-check lint typecheck test-backend

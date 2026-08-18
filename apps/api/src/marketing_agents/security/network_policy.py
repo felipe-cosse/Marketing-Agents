@@ -17,15 +17,21 @@ class AdapterNetworkPolicy:
     real_llm_opt_in: bool = False
     real_connector_opt_in: bool = False
 
-    def validate(self) -> "AdapterNetworkPolicy":
+    def validate(self) -> AdapterNetworkPolicy:
         real_llm = self.llm_provider != "mock"
         real_connectors = self.connector_mode != "mock"
         if real_llm and (not self.allow_external_network or not self.real_llm_opt_in):
-            raise NetworkPolicyError("real LLM mode requires external network and the independent LLM opt-in")
+            raise NetworkPolicyError(
+                "real LLM mode requires external network and the independent LLM opt-in"
+            )
         if real_connectors and (not self.allow_external_network or not self.real_connector_opt_in):
-            raise NetworkPolicyError("real connector mode requires external network and the independent connector opt-in")
+            raise NetworkPolicyError(
+                "real connector mode requires external network and the independent connector opt-in"
+            )
         if self.allow_external_network and not (real_llm or real_connectors):
-            raise NetworkPolicyError("external network cannot be enabled while every adapter remains mock")
+            raise NetworkPolicyError(
+                "external network cannot be enabled while every adapter remains mock"
+            )
         if self.real_llm_opt_in and not real_llm:
             raise NetworkPolicyError("LLM opt-in cannot be enabled for the mock provider")
         if self.real_connector_opt_in and not real_connectors:

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-
 REDACTED = "[REDACTED]"
 SENSITIVE_KEY_FRAGMENTS = (
     "api_key",

@@ -11,7 +11,6 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-
 KEY_BYTES = 32
 FINGERPRINT_DOMAIN = b"marketing-agents-digest-key-fingerprint-v1\x00"
 

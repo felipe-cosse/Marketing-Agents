@@ -5,9 +5,9 @@ from .network_policy import AdapterNetworkPolicy, NetworkPolicyError
 from .secret_config import SecretValue, redact_config
 
 __all__ = [
+    "AdapterNetworkPolicy",
     "DigestKey",
     "DigestKeyError",
-    "AdapterNetworkPolicy",
     "NetworkPolicyError",
     "SecretValue",
     "digest_key_fingerprint",
