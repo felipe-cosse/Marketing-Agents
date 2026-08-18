@@ -6,7 +6,11 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 
 import pytest
-from marketing_agents.domain.action_hash import CanonicalExternalAction
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    SemanticExternalAction,
+    semantic_action_hash,
+)
 from marketing_agents.domain.approval import (
     ActionApprovalRequest,
     ApprovalBindingError,
@@ -24,7 +28,10 @@ def _action(**updates: object) -> CanonicalExternalAction:
         "action_id": "action.1",
         "authorization_set_id": "authorization-set.1",
         "run_id": "run.1",
+        "plan_hash": "a" * 64,
+        "proposal_revision": 1,
         "step_id": "step.subscribe",
+        "step_key": "subscribe",
         "template_id": "tpl.email.newsletter.newsletter-subscriber",
         "instance_id": "inst.email.newsletter.newsletter-subscriber.01",
         "action_type": "newsletter.subscribe",
@@ -36,6 +43,23 @@ def _action(**updates: object) -> CanonicalExternalAction:
         "minimized_payload": {"email": "person@example.invalid", "locale": "en"},
     }
     values.update(updates)
+    semantic = SemanticExternalAction.model_validate(
+        {
+            key: values[key]
+            for key in (
+                "template_id",
+                "instance_id",
+                "action_type",
+                "capability_id",
+                "connector_family",
+                "binding_id",
+                "destination",
+                "payload_schema_id",
+                "minimized_payload",
+            )
+        }
+    )
+    values["semantic_action_hash"] = semantic_action_hash(semantic)
     return CanonicalExternalAction.model_validate(values)
 
 
@@ -102,7 +126,10 @@ def test_run_07_identical_payload_in_a_different_action_is_not_reusable() -> Non
     [
         ("authorization_set_id", "authorization-set.2"),
         ("run_id", "run.2"),
+        ("plan_hash", "b" * 64),
+        ("proposal_revision", 2),
         ("step_id", "step.other"),
+        ("step_key", "other"),
         ("template_id", "tpl.other"),
         ("instance_id", "inst.other.01"),
         ("action_type", "newsletter.unsubscribe"),

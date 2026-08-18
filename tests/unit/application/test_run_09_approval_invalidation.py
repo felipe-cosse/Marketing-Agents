@@ -10,7 +10,11 @@ from marketing_agents.application.services.approval_integrity import (
     invalidate_and_replace,
     validate_current_action,
 )
-from marketing_agents.domain.action_hash import CanonicalExternalAction
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    SemanticExternalAction,
+    semantic_action_hash,
+)
 from marketing_agents.domain.approval import (
     ApprovalPolicySnapshot,
     ProposedExternalAction,
@@ -32,7 +36,10 @@ def _action(**updates: object) -> CanonicalExternalAction:
         "action_id": "action.1",
         "authorization_set_id": "authorization-set.1",
         "run_id": "run.1",
+        "plan_hash": "a" * 64,
+        "proposal_revision": 1,
         "step_id": "step.send",
+        "step_key": "send",
         "template_id": "tpl.email.newsletter.newsletter-subscriber",
         "instance_id": "inst.email.newsletter.newsletter-subscriber.01",
         "action_type": "email.send",
@@ -44,6 +51,23 @@ def _action(**updates: object) -> CanonicalExternalAction:
         "minimized_payload": {"display_name": "Café", "details": {"b": 2, "a": 1}},
     }
     values.update(updates)
+    semantic = SemanticExternalAction.model_validate(
+        {
+            key: values[key]
+            for key in (
+                "template_id",
+                "instance_id",
+                "action_type",
+                "capability_id",
+                "connector_family",
+                "binding_id",
+                "destination",
+                "payload_schema_id",
+                "minimized_payload",
+            )
+        }
+    )
+    values["semantic_action_hash"] = semantic_action_hash(semantic)
     return CanonicalExternalAction.model_validate(values)
 
 
