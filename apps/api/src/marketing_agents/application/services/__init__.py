@@ -13,6 +13,12 @@ from .external_action_registration import (
     RegisteredExternalAction,
     RegisteredExternalActionSet,
 )
+from .idempotent_work_receipt import (
+    IdempotentWorkRunReceiptService,
+    WorkRunReceiptDisposition,
+    WorkRunReceiptError,
+    WorkRunReceiptResult,
+)
 from .incoming_work_validation import (
     CampaignBriefPolicy,
     CampaignBriefRevision,
@@ -48,6 +54,7 @@ __all__ = [
     "ExternalActionRegistrationDisposition",
     "ExternalActionRegistrationError",
     "ExternalActionRegistrationService",
+    "IdempotentWorkRunReceiptService",
     "IncomingWorkValidationError",
     "IncomingWorkValidator",
     "ReceiveRunRequest",
@@ -60,6 +67,9 @@ __all__ = [
     "WorkAdmissionResult",
     "WorkAdmissionService",
     "WorkIdempotencyError",
+    "WorkRunReceiptDisposition",
+    "WorkRunReceiptError",
+    "WorkRunReceiptResult",
     "WorkflowAdmissionDefinition",
     "WorkflowAdmissionSnapshot",
 ]

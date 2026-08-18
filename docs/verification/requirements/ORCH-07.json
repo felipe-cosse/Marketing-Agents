@@ -1,0 +1,127 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-07",
+  "matrix_statement_sha256": "6bf10a6f3e4f2123e02cc782b540d96ccf5b45a88bf5be9cda6dc0d0e1bd04a6",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/policies/__init__.py",
+      "apps/api/src/marketing_agents/application/policies/action_recovery.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/idempotent_work_receipt.py",
+      "apps/api/src/marketing_agents/application/services/incoming_work_validation.py",
+      "tests/support/incoming_work.py",
+      "tests/unit/application/test_orch_07_action_recovery.py",
+      "tests/integration/db/test_orch_07_idempotent_receipts.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "docs/verification/requirements/ORCH-07.json",
+      "docs/verification/requirements/ORCH-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/idempotent_work_receipt.py",
+          "apps/api/src/marketing_agents/application/policies/action_recovery.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_orch_07_idempotent_receipts.py",
+          "tests/unit/application/test_orch_07_action_recovery.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "atomic-work-run-receipt",
+      "type": "contract",
+      "statement": "One validator-sealed admission creates or replays its authoritative WorkItem, primary Run, and sequence-one received transition in one caller-controlled transaction; mixed, misdirected, wrong-catalog, orphan, and post-flush faults cannot create or heal a partial pair.",
+      "test_refs": [
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_faults_and_caller_rollback_never_leave_partial_receipt",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_created_run_must_retain_marker_catalog_and_fk_blocks_orphan_run"
+      ]
+    },
+    {
+      "id": "authoritative-replay-and-collision",
+      "type": "negative_control",
+      "statement": "Independent sessions racing on one source-event-instance identity resolve to one WorkItem, one primary Run, and one initial transition: identical work returns created plus replayed original identities, while changed admitted semantics returns one creator plus one conflict.",
+      "test_refs": [
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_identical_and_changed_two_session_races_are_pair_atomic"
+      ]
+    },
+    {
+      "id": "catalog-fresh-first-admission-historical-replay",
+      "type": "contract",
+      "statement": "An unsealed, integrity-mutated, or stale catalog marker is rejected before a unit of work, clock, or ID generator is used; a newly validated catalog-only retry replays the original WorkItem and terminal primary Run with their historical catalog and configuration snapshot.",
+      "test_refs": [
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_unsealed_tampered_or_stale_marker_fails_before_authority_use",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py::test_orch_07_atomic_receipt_replays_original_after_terminal_and_catalog_release"
+      ]
+    },
+    {
+      "id": "pure-classified-action-recovery",
+      "type": "negative_control",
+      "statement": "A pure policy classifies the persisted stale ExternalAction snapshot: pre-call leases retry any provider class only within budget, post-call leases retry only required or supported idempotency within budget, and every other post-call case becomes outcome-unknown after durable-receipt reconciliation.",
+      "test_refs": [
+        "tests/unit/application/test_orch_07_action_recovery.py::test_orch_07_recovery_classifier_has_complete_fail_closed_truth_table",
+        "tests/unit/application/test_orch_07_action_recovery.py::test_orch_07_recovery_classifier_rejects_nonpersisted_or_unexpired_state",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_stale_crash_after_receipt_reconciles_without_provider_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_final_attempt_lost_response_reconciles_durable_receipt",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_unavailable_post_call_stale_never_blind_retries"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-07-idempotent-receipts",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_orch_07_action_recovery.py",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "atomic-work-run-receipt",
+        "authoritative-replay-and-collision",
+        "catalog-fresh-first-admission-historical-replay",
+        "pure-classified-action-recovery"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/idempotent_work_receipt.py",
+      "apps/api/src/marketing_agents/application/services/work_admission.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/policies/action_recovery.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/work.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+    ],
+    "gate_id": "orch-07-idempotent-receipts"
+  },
+  "limitations": [
+    "RUN-04 retains admission digest and source-key ownership, RUN-01 retains the primary Run lifecycle, and RUN-05 retains action-key, action-state, connector-receipt, and dispatch persistence; ORCH-07 composes their receipts and extracts only the stale recovery decision policy.",
+    "Webhook, scheduler, and manual API transports remain responsible for producing stable source event IDs and invoking the validator before this service; their endpoint and occurrence receipts belong to their dedicated requirements.",
+    "The current catalog hash is a constructor-captured trusted composition snapshot; the composition root must rebuild the receipt service whenever it installs a new catalog release.",
+    "ORCH-09 owns redacted audit append and will compose through receive_in_uow so its initial receipt event shares this transaction without duplicating on replay.",
+    "The recovery policy preserves RUN-05 deterministic durable-mock guarantees and honest outcome-unknown behavior; it does not claim universal exactly-once delivery from external providers."
+  ]
+}

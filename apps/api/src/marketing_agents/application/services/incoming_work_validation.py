@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -192,6 +193,7 @@ class ValidatedIncomingWork:
     envelope: AdmissionEnvelope
     snapshot: WorkflowAdmissionSnapshot
     _seal: object = field(repr=False, compare=False)
+    _integrity_hash: str = field(repr=False, compare=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("ValidatedIncomingWork can only be issued by IncomingWorkValidator")
@@ -205,19 +207,97 @@ def _issue_validated(
     object.__setattr__(value, "envelope", envelope)
     object.__setattr__(value, "snapshot", snapshot)
     object.__setattr__(value, "_seal", _VALIDATION_SEAL)
+    object.__setattr__(value, "_integrity_hash", _validated_integrity_hash(envelope, snapshot))
     return value
 
 
-def _validated_envelope(value: object) -> AdmissionEnvelope:
+def _validated_integrity_hash(
+    envelope: AdmissionEnvelope,
+    snapshot: WorkflowAdmissionSnapshot,
+) -> str:
+    projection = {
+        "envelope": {
+            "source": envelope.source,
+            "event_id": envelope.event_id,
+            "instance_id": envelope.instance_id,
+            "trigger_id": envelope.trigger_id,
+            "workflow_id": envelope.workflow_id,
+            "mode": envelope.mode.value,
+            "brief_id": envelope.brief_id,
+            "brief_revision": envelope.brief_revision,
+            "configuration_revision": envelope.configuration_revision,
+            "admitted_payload": envelope.admitted_payload,
+        },
+        "snapshot": {
+            "catalog_hash": snapshot.catalog_hash,
+            "instance_id": snapshot.instance_id,
+            "template_id": snapshot.template_id,
+            "instance_configuration_revision": snapshot.instance_configuration_revision,
+            "trigger_id": snapshot.trigger_id,
+            "workflow_id": snapshot.workflow_id,
+            "input_schema_id": snapshot.input_schema_id,
+            "input_schema_hash": snapshot.input_schema_hash,
+        },
+    }
+    digest = hashlib.sha256(
+        b"validated-incoming-work:v1\x00" + canonical_json_bytes(projection)
+    ).hexdigest()
+    return f"validated-incoming-sha256-v1:{digest}"
+
+
+def _validated_parts(
+    value: object,
+) -> tuple[AdmissionEnvelope, WorkflowAdmissionSnapshot]:
     if (
-        not isinstance(value, ValidatedIncomingWork)
+        type(value) is not ValidatedIncomingWork
         or getattr(value, "_seal", None) is not _VALIDATION_SEAL
     ):
         raise IncomingWorkValidationError(
             "incoming_work_not_validated",
             "work admission requires a validator-issued incoming-work marker",
         )
-    return value.envelope
+    envelope = getattr(value, "envelope", None)
+    snapshot = getattr(value, "snapshot", None)
+    if type(envelope) is not AdmissionEnvelope or type(snapshot) is not WorkflowAdmissionSnapshot:
+        raise IncomingWorkValidationError(
+            "incoming_work_not_validated",
+            "work admission requires a complete validator-issued incoming-work marker",
+        )
+    try:
+        expected_integrity_hash = _validated_integrity_hash(envelope, snapshot)
+    except (CanonicalJsonError, TypeError, ValueError) as exc:
+        raise IncomingWorkValidationError(
+            "incoming_work_not_validated",
+            "validator-issued incoming-work marker integrity is invalid",
+        ) from exc
+    integrity_hash = getattr(value, "_integrity_hash", None)
+    if not isinstance(integrity_hash, str) or not hmac.compare_digest(
+        integrity_hash,
+        expected_integrity_hash,
+    ):
+        raise IncomingWorkValidationError(
+            "incoming_work_not_validated",
+            "validator-issued incoming-work marker integrity is invalid",
+        )
+    if (
+        snapshot.instance_id != envelope.instance_id
+        or snapshot.trigger_id != envelope.trigger_id
+        or snapshot.workflow_id != envelope.workflow_id
+        or snapshot.instance_configuration_revision != envelope.configuration_revision
+    ):
+        raise IncomingWorkValidationError(
+            "admission_snapshot_invalid",
+            "incoming work no longer matches its validator-issued admission snapshot",
+        )
+    return envelope, snapshot
+
+
+def _validated_envelope(value: object) -> AdmissionEnvelope:
+    return _validated_parts(value)[0]
+
+
+def _validated_snapshot(value: object) -> WorkflowAdmissionSnapshot:
+    return _validated_parts(value)[1]
 
 
 def _unique_by_id[RecordT](records: Sequence[RecordT], label: str) -> dict[str, RecordT]:

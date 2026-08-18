@@ -10,6 +10,10 @@ from enum import StrEnum
 from marketing_agents.application.orchestration.dependencies import (
     OrchestrationDependencies,
 )
+from marketing_agents.application.policies.action_recovery import (
+    StaleActionRecoveryDecision,
+    classify_stale_action_recovery,
+)
 from marketing_agents.application.policies.write_authorization import (
     ApprovalReservation,
     AuthorizedExternalWrite,
@@ -322,36 +326,34 @@ class ExternalActionDispatcher:
             lease = snapshot.lease
             if lease is None:  # pragma: no cover - domain invariant
                 continue
-            if snapshot.call_started_at is None:
-                if snapshot.delivery_attempt_count >= snapshot.delivery_attempt_limit:
-                    async with self._dependencies.unit_of_work() as unit_of_work:
-                        failed = await unit_of_work.external_actions.fail_exhausted_stale_pre_call(
-                            action_id=snapshot.id,
-                            expected_version=snapshot.version,
-                            attempt_number=lease.attempt_number,
-                            occurred_at=now,
-                            reason_code="pre_call_attempts_exhausted",
-                        )
-                        if failed is not None:
-                            await unit_of_work.commit()
-                            results.append(
-                                ExternalActionDispatchResult(failed, DispatchDisposition.FAILED)
-                            )
-                    continue
-                released = await self._release_stale(snapshot, now, "pre_call_expired")
-            elif (
-                reconciled := await self._reconcile_durable_receipt(
-                    snapshot, lease_owner=lease.owner
+            if (
+                snapshot.call_started_at is not None
+                and (
+                    reconciled := await self._reconcile_durable_receipt(
+                        snapshot, lease_owner=lease.owner
+                    )
                 )
-            ) is not None:
+                is not None
+            ):
                 results.append(reconciled)
                 continue
-            elif (
-                snapshot.delivery_contract.idempotency_support in {"required", "supported"}
-                and snapshot.delivery_attempt_count < snapshot.delivery_attempt_limit
-            ):
-                released = await self._release_stale(snapshot, now, "provider_retry")
-            else:
+            decision = classify_stale_action_recovery(snapshot, now=now)
+            if decision is StaleActionRecoveryDecision.FAIL_PRE_CALL_EXHAUSTED:
+                async with self._dependencies.unit_of_work() as unit_of_work:
+                    failed = await unit_of_work.external_actions.fail_exhausted_stale_pre_call(
+                        action_id=snapshot.id,
+                        expected_version=snapshot.version,
+                        attempt_number=lease.attempt_number,
+                        occurred_at=now,
+                        reason_code="pre_call_attempts_exhausted",
+                    )
+                    if failed is not None:
+                        await unit_of_work.commit()
+                        results.append(
+                            ExternalActionDispatchResult(failed, DispatchDisposition.FAILED)
+                        )
+                continue
+            if decision is StaleActionRecoveryDecision.OUTCOME_UNKNOWN:
                 async with self._dependencies.unit_of_work() as unit_of_work:
                     unknown = await unit_of_work.external_actions.mark_outcome_unknown(
                         action_id=snapshot.id,
@@ -369,6 +371,16 @@ class ExternalActionDispatcher:
                             )
                         )
                 continue
+            if decision is StaleActionRecoveryDecision.RETRY_PRE_CALL:
+                conclusion = "pre_call_expired"
+            elif decision is StaleActionRecoveryDecision.RETRY_PROVIDER_IDEMPOTENT:
+                conclusion = "provider_retry"
+            else:  # pragma: no cover - exhaustive fail-closed enum guard
+                raise ExternalActionDispatchError(
+                    "recovery_decision_invalid",
+                    "stale action recovery returned an unsupported decision",
+                )
+            released = await self._release_stale(snapshot, now, conclusion)
             if released is None:
                 continue
             try:
