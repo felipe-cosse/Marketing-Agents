@@ -1,0 +1,63 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-05",
+  "matrix_statement_sha256": "2484b2eb5fe3982b0b902106a58c0ce86720541db1c48e4f800bc5d168f6a5cb",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/__init__.py",
+      "apps/api/src/marketing_agents/application/ports/llm.py",
+      "tests/unit/application/ports/test_safe_05_llm_contract.py",
+      "docs/verification/requirements/SAFE-05.json",
+      "docs/verification/requirements/SAFE-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": ["apps/api/src/marketing_agents/application/ports/llm.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/ports/test_safe_05_llm_contract.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "structural-trust-separation",
+      "type": "contract",
+      "statement": "Trusted system instructions, retrieved external content, and connector observations occupy distinct immutable request fields.",
+      "test_refs": ["tests/unit/application/ports/test_safe_05_llm_contract.py::test_safe_05_provider_receives_injection_only_in_typed_untrusted_fields"]
+    },
+    {
+      "id": "no-model-tool-surface",
+      "type": "negative_control",
+      "statement": "The provider port rejects flattened message arrays, tool declarations, tool choices, raw instructions, naive deadlines, and raw-text response envelopes.",
+      "test_refs": [
+        "tests/unit/application/ports/test_safe_05_llm_contract.py::test_safe_05_mixed_messages_and_model_tool_calling_are_not_in_contract",
+        "tests/unit/application/ports/test_safe_05_llm_contract.py::test_safe_05_trusted_instructions_and_structured_response_fail_closed"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-05-llm-contract-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/application/ports/test_safe_05_llm_contract.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["structural-trust-separation", "no-model-tool-surface"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/__init__.py",
+      "apps/api/src/marketing_agents/application/ports/llm.py"
+    ],
+    "gate_id": "safe-05-llm-contract-tests"
+  },
+  "limitations": []
+}
