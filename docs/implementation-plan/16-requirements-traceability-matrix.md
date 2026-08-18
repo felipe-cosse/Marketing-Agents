@@ -119,7 +119,7 @@ Allowed status values:
 | DEMO-04 | Community event signup to reminder draft. | 11 | Reminder draft/recommended time | Community acceptance | planned |
 | DEMO-05 | Partnership application to structured recommendation. | 11 | Advisory review workflow | Partnerships acceptance | planned |
 | DEMO-06 | Writes await exact approval; Email has zero calls before and mocks after. | 06, 11 | All-approvals barrier | Email negative/positive/crash tests | planned |
-| SAFE-01 | Default dry-run/mock providers/connectors. | 01, 10 | Settings/registry/UI banner | Startup/session tests | planned |
+| SAFE-01 | Default dry-run/mock providers/connectors. | 01, 10 | Settings/registry/UI banner | Startup/session tests | verified |
 | SAFE-02 | No publish/send/enroll/unsubscribe/CRM/CMS/calendar/fulfillment without approval. | 02, 06, 10 | Capability/policy/dispatcher | Catalog + action tests | planned |
 | SAFE-03 | No unofficial scraping/terms-violating automation. | 00, 10, 11 | No generic fetch; supplied fixtures | Adapter inventory/review | planned |
 | SAFE-04 | External content is untrusted, not executable instructions. | 05, 10, 13 | Trust-separated requests | Injection tests | planned |
