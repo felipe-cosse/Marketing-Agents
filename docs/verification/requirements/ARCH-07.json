@@ -1,0 +1,95 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-07",
+  "matrix_statement_sha256": "4b404a57b8c6a04e9ce190fee7e75b40fe1df859d04e945078d078daab82f6f2",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/connectors.py",
+      "apps/api/src/marketing_agents/application/ports/connector_families.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/**",
+      "tests/contract/test_arch_07_connector_contract_matrix.py",
+      "docs/verification/requirements/ARCH-07.json",
+      "docs/verification/requirements/ARCH-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/ports/connector_families.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/connectors/**"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/contract/test_arch_07_connector_contract_matrix.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "eight-family-catalog-parity",
+      "type": "contract",
+      "statement": "The immutable operation registry exactly covers the 20 external catalog capabilities across eight connector families and rejects duplicates or execution-metadata drift.",
+      "test_refs": [
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_registry_matches_catalog_contract_for_all_eight_families",
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_registry_rejects_duplicate_and_drifted_operations"
+      ]
+    },
+    {
+      "id": "typed-deterministic-offline-mocks",
+      "type": "positive",
+      "statement": "Every connector family exposes a typed deterministic mock whose reads remain provenance-bound untrusted observations and whose modules have no network or provider SDK imports.",
+      "test_refs": [
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_each_family_exposes_a_typed_deterministic_mock",
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_mock_modules_have_no_network_or_sdk_imports"
+      ]
+    },
+    {
+      "id": "disabled-and-unauthorized-writes-rejected",
+      "type": "negative_control",
+      "statement": "Mock writes recheck their exact sealed authorization, while unassigned, reserved, forbidden, and real-mode operations fail before a mock effect and never fall back.",
+      "test_refs": [
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_writes_require_exact_proof_and_disabled_ops_never_call",
+        "tests/contract/test_arch_07_connector_contract_matrix.py::test_arch_07_reserved_forbidden_and_real_modes_have_no_handler_or_fallback"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-07-connector-contract-matrix",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/contract/test_arch_07_connector_contract_matrix.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "eight-family-catalog-parity",
+        "typed-deterministic-offline-mocks",
+        "disabled-and-unauthorized-writes-rejected"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/connectors.py",
+      "apps/api/src/marketing_agents/application/ports/connector_families.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/**"
+    ],
+    "gate_id": "arch-07-connector-contract-matrix"
+  },
+  "limitations": [
+    "No real connector SDK is shipped; every non-mock selection fails without fallback.",
+    "The injected mock receipt ledger is process-local; RUN-05 owns durable uniqueness and crash recovery before dispatcher integration."
+  ]
+}
