@@ -1,0 +1,49 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-02",
+  "matrix_statement_sha256": "de8bfc910a03a24a593c42b1f4cee1f1e0b7ae6301fdd9df1d6ebd584b68244e",
+  "evidence_class": "decision_record",
+  "legacy_bootstrap": true,
+  "legacy_manifest_added_at": "DEL-08",
+  "scope": {
+    "allowed_path_globs": [
+      "docs/adr/**",
+      "docs/verification/requirements/EXEC-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "tests/source/test_exec_02_architecture_decisions.py"
+    ],
+    "required_path_groups": [
+      {"kind": "decision", "one_of": ["docs/adr/0001-*.md", "docs/adr/0010-*.md"]},
+      {"kind": "test", "one_of": ["tests/source/test_exec_02_architecture_decisions.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "ten-accepted-decisions",
+      "type": "documentation",
+      "statement": "ADR-0001 through ADR-0010 are accepted, substantive, placeholder-free, and linked to known assumptions.",
+      "test_refs": ["tests/source/test_exec_02_architecture_decisions.py::ArchitectureDecisionTests"]
+    },
+    {
+      "id": "dependent-path-gate",
+      "type": "contract",
+      "statement": "Dependent implementation path prefixes map only to accepted architecture decisions.",
+      "test_refs": ["tests/source/test_exec_02_architecture_decisions.py::ArchitectureDecisionTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-02-decisions",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_exec_02_architecture_decisions"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["ten-accepted-decisions", "dependent-path-gate"]
+    }
+  ],
+  "limitations": [
+    "This legacy manifest was added by DEL-08; it was not present in the original EXEC-02 feature commit."
+  ]
+}

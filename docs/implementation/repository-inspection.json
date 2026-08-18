@@ -4,6 +4,7 @@
   "repository_root": ".",
   "initial_state": "greenfield: implementation prompt and six reference frames; no application stack",
   "required_prompt": "IMPLEMENTATION_PROMPT.md",
+  "required_prompt_sha256": "33581a31abed71c77da58b6278319f2755e829b66216a668f7dc5bb0025a446e",
   "reference_index": "catalog/source-evidence.json",
   "guidance_names_checked": [
     "AGENTS.md",

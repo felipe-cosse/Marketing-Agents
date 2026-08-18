@@ -1,0 +1,59 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-01",
+  "matrix_statement_sha256": "30b984ebf8bf8dfce5c732c75c58ca2d0aa04173f42775cd657e824b0b97347b",
+  "evidence_class": "process_gate",
+  "legacy_bootstrap": true,
+  "legacy_manifest_added_at": "DEL-08",
+  "scope": {
+    "allowed_path_globs": [
+      "docs/implementation/repository-inspection.json",
+      "docs/verification/requirements/EXEC-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "scripts/verify_source_evidence.py",
+      "tests/source/test_exec_01_source_inspection.py"
+    ],
+    "required_path_groups": [
+      {"kind": "control", "one_of": ["docs/implementation/repository-inspection.json", "scripts/verify_source_evidence.py"]},
+      {"kind": "test", "one_of": ["tests/source/test_exec_01_source_inspection.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-local-inspection",
+      "type": "contract",
+      "statement": "The fixed prompt, source index, six frames, and eight unique inspection subjects are verified.",
+      "test_refs": ["tests/source/test_exec_01_source_inspection.py::SourceInspectionTests"]
+    },
+    {
+      "id": "mutated-evidence-rejected",
+      "type": "negative_control",
+      "statement": "Altered frames, duplicate subjects, configurable paths, and unrecorded repository guidance are rejected.",
+      "test_refs": ["tests/source/test_exec_01_source_inspection.py::SourceInspectionTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-01-inspection",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_exec_01_source_inspection"],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-local-inspection", "mutated-evidence-rejected"]
+    },
+    {
+      "id": "exec-01-verifier",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_source_evidence.py", "--json"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-local-inspection"]
+    }
+  ],
+  "limitations": [
+    "This legacy manifest was added by DEL-08; it was not present in the original EXEC-01 feature commit."
+  ]
+}

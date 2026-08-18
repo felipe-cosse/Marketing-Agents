@@ -13,6 +13,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_INDEX = ROOT / "catalog" / "source-evidence.json"
 INSPECTION = ROOT / "docs" / "implementation" / "repository-inspection.json"
+EXPECTED_PROMPT = "IMPLEMENTATION_PROMPT.md"
+EXPECTED_INDEX = "catalog/source-evidence.json"
+EXPECTED_GUIDANCE_NAMES = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    ".cursorrules",
+    ".agents",
+    ".codex",
+]
+EXPECTED_SUBJECTS = [
+    "repository guidance",
+    "implementation prompt",
+    "overview frame",
+    "Social media frame",
+    "Blog & SEO frame",
+    "Email frame",
+    "Community frame",
+    "Partnerships frame",
+]
 EXPECTED_FRAMES = {
     "linkedin-ai-agents-org-chart-overview.png",
     "linkedin-ai-agents-org-chart-social-media.png",
@@ -33,9 +53,26 @@ def _read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _discover_guidance(root: Path) -> list[str]:
+    discovered: set[str] = set()
+    file_names = set(EXPECTED_GUIDANCE_NAMES[:4])
+    directory_names = set(EXPECTED_GUIDANCE_NAMES[4:])
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if ".git" in relative.parts:
+            continue
+        if path.is_file() and path.name in file_names:
+            discovered.add(relative.as_posix())
+        if path.is_dir() and path.name in directory_names:
+            discovered.add(relative.as_posix())
+    return sorted(discovered)
+
+
 def verify(root: Path = ROOT) -> EvidenceResult:
-    index = _read_json(root / SOURCE_INDEX.relative_to(ROOT))
-    inspection = _read_json(root / INSPECTION.relative_to(ROOT))
+    index_path = root / SOURCE_INDEX.relative_to(ROOT)
+    inspection_path = root / INSPECTION.relative_to(ROOT)
+    index = _read_json(index_path)
+    inspection = _read_json(inspection_path)
     assets = index.get("assets")
     if not isinstance(assets, list):
         raise ValueError("source evidence assets must be a list")
@@ -60,17 +97,26 @@ def verify(root: Path = ROOT) -> EvidenceResult:
 
     if names != EXPECTED_FRAMES:
         raise ValueError("source frame inventory does not match the required six frames")
-    if not (root / str(inspection.get("required_prompt"))).is_file():
-        raise ValueError("implementation prompt is missing")
+    if inspection.get("required_prompt") != EXPECTED_PROMPT:
+        raise ValueError("inspection must use the fixed implementation prompt path")
+    if inspection.get("reference_index") != EXPECTED_INDEX or index_path != root / EXPECTED_INDEX:
+        raise ValueError("inspection must use the fixed source-evidence index")
+    prompt_path = (root / EXPECTED_PROMPT).resolve()
+    if root.resolve() not in prompt_path.parents or not prompt_path.is_file():
+        raise ValueError("implementation prompt is missing or escaped")
+    prompt_hash = hashlib.sha256(prompt_path.read_bytes()).hexdigest()
+    if inspection.get("required_prompt_sha256") != prompt_hash:
+        raise ValueError("implementation prompt hash mismatch")
+    if inspection.get("guidance_names_checked") != EXPECTED_GUIDANCE_NAMES:
+        raise ValueError("guidance candidate list is incomplete or reordered")
     found = inspection.get("repository_guidance_files_found")
     if not isinstance(found, list):
         raise ValueError("repository guidance result must be a list")
-    for relative in found:
-        if not isinstance(relative, str) or not (root / relative).is_file():
-            raise ValueError(f"recorded guidance file is missing: {relative}")
+    if found != _discover_guidance(root):
+        raise ValueError("recorded repository guidance does not match filesystem discovery")
     subjects = inspection.get("inspected_subjects")
-    if not isinstance(subjects, list) or len(subjects) != 8:
-        raise ValueError("inspection must cover guidance, prompt, and all six frames")
+    if subjects != EXPECTED_SUBJECTS or len(set(subjects)) != len(EXPECTED_SUBJECTS):
+        raise ValueError("inspection must cover the exact unique guidance, prompt, and frame subjects")
     return EvidenceResult(frame_count=len(assets), inspected_subject_count=len(subjects))
 
 

@@ -1,0 +1,66 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SRC-02",
+  "matrix_statement_sha256": "55324e70795ac31e93f8d24a3f9602cdb3688376c02528cab998a43610f4b00f",
+  "evidence_class": "source_boundary",
+  "legacy_bootstrap": true,
+  "legacy_manifest_added_at": "DEL-08",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/source-evidence.json",
+      "docs/source-authority.md",
+      "docs/verification/requirements/SRC-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "tests/source/test_src_02_source_authority.py"
+    ],
+    "required_path_groups": [
+      {"kind": "source", "one_of": ["catalog/source-evidence.json", "docs/source-authority.md"]},
+      {"kind": "test", "one_of": ["tests/source/test_src_02_source_authority.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "six-hash-pinned-frames",
+      "type": "contract",
+      "statement": "The source boundary indexes exactly six local frames and verifies every SHA-256 digest.",
+      "test_refs": ["tests/source/test_src_02_source_authority.py::SourceAuthorityTests"]
+    },
+    {
+      "id": "prompt-precedence-and-exclusions",
+      "type": "negative_control",
+      "statement": "Prompt text has precedence and logos cannot establish credentials, integrations, or duplicate reasons.",
+      "test_refs": ["tests/source/test_src_02_source_authority.py::SourceAuthorityTests"]
+    },
+    {
+      "id": "community-duplication-unexplained",
+      "type": "contract",
+      "statement": "Community remains seven templates and fourteen instances with null business reason and variant label.",
+      "test_refs": ["tests/source/test_src_02_source_authority.py::SourceAuthorityTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "src-02-authority",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_src_02_source_authority"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["six-hash-pinned-frames", "prompt-precedence-and-exclusions", "community-duplication-unexplained"]
+    },
+    {
+      "id": "src-02-evidence-index",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_source_evidence.py", "--json"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_enforced",
+      "covers": ["six-hash-pinned-frames"]
+    }
+  ],
+  "limitations": [
+    "This legacy manifest was added by DEL-08; it was not present in the original SRC-02 feature commit.",
+    "The gates require no network behavior, but kernel-level network denial was not yet enforced for this bootstrap branch."
+  ]
+}

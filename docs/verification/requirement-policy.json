@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "8b4b209e2ed7b119b793d06ac1c61b290d38fbe0",
+  "legacy_bootstrap_ids": ["SRC-01", "SRC-02", "SRC-03", "EXEC-01", "EXEC-02"],
+  "legacy_manifests_added_by": "DEL-08",
+  "strict_protocol_starts_at": "DEL-08",
+  "protected_carrier_ids": ["DEL-08", "EXEC-08"],
+  "protected_path_globs": [
+    "docs/verification/schema/**",
+    "docs/verification/requirement-policy.json",
+    "scripts/verify_requirement_evidence.py"
+  ],
+  "evidence_only_path_globs": [
+    "docs/verification/requirements/**",
+    "docs/implementation-plan/16-requirements-traceability-matrix.md"
+  ],
+  "category_classes": {
+    "SRC": "source_boundary",
+    "OBJ": "product",
+    "CAT": "product",
+    "ARCH": "product",
+    "ORCH": "product",
+    "DOM": "product",
+    "RUN": "product",
+    "SCHED": "product",
+    "API": "product",
+    "WEB": "product",
+    "DEMO": "product",
+    "SAFE": "security_control",
+    "DEL": "product",
+    "AC": "acceptance",
+    "EXEC": "process_gate"
+  },
+  "class_defaults": {
+    "source_boundary": {"minimum_claims": 1, "minimum_gates": 1, "required_group_kinds": ["source", "test"], "connection_witness": false},
+    "decision_record": {"minimum_claims": 1, "minimum_gates": 1, "required_group_kinds": ["decision", "test"], "connection_witness": false},
+    "process_gate": {"minimum_claims": 1, "minimum_gates": 1, "required_group_kinds": ["control", "test"], "connection_witness": true},
+    "tooling_control": {"minimum_claims": 2, "minimum_gates": 1, "required_group_kinds": ["control", "test"], "connection_witness": true},
+    "product": {"minimum_claims": 2, "minimum_gates": 1, "required_group_kinds": ["implementation", "test"], "connection_witness": true},
+    "security_control": {"minimum_claims": 2, "minimum_gates": 1, "required_group_kinds": ["control", "test"], "connection_witness": true},
+    "acceptance": {"minimum_claims": 2, "minimum_gates": 1, "required_group_kinds": ["journey", "test"], "connection_witness": false}
+  },
+  "requirement_overrides": {
+    "SRC-03": {"evidence_class": "decision_record", "connection_witness": false},
+    "EXEC-01": {"evidence_class": "process_gate", "connection_witness": false},
+    "EXEC-02": {"evidence_class": "decision_record", "connection_witness": false},
+    "DEL-08": {"evidence_class": "tooling_control", "connection_witness": true}
+  }
+}
