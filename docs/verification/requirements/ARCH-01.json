@@ -1,0 +1,92 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-01",
+  "matrix_statement_sha256": "c7a8cbe3b0b407dbbfbcbf531c1337200e3219f2932d829902097c320b5b0ca9",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      ".python-version",
+      ".gitignore",
+      ".dockerignore",
+      ".env.example",
+      "Makefile",
+      "pyproject.toml",
+      "uv.lock",
+      "apps/api/src/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      "scripts/verify_source_evidence.py",
+      "docs/verification/requirements/ARCH-01.json",
+      "docs/verification/requirements/ARCH-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "pyproject.toml",
+          "uv.lock",
+          "apps/api/src/marketing_agents/config.py",
+          "apps/api/src/marketing_agents/api/**"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/config/test_arch_01_settings.py",
+          "tests/unit/architecture/test_arch_01_toolchain.py",
+          "tests/integration/api/test_arch_01_health.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "python-312-required-stack",
+      "type": "contract",
+      "statement": "Python 3.12 and locked FastAPI, Pydantic, SQLAlchemy, and Alembic dependencies are declared and importable.",
+      "test_refs": ["tests/unit/architecture/test_arch_01_toolchain.py::ToolchainTests"]
+    },
+    {
+      "id": "secure-settings-and-app-factory",
+      "type": "negative_control",
+      "statement": "Typed settings keep mock loopback defaults, reject unsafe modes and hosts, mask credentials, and build FastAPI without import-time infrastructure.",
+      "test_refs": [
+        "tests/unit/config/test_arch_01_settings.py::SettingsTests",
+        "tests/integration/api/test_arch_01_health.py::HealthEndpointTests"
+      ]
+    },
+    {
+      "id": "backend-quality-gates",
+      "type": "positive",
+      "statement": "The pinned backend passes Ruff formatting and lint, strict mypy, and the complete Python pytest suite.",
+      "test_refs": ["tests/unit/architecture/test_arch_01_toolchain.py::ToolchainTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-01-backend",
+      "runner": "argv",
+      "argv": ["make", "verify-backend"],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "not_enforced",
+      "covers": ["python-312-required-stack", "secure-settings-and-app-factory", "backend-quality-gates"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      ".python-version",
+      "pyproject.toml",
+      "uv.lock",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/api/**"
+    ],
+    "gate_id": "arch-01-backend"
+  },
+  "limitations": [
+    "SQLite is the exercised default; PostgreSQL repository compatibility is implemented and verified by ARCH-03.",
+    "The liveness route intentionally performs no readiness, database, catalog, provider, or connector probe; API-01 adds typed readiness."
+  ]
+}
