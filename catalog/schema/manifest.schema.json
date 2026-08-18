@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:marketing-agents:catalog:manifest:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format_version", "content_version", "json_schema_dialect", "files"],
+  "properties": {
+    "format_version": {"const": 1},
+    "content_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "json_schema_dialect": {"const": "https://json-schema.org/draft/2020-12/schema"},
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["departments", "functions", "tool_capabilities", "approval_policies", "templates", "instances"],
+      "properties": {
+        "departments": {"$ref": "#/$defs/localPath"},
+        "functions": {"$ref": "#/$defs/localPath"},
+        "tool_capabilities": {"$ref": "#/$defs/localPath"},
+        "approval_policies": {"$ref": "#/$defs/localPath"},
+        "templates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/localPath"}},
+        "instances": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/localPath"}}
+      }
+    },
+    "source_evidence": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/localPath"}}
+  },
+  "$defs": {
+    "localPath": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*://).+$"}
+  }
+}

@@ -20,6 +20,9 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.scripts]
+marketing-agents-catalog = "marketing_agents.workers.catalog_cli:main"
+
 [dependency-groups]
 dev = [
   "httpx>=0.28,<1",

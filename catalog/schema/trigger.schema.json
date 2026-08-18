@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:marketing-agents:catalog:trigger:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "enabled"],
+  "properties": {
+    "type": {"enum": ["manual", "webhook", "schedule"]},
+    "enabled": {"type": "boolean"},
+    "event_source": {"type": ["string", "null"], "maxLength": 100},
+    "cron": {"type": ["string", "null"], "maxLength": 100},
+    "timezone": {"type": ["string", "null"], "maxLength": 100},
+    "misfire_policy": {"enum": ["skip", "run_once", null]}
+  }
+}

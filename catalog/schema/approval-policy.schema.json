@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:marketing-agents:catalog:approval-policy:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "required_roles", "expiry_seconds", "allow_self_approval"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^policy\\.[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "kind": {"enum": ["none", "human_external_write"]},
+    "required_roles": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+    "expiry_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
+    "allow_self_approval": {"type": "boolean"}
+  }
+}

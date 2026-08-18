@@ -1,0 +1,84 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-04",
+  "matrix_statement_sha256": "129a67f6f3a7c498f8b364c4eae62e7945af2a2a5b79f1d45c5454b627503c55",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "pyproject.toml",
+      "uv.lock",
+      "catalog/schema/**",
+      "apps/api/src/marketing_agents/infrastructure/catalog/**",
+      "apps/api/src/marketing_agents/workers/catalog_cli.py",
+      "tests/catalog/test_arch_04_catalog_compiler.py",
+      "docs/verification/requirements/ARCH-04.json",
+      "docs/verification/requirements/ARCH-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/schema/**",
+          "apps/api/src/marketing_agents/infrastructure/catalog/**",
+          "apps/api/src/marketing_agents/workers/catalog_cli.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_arch_04_catalog_compiler.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "offline-versioned-schema",
+      "type": "contract",
+      "statement": "Eight Draft 2020-12 structural schemas compile offline and reject unknown fields, unsafe paths, and invalid records.",
+      "test_refs": ["tests/catalog/test_arch_04_catalog_compiler.py::CatalogCompilerTests"]
+    },
+    {
+      "id": "deterministic-local-compiler",
+      "type": "positive",
+      "statement": "Duplicate-key-safe YAML, bounded local resources, frozen records, semantic references, count contracts, and content hashes compile deterministically.",
+      "test_refs": ["tests/catalog/test_arch_04_catalog_compiler.py::CatalogCompilerTests"]
+    },
+    {
+      "id": "unsafe-catalog-rejected",
+      "type": "negative_control",
+      "statement": "Remote or escaped references, duplicate keys, contract drift, and write capabilities under read-only policy fail compilation.",
+      "test_refs": ["tests/catalog/test_arch_04_catalog_compiler.py::CatalogCompilerTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-04-catalog-tests",
+      "runner": "argv",
+      "argv": ["make", "test-catalog-compiler"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["offline-versioned-schema", "deterministic-local-compiler", "unsafe-catalog-rejected"]
+    },
+    {
+      "id": "arch-04-static",
+      "runner": "argv",
+      "argv": ["make", "typecheck"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["deterministic-local-compiler"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/schema/**",
+      "apps/api/src/marketing_agents/infrastructure/catalog/**",
+      "apps/api/src/marketing_agents/workers/catalog_cli.py"
+    ],
+    "gate_id": "arch-04-catalog-tests"
+  },
+  "limitations": [
+    "This branch freezes and verifies the compiler with synthetic catalogs; the authoritative five-department production catalog lands in CAT-01 through CAT-08.",
+    "ARCH-04 remains implemented until the production catalog validates under the non-overridable 5/12/36/43 contract."
+  ]
+}
