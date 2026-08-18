@@ -1,0 +1,70 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-06",
+  "matrix_statement_sha256": "035bab14ef8f12e126f184874d8617e48e1f24100865b41dc925b8bfa7466166",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/policies/__init__.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+      "apps/api/src/marketing_agents/security/url_policy.py",
+      "tests/security/test_safe_06_runtime_policy.py",
+      "docs/verification/requirements/SAFE-06.json",
+      "docs/verification/requirements/SAFE-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+          "apps/api/src/marketing_agents/security/url_policy.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_06_runtime_policy.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-schema-runtime",
+      "type": "contract",
+      "statement": "Input, output, content, JSON depth, call budgets, rates, timeouts, deadlines, and capability effects are enforced by one immutable runtime policy snapshot.",
+      "test_refs": [
+        "tests/security/test_safe_06_runtime_policy.py::test_safe_06_exact_schema_size_depth_and_content_limits_pass",
+        "tests/security/test_safe_06_runtime_policy.py::test_safe_06_attempts_require_allowlist_effect_budget_rate_and_deadline"
+      ]
+    },
+    {
+      "id": "unsafe-boundaries-rejected",
+      "type": "negative_control",
+      "statement": "Limit overruns, invalid schemas, unknown capabilities, exhausted budgets, and unsafe reference URLs fail closed without network access.",
+      "test_refs": [
+        "tests/security/test_safe_06_runtime_policy.py::test_safe_06_limit_plus_one_and_invalid_schema_payloads_fail",
+        "tests/security/test_safe_06_runtime_policy.py::test_safe_06_reference_urls_are_https_allowlisted_and_provenance_only"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-06-runtime-policy-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_06_runtime_policy.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["bounded-schema-runtime", "unsafe-boundaries-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+      "apps/api/src/marketing_agents/security/url_policy.py"
+    ],
+    "gate_id": "safe-06-runtime-policy-tests"
+  },
+  "limitations": ["Reference URLs are inert provenance in v1; any future fetch adapter must revalidate DNS and redirects at connection time."]
+}
