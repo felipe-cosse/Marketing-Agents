@@ -10,6 +10,7 @@ from typing import Literal, Self, cast
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.security.network_policy import AdapterNetworkPolicy, NetworkPolicyError
 from marketing_agents.security.secret_config import redact_config
 
@@ -37,6 +38,12 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     marketing_agents_digest_key_path: Path = Path("data/digest.key")
     real_llm_api_key: SecretStr | None = None
+    retention_admitted_payload_days: int = Field(default=7, ge=1, le=3650)
+    retention_external_action_payload_days: int = Field(default=7, ge=1, le=3650)
+    retention_approval_detail_days: int = Field(default=7, ge=1, le=3650)
+    retention_artifact_detail_days: int = Field(default=30, ge=1, le=3650)
+    retention_connector_receipt_detail_days: int = Field(default=30, ge=1, le=3650)
+    retention_audit_metadata_days: int = Field(default=90, ge=1, le=3650)
 
     @field_validator("database_url")
     @classmethod
@@ -81,6 +88,17 @@ class Settings(BaseSettings):
 
     def safe_snapshot(self) -> dict[str, object]:
         return cast(dict[str, object], redact_config(self.model_dump(mode="json")))
+
+    @property
+    def retention_policy(self) -> RetentionPolicy:
+        return RetentionPolicy(
+            admitted_payload_days=self.retention_admitted_payload_days,
+            external_action_payload_days=self.retention_external_action_payload_days,
+            approval_detail_days=self.retention_approval_detail_days,
+            artifact_detail_days=self.retention_artifact_detail_days,
+            connector_receipt_detail_days=self.retention_connector_receipt_detail_days,
+            audit_metadata_days=self.retention_audit_metadata_days,
+        )
 
 
 @lru_cache(maxsize=1)

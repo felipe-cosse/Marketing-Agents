@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-07",
+  "matrix_statement_sha256": "e94c356f8efe01ec011f2293ab1910f79c683e8f9e4223781569e17c5150312e",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      ".env.example",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/domain/data_classification.py",
+      "apps/api/src/marketing_agents/domain/retention.py",
+      "apps/api/src/marketing_agents/security/redaction.py",
+      "apps/api/src/marketing_agents/security/secret_config.py",
+      "tests/security/test_safe_07_redaction_retention.py",
+      "docs/verification/requirements/SAFE-07.json",
+      "docs/verification/requirements/SAFE-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/security/redaction.py",
+          "apps/api/src/marketing_agents/domain/retention.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_07_redaction_retention.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "central-field-aware-redaction",
+      "type": "contract",
+      "statement": "Nested schema classifications and sensitive annotations drive a non-mutating redacted projection with suspicious-key defense in depth.",
+      "test_refs": [
+        "tests/security/test_safe_07_redaction_retention.py::test_safe_07_nested_schema_and_defense_in_depth_remove_pii_canaries",
+        "tests/security/test_safe_07_redaction_retention.py::test_safe_07_secret_wrappers_and_settings_snapshots_never_render_values"
+      ]
+    },
+    {
+      "id": "independent-safe-retention",
+      "type": "negative_control",
+      "statement": "Six persisted-detail TTLs are independently configurable, bounded, UTC-based, and never authorize retention of secrets.",
+      "test_refs": [
+        "tests/security/test_safe_07_redaction_retention.py::test_safe_07_retention_defaults_and_independent_overrides_are_exact",
+        "tests/security/test_safe_07_redaction_retention.py::test_safe_07_retention_rejects_unsafe_ttls_timestamps_and_secrets"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-07-redaction-retention-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_07_redaction_retention.py", "tests/security/test_safe_10_secret_hygiene.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["central-field-aware-redaction", "independent-safe-retention"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/data_classification.py",
+      "apps/api/src/marketing_agents/domain/retention.py",
+      "apps/api/src/marketing_agents/security/redaction.py"
+    ],
+    "gate_id": "safe-07-redaction-retention-tests"
+  },
+  "limitations": ["The persistence maintenance worker that applies these TTLs is implemented with the database runtime, not in this policy branch."]
+}
