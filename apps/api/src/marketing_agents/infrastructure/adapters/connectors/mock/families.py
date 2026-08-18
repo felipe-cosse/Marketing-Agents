@@ -45,6 +45,7 @@ from marketing_agents.application.ports.connectors import (
 )
 from marketing_agents.infrastructure.adapters.connectors.mock.base import (
     InMemoryMockReceiptLedger,
+    MockReceiptLedger,
     build_read_observation,
     execute_mock_write,
 )
@@ -101,38 +102,34 @@ class MockSocialConnector:
 
 
 class MockNewsletterConnector:
-    def __init__(
-        self, registry: ConnectorOperationRegistry, ledger: InMemoryMockReceiptLedger
-    ) -> None:
+    def __init__(self, registry: ConnectorOperationRegistry, ledger: MockReceiptLedger) -> None:
         self._registry = registry
         self._ledger = ledger
 
     async def subscribe(
         self, request: AuthorizedConnectorCommand[SubscribeContactCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.newsletter.subscribe"), request, self._ledger
         )
 
     async def unsubscribe(
         self, request: AuthorizedConnectorCommand[UnsubscribeContactCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.newsletter.unsubscribe"), request, self._ledger
         )
 
     async def send_message(
         self, request: AuthorizedConnectorCommand[SendEmailCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.email.send-message"), request, self._ledger
         )
 
 
 class MockCrmConnector:
-    def __init__(
-        self, registry: ConnectorOperationRegistry, ledger: InMemoryMockReceiptLedger
-    ) -> None:
+    def __init__(self, registry: ConnectorOperationRegistry, ledger: MockReceiptLedger) -> None:
         self._registry = registry
         self._ledger = ledger
 
@@ -149,7 +146,7 @@ class MockCrmConnector:
     async def upsert_contact(
         self, request: AuthorizedConnectorCommand[UpsertContactCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.crm.upsert-contact"), request, self._ledger
         )
 
@@ -170,9 +167,7 @@ class MockCmsConnector:
 
 
 class MockEventsConnector:
-    def __init__(
-        self, registry: ConnectorOperationRegistry, ledger: InMemoryMockReceiptLedger
-    ) -> None:
+    def __init__(self, registry: ConnectorOperationRegistry, ledger: MockReceiptLedger) -> None:
         self._registry = registry
         self._ledger = ledger
 
@@ -199,15 +194,13 @@ class MockEventsConnector:
     async def enroll_attendee(
         self, request: AuthorizedConnectorCommand[EnrollAttendeeCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.events.enroll-attendee"), request, self._ledger
         )
 
 
 class MockCommunityConnector:
-    def __init__(
-        self, registry: ConnectorOperationRegistry, ledger: InMemoryMockReceiptLedger
-    ) -> None:
+    def __init__(self, registry: ConnectorOperationRegistry, ledger: MockReceiptLedger) -> None:
         self._registry = registry
         self._ledger = ledger
 
@@ -234,22 +227,20 @@ class MockCommunityConnector:
     async def send_message(
         self, request: AuthorizedConnectorCommand[SendCommunityMessageCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.messaging.send-message"), request, self._ledger
         )
 
     async def share_material(
         self, request: AuthorizedConnectorCommand[ShareMaterialCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.messaging.share-material"), request, self._ledger
         )
 
 
 class MockSpreadsheetConnector:
-    def __init__(
-        self, registry: ConnectorOperationRegistry, ledger: InMemoryMockReceiptLedger
-    ) -> None:
+    def __init__(self, registry: ConnectorOperationRegistry, ledger: MockReceiptLedger) -> None:
         self._registry = registry
         self._ledger = ledger
 
@@ -267,7 +258,7 @@ class MockSpreadsheetConnector:
     async def update_rows(
         self, request: AuthorizedConnectorCommand[UpdateRowsCommand]
     ) -> ConnectorWriteResult:
-        return execute_mock_write(
+        return await execute_mock_write(
             self._registry.declaration("cap.spreadsheet.update-rows"), request, self._ledger
         )
 
@@ -290,7 +281,7 @@ class MockFulfillmentConnector:
 @dataclass(frozen=True, slots=True)
 class MockConnectorBundle:
     registry: ConnectorOperationRegistry
-    ledger: InMemoryMockReceiptLedger
+    ledger: MockReceiptLedger
     social: MockSocialConnector
     newsletter: MockNewsletterConnector
     crm: MockCrmConnector
@@ -301,8 +292,12 @@ class MockConnectorBundle:
     fulfillment: MockFulfillmentConnector
 
     @classmethod
-    def create(cls, registry: ConnectorOperationRegistry) -> MockConnectorBundle:
-        ledger = InMemoryMockReceiptLedger()
+    def create(
+        cls,
+        registry: ConnectorOperationRegistry,
+        ledger: MockReceiptLedger | None = None,
+    ) -> MockConnectorBundle:
+        ledger = ledger or InMemoryMockReceiptLedger()
         return cls(
             registry=registry,
             ledger=ledger,

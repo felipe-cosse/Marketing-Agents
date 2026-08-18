@@ -131,6 +131,9 @@ class PlanningOperationMetadataSource(Protocol):
     def idempotency_support(self) -> str: ...
 
     @property
+    def default_timeout_seconds(self) -> int: ...
+
+    @property
     def request_redaction_fields(self) -> Sequence[str]: ...
 
     @property
@@ -237,6 +240,7 @@ class EffectPlannedStep:
     request_schema_id: str | None
     request_redaction_fields: tuple[str, ...]
     idempotency_support: str
+    connector_timeout_seconds: int | None
     approval_policy_id: str
     approval_required_roles: tuple[str, ...]
     approval_required_scopes: tuple[str, ...]
@@ -274,6 +278,12 @@ class EffectPlannedStep:
                 not isinstance(revision, int) or isinstance(revision, bool) or revision < 1
             ):
                 raise ValueError(f"{revision_name} must be positive")
+        if self.connector_timeout_seconds is not None and (
+            not isinstance(self.connector_timeout_seconds, int)
+            or isinstance(self.connector_timeout_seconds, bool)
+            or not 1 <= self.connector_timeout_seconds <= 120
+        ):
+            raise ValueError("connector timeout must be from 1 through 120 seconds")
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,11 +344,16 @@ class EffectPlan:
             raise ValueError("effect plan hash does not bind its structural snapshot")
         for step in self.steps:
             if step.connector_family in _NON_CONNECTOR_FAMILIES:
-                if step.binding_id is not None or step.binding_configuration_revision is not None:
+                if (
+                    step.binding_id is not None
+                    or step.binding_configuration_revision is not None
+                    or step.connector_timeout_seconds is not None
+                ):
                     raise ValueError("non-connector plan steps cannot retain bindings")
             elif (
                 step.binding_id is None
                 or step.binding_configuration_revision != step.configuration_revision
+                or step.connector_timeout_seconds is None
             ):
                 raise ValueError("external plan steps require the routed effective binding")
         writes = tuple(step for step in self.steps if step.effect is Effect.WRITE)
@@ -435,6 +450,7 @@ class _OperationSnapshot:
     request_schema_id: str
     request_redaction_fields: tuple[str, ...]
     idempotency_support: str
+    default_timeout_seconds: int
     enabled: bool
     disabled_reason: str | None
     request_type: type[BaseModel]
@@ -541,6 +557,9 @@ class EffectAwarePlanner:
                 request_schema_id=operation.request_schema_id if operation else None,
                 request_redaction_fields=(operation.request_redaction_fields if operation else ()),
                 idempotency_support=capability.idempotency_support,
+                connector_timeout_seconds=(
+                    operation.default_timeout_seconds if operation else None
+                ),
                 approval_policy_id=template.approval_policy_id,
                 approval_required_roles=(
                     tuple(sorted(approval_policy.required_roles)) if approval_policy else ()
@@ -991,6 +1010,14 @@ class EffectAwarePlanner:
                 raise EffectPlanningError(
                     "invalid_operation", "operation idempotency support is invalid"
                 )
+            if (
+                not isinstance(metadata.default_timeout_seconds, int)
+                or isinstance(metadata.default_timeout_seconds, bool)
+                or not 1 <= metadata.default_timeout_seconds <= 120
+            ):
+                raise EffectPlanningError(
+                    "invalid_operation", "operation timeout must be from 1 through 120 seconds"
+                )
             redaction_fields = tuple(metadata.request_redaction_fields)
             if len(redaction_fields) != len(set(redaction_fields)) or any(
                 not field.startswith("/") or field == "/" or "//" in field or "*" in field
@@ -1018,6 +1045,7 @@ class EffectAwarePlanner:
                 request_schema_id=metadata.request_schema_id,
                 request_redaction_fields=redaction_fields,
                 idempotency_support=metadata.idempotency_support,
+                default_timeout_seconds=metadata.default_timeout_seconds,
                 enabled=metadata.enabled,
                 disabled_reason=metadata.disabled_reason,
                 request_type=source.request_type,
@@ -1095,6 +1123,7 @@ def _effect_plan_hash(
                 "request_schema_id": step.request_schema_id,
                 "request_redaction_fields": list(step.request_redaction_fields),
                 "idempotency_support": step.idempotency_support,
+                "connector_timeout_seconds": step.connector_timeout_seconds,
                 "approval_policy": {
                     "id": step.approval_policy_id,
                     "required_roles": list(step.approval_required_roles),

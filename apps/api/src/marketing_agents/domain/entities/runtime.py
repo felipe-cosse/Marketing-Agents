@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from marketing_agents.domain.data_classification import DataClassification
-from marketing_agents.domain.enums import Effect, ExternalActionState, RunState, StepState
+from marketing_agents.domain.enums import Effect, RunState, StepState
 
 from ._validation import (
     frozen_mapping,
@@ -121,21 +121,3 @@ class Artifact:
             raise ValueError("artifact cannot be its own parent")
         require_utc(self.created_at, "artifact creation time")
         object.__setattr__(self, "payload", frozen_mapping(self.payload))
-
-
-@dataclass(frozen=True, slots=True)
-class ExternalAction:
-    id: str
-    run_id: str
-    step_id: str
-    action_hash: str
-    idempotency_key: str
-    connector_binding_id: str
-    state: ExternalActionState
-    created_at: datetime
-
-    def __post_init__(self) -> None:
-        for field_name in ("id", "run_id", "step_id", "idempotency_key", "connector_binding_id"):
-            require_id(getattr(self, field_name), field_name)
-        require_digest(self.action_hash, "external action hash")
-        require_utc(self.created_at, "external action creation time")

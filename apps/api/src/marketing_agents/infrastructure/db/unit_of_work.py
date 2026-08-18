@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from marketing_agents.application.ports.repositories import (
     AuditRepository,
+    ConnectorReceiptRepository,
+    ExternalActionRepository,
     RunRepository,
     WorkRepository,
 )
@@ -25,6 +27,8 @@ class RepositoryBundle:
     works: WorkRepository
     runs: RunRepository
     audits: AuditRepository
+    external_actions: ExternalActionRepository | None = None
+    connector_receipts: ConnectorReceiptRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,12 +36,20 @@ class SQLAlchemyRepositoryFactories:
     works: Callable[[AsyncSession], WorkRepository]
     runs: Callable[[AsyncSession], RunRepository]
     audits: Callable[[AsyncSession], AuditRepository]
+    external_actions: Callable[[AsyncSession], ExternalActionRepository] | None = None
+    connector_receipts: Callable[[AsyncSession], ConnectorReceiptRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
             works=self.works(session),
             runs=self.runs(session),
             audits=self.audits(session),
+            external_actions=(
+                None if self.external_actions is None else self.external_actions(session)
+            ),
+            connector_receipts=(
+                None if self.connector_receipts is None else self.connector_receipts(session)
+            ),
         )
 
 
@@ -76,6 +88,20 @@ class SQLAlchemyUnitOfWork:
     @property
     def audits(self) -> AuditRepository:
         return self._require_repositories().audits
+
+    @property
+    def external_actions(self) -> ExternalActionRepository:
+        repository = self._require_repositories().external_actions
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("external action repository is not configured")
+        return repository
+
+    @property
+    def connector_receipts(self) -> ConnectorReceiptRepository:
+        repository = self._require_repositories().connector_receipts
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("connector receipt repository is not configured")
+        return repository
 
     async def __aenter__(self) -> SQLAlchemyUnitOfWork:
         if self._session is not None:

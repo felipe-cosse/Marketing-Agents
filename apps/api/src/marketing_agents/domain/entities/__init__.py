@@ -10,10 +10,21 @@ from .catalog import (
     TriggerDefinition,
 )
 from .control import ApprovalDecision, ApprovalRequest, AuditEvent, Schedule, ScheduleOccurrence
-from .runtime import Artifact, ExternalAction, Run, RunStep
+from .external_action import (
+    MAX_DELIVERY_ATTEMPTS,
+    ActionReservationSnapshot,
+    ConnectorActionReceipt,
+    DeliveryContractSnapshot,
+    DispatchLease,
+    ExternalAction,
+    ExternalActionResultSnapshot,
+)
+from .runtime import Artifact, Run, RunStep
 from .work import CampaignBrief, WorkItem
 
 __all__ = [
+    "MAX_DELIVERY_ATTEMPTS",
+    "ActionReservationSnapshot",
     "AgentInstance",
     "AgentTemplate",
     "ApprovalDecision",
@@ -22,8 +33,12 @@ __all__ = [
     "Artifact",
     "AuditEvent",
     "CampaignBrief",
+    "ConnectorActionReceipt",
+    "DeliveryContractSnapshot",
     "Department",
+    "DispatchLease",
     "ExternalAction",
+    "ExternalActionResultSnapshot",
     "FunctionTeam",
     "Run",
     "RunStep",

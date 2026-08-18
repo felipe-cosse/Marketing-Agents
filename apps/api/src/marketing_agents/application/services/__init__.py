@@ -1,5 +1,18 @@
 """Framework-independent application services."""
 
+from .external_action_dispatcher import (
+    DispatchDisposition,
+    ExternalActionDispatcher,
+    ExternalActionDispatchError,
+    ExternalActionDispatchResult,
+)
+from .external_action_registration import (
+    ExternalActionRegistrationDisposition,
+    ExternalActionRegistrationError,
+    ExternalActionRegistrationService,
+    RegisteredExternalAction,
+    RegisteredExternalActionSet,
+)
 from .incoming_work_validation import (
     CampaignBriefPolicy,
     CampaignBriefRevision,
@@ -28,10 +41,19 @@ __all__ = [
     "CampaignBriefPolicy",
     "CampaignBriefRevision",
     "ConfiguredIncomingTrigger",
+    "DispatchDisposition",
+    "ExternalActionDispatchError",
+    "ExternalActionDispatchResult",
+    "ExternalActionDispatcher",
+    "ExternalActionRegistrationDisposition",
+    "ExternalActionRegistrationError",
+    "ExternalActionRegistrationService",
     "IncomingWorkValidationError",
     "IncomingWorkValidator",
     "ReceiveRunRequest",
     "ReceiveRunResult",
+    "RegisteredExternalAction",
+    "RegisteredExternalActionSet",
     "RunLifecycleService",
     "RunLifecycleServiceError",
     "ValidatedIncomingWork",

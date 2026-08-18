@@ -53,6 +53,7 @@ class ExternalActionState(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
     OUTCOME_UNKNOWN = "outcome_unknown"
 
 
