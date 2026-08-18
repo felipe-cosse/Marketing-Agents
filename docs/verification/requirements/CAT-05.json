@@ -1,0 +1,68 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-05",
+  "matrix_statement_sha256": "ec9b743ed4d96132b42e922d14bedb6194be2df4f7cd13fc44af627022aa4690",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/v1/templates/blog-seo.yaml",
+      "catalog/v1/instances/blog-seo.yaml",
+      "catalog/v1/prompts/tpl.blog-seo.*",
+      "catalog/v1/schemas/tpl.blog-seo.*/**",
+      "tests/catalog/test_cat_05_blog_seo.py",
+      "docs/verification/requirements/CAT-05.json",
+      "docs/verification/requirements/CAT-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/templates/blog-seo.yaml",
+          "catalog/v1/instances/blog-seo.yaml",
+          "catalog/v1/prompts/tpl.blog-seo.*",
+          "catalog/v1/schemas/tpl.blog-seo.*/**"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_05_blog_seo.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-blog-seo-inventory",
+      "type": "contract",
+      "statement": "All six source-named Blog and SEO roles preserve the exact three-and-three function split, purposes, and stable single instances.",
+      "test_refs": ["tests/catalog/test_cat_05_blog_seo.py::test_cat_05_exact_blog_seo_inventory_and_distribution"]
+    },
+    {
+      "id": "upload-remains-inert",
+      "type": "negative_control",
+      "statement": "Blog preparation and tracking remain read-only artifacts with bounded schemas and no publish or CMS upload capability.",
+      "test_refs": ["tests/catalog/test_cat_05_blog_seo.py::test_cat_05_assets_compile_and_upload_stays_inert"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-05-blog-seo-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_05_blog_seo.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-blog-seo-inventory", "upload-remains-inert"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/v1/templates/blog-seo.yaml",
+      "catalog/v1/instances/blog-seo.yaml",
+      "catalog/v1/prompts/tpl.blog-seo.*",
+      "catalog/v1/schemas/tpl.blog-seo.*/**"
+    ],
+    "gate_id": "cat-05-blog-seo-tests"
+  },
+  "limitations": [
+    "This complete department slice stays unlisted until CAT-01 activates the authoritative all-department catalog manifest."
+  ]
+}
