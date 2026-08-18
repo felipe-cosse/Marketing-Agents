@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "source_post": "https://www.linkedin.com/feed/update/urn:li:activity:7332020052650586114/",
+  "captured_at": "2026-08-17",
+  "authority": {
+    "authoritative": [
+      "department hierarchy",
+      "function hierarchy",
+      "role display names",
+      "role intent stated in IMPLEMENTATION_PROMPT.md",
+      "Community role-card multiplicity"
+    ],
+    "non_authoritative": [
+      "small logos and icons",
+      "hidden workflows",
+      "credentials",
+      "exact third-party integrations",
+      "reasons for duplicated Community cards"
+    ],
+    "conflict_rule": "IMPLEMENTATION_PROMPT.md is the normalized textual authority when frame text and the prompt differ.",
+    "implementation_rule": "Vendor bindings, trigger bindings, schedules, and duplicate explanations require explicit local configuration or a later source-backed change."
+  },
+  "community_duplicates": {
+    "template_count": 7,
+    "instance_count": 14,
+    "identity_rule": "Each template has ordinal instances .01 and .02.",
+    "business_reason": null,
+    "variant_label": null
+  },
+  "assets": [
+    {
+      "path": "references/linkedin-ai-agents-org-chart-overview.png",
+      "subject": "complete organization",
+      "sha256": "1c3ec95be438853b021a3b5d6f88676da274a607bc6e5dd995c0033f6f3b413e"
+    },
+    {
+      "path": "references/linkedin-ai-agents-org-chart-social-media.png",
+      "subject": "Social media department",
+      "sha256": "72434a813a4be2dad5a961e563dc4213530bb5a48940a900ce1a62f2415ff1dc"
+    },
+    {
+      "path": "references/linkedin-ai-agents-org-chart-blog-seo.png",
+      "subject": "Blog & SEO department",
+      "sha256": "565c57f97d1cf1eac04b31ad634e5b8cedffc6fcf52a515402feb4364fe258e3"
+    },
+    {
+      "path": "references/linkedin-ai-agents-org-chart-email.png",
+      "subject": "Email department",
+      "sha256": "f377a6d1435041bff05a92a0a3d36ada3ea893f603d916b58db3a8d926a38933"
+    },
+    {
+      "path": "references/linkedin-ai-agents-org-chart-community.png",
+      "subject": "Community department",
+      "sha256": "e86c3501131ed4172fb9626fc2ff172108d78d90d82af12bb15b7d85ea87859a"
+    },
+    {
+      "path": "references/linkedin-ai-agents-org-chart-partnerships.png",
+      "subject": "Partnerships department",
+      "sha256": "0b9c3bd17ee0d7b9d263bfcf60d681eaba630fabddd136b2768421032366392a"
+    }
+  ]
+}
