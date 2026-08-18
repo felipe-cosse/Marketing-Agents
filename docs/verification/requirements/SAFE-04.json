@@ -1,0 +1,59 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-04",
+  "matrix_statement_sha256": "f9afae6eaf32ffb2d231fdbe6cf6ec815e32c2cf34038fbdbe728ddc4b33f57b",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/security/content_trust.py",
+      "tests/security/test_safe_04_untrusted_content.py",
+      "docs/verification/requirements/SAFE-04.json",
+      "docs/verification/requirements/SAFE-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": ["apps/api/src/marketing_agents/security/content_trust.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_04_untrusted_content.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "external-content-is-inert",
+      "type": "positive",
+      "statement": "External text is represented only by an immutable untrusted part with a source kind and provenance identifiers.",
+      "test_refs": ["tests/security/test_safe_04_untrusted_content.py::test_safe_04_injection_text_is_preserved_only_as_untrusted_data"]
+    },
+    {
+      "id": "control-authority-rejected",
+      "type": "negative_control",
+      "statement": "External callers cannot relabel content as trusted or attach capabilities, destinations, or approval authority.",
+      "test_refs": [
+        "tests/security/test_safe_04_untrusted_content.py::test_safe_04_external_callers_cannot_attach_control_authority",
+        "tests/security/test_safe_04_untrusted_content.py::test_safe_04_every_catalog_prompt_declares_external_content_untrusted"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-04-content-trust-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_04_untrusted_content.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["external-content-is-inert", "control-authority-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/security/content_trust.py"],
+    "gate_id": "safe-04-content-trust-tests"
+  },
+  "limitations": []
+}
