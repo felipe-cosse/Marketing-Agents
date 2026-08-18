@@ -23,7 +23,7 @@ Allowed status values:
 | SRC-01 | Inspect repository guidance and all six local frames. | 00 | Evidence inventory and `docs/assumptions.md` | Evidence checklist/manual review | planned |
 | SRC-02 | Treat hierarchy/names/role intent as authoritative; do not infer hidden integrations/duplicate reasons. | 00, 02 | Source references, confidence, implementation notes | Catalog source-note/duplicate tests | verified |
 | SRC-03 | Record material assumptions. | 00, 15 | `docs/assumptions.md`, ADRs | Documentation review | verified |
-| OBJ-01 | Represent the exact five-department organization. | 02 | Compiled catalog | Exact-count/distribution tests | planned |
+| OBJ-01 | Represent the exact five-department organization. | 02 | Compiled catalog | Exact-count/distribution tests | verified |
 | OBJ-02 | Display an interactive source-modeled org chart. | 12 | Org chart canvas/tree | Component + Playwright hierarchy tests | planned |
 | OBJ-03 | Safely configure, simulate, approve, and audit work. | 05, 06, 09, 12, 13 | Application services/APIs/UI | Cross-layer acceptance | planned |
 | OBJ-04 | Run locally without cloud credentials or real external calls. | 01, 10, 14, 15 | Mock defaults, Compose | No-network + clean-state tests | planned |
