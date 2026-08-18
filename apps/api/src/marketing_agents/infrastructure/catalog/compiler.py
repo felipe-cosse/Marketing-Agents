@@ -30,6 +30,7 @@ from .models import (
     ToolCapabilityRecord,
 )
 from .references import reject_remote_or_escaped_refs
+from .semantics import marketing_v1_multiplicity_issues
 
 ID_PATTERNS = {
     "department": re.compile(r"^dept\.[a-z0-9]+(?:-[a-z0-9]+)*$"),
@@ -436,6 +437,8 @@ def compile_catalog(
         department_counts,
         issues,
     )
+    if contract is MARKETING_AGENTS_V1_CONTRACT:
+        issues.extend(marketing_v1_multiplicity_issues(templates, instances))
     if issues:
         raise CatalogCompilationError(tuple(issues))
 
