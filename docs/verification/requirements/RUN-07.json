@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-07",
+  "matrix_statement_sha256": "231f8c6d0e83f8490d47dc996a4ada4f87805537fc5b1da7f2831ca35c94ed14",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "tests/unit/domain/test_run_07_exact_action_approval.py",
+      "docs/verification/requirements/RUN-07.json",
+      "docs/verification/requirements/RUN-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/domain/approval.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/domain/test_run_07_exact_action_approval.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "one-request-one-action",
+      "type": "contract",
+      "statement": "An approval request snapshots one action ID, exact action hash, logical authorization set, run, step, template, instance, type, capability, binding, redacted destination, policy, requester, and finite expiry.",
+      "test_refs": ["tests/unit/domain/test_run_07_exact_action_approval.py::test_run_07_request_snapshots_one_exact_action_with_finite_expiry"]
+    },
+    {
+      "id": "approval-cannot-transfer",
+      "type": "negative_control",
+      "statement": "An identical payload under another action ID and any scope, destination, capability, binding, schema, or payload change cannot reuse the request.",
+      "test_refs": [
+        "tests/unit/domain/test_run_07_exact_action_approval.py::test_run_07_identical_payload_in_a_different_action_is_not_reusable",
+        "tests/unit/domain/test_run_07_exact_action_approval.py::test_run_07_any_action_scope_or_payload_change_breaks_binding",
+        "tests/unit/domain/test_run_07_exact_action_approval.py::test_run_07_unbounded_or_nonfinite_approval_expiry_is_rejected"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-07-exact-action-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/domain/test_run_07_exact_action_approval.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["one-request-one-action", "approval-cannot-transfer"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/domain/approval.py"],
+    "gate_id": "run-07-exact-action-tests"
+  },
+  "limitations": ["Actor decisions, atomic multi-action reservation, and persistence are separate later requirements."]
+}
