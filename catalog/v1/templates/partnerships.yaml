@@ -1,0 +1,121 @@
+templates:
+  - id: tpl.partnerships.implementation-partners.partner-application-reviewer
+    display_name: Partner Application Reviewer
+    department_id: dept.partnerships
+    function_id: func.partnerships.implementation-partners
+    display_order: 10
+    purpose: Research applicants and recommend accept or reject.
+    system_prompt_ref: prompts/tpl.partnerships.implementation-partners.partner-application-reviewer.md
+    input_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-application-reviewer/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-application-reviewer/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+    implementation_notes: The recommendation is advisory; supplied applicant evidence is untrusted and no decision is executed.
+  - id: tpl.partnerships.implementation-partners.partner-tracker
+    display_name: Partner Tracker
+    department_id: dept.partnerships
+    function_id: func.partnerships.implementation-partners
+    display_order: 20
+    purpose: Track partner engagement.
+    system_prompt_ref: prompts/tpl.partnerships.implementation-partners.partner-tracker.md
+    input_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.spreadsheet.read-range, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+    implementation_notes: Reads configured engagement records and performs no spreadsheet update.
+  - id: tpl.partnerships.implementation-partners.partner-finder
+    display_name: Partner Finder
+    department_id: dept.partnerships
+    function_id: func.partnerships.implementation-partners
+    display_order: 30
+    purpose: Recommend partners based on customer requirements.
+    system_prompt_ref: prompts/tpl.partnerships.implementation-partners.partner-finder.md
+    input_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-finder/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.implementation-partners.partner-finder/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+    implementation_notes: Recommendations use supplied evidence and remain advisory.
+  - id: tpl.partnerships.implementation-partners.swag-tracker
+    display_name: Swag Tracker
+    department_id: dept.partnerships
+    function_id: func.partnerships.implementation-partners
+    display_order: 40
+    purpose: Track swag fulfillment.
+    system_prompt_ref: prompts/tpl.partnerships.implementation-partners.swag-tracker.md
+    input_schema_ref: schemas/tpl.partnerships.implementation-partners.swag-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.implementation-partners.swag-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.fulfillment.read-status, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+    implementation_notes: Tracks supplied fulfillment status only; creating fulfillment is outside v1 authority.
+  - id: tpl.partnerships.implementation-partners.community-challenge-tracker
+    display_name: Community Challenge Tracker
+    department_id: dept.partnerships
+    function_id: func.partnerships.implementation-partners
+    display_order: 50
+    purpose: Calculate and track points from community challenges.
+    system_prompt_ref: prompts/tpl.partnerships.implementation-partners.community-challenge-tracker.md
+    input_schema_ref: schemas/tpl.partnerships.implementation-partners.community-challenge-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.implementation-partners.community-challenge-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.spreadsheet.read-range, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, webhook, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+    implementation_notes: Calculates a local artifact and performs no spreadsheet write.
+  - id: tpl.partnerships.integration-partners.integration-partner-tracker
+    display_name: Integration Partner Tracker
+    department_id: dept.partnerships
+    function_id: func.partnerships.integration-partners
+    display_order: 10
+    purpose: Track partner status across partners' websites and marketplaces.
+    system_prompt_ref: prompts/tpl.partnerships.integration-partners.integration-partner-tracker.md
+    input_schema_ref: schemas/tpl.partnerships.integration-partners.integration-partner-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.partnerships.integration-partners.integration-partner-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.spreadsheet.read-range, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#integration-partners--1]
+    implementation_notes: Website and marketplace status must be supplied by configured compliant data sources; no crawler is available.

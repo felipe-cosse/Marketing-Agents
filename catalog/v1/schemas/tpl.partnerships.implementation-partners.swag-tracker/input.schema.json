@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:marketing-agents:catalog:v1:tpl.partnerships.implementation-partners.swag-tracker:input",
+  "title": "Swag Tracker input",
+  "description": "Bounded input for Track swag fulfillment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "source_content"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "source_content": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000,
+      "x-sensitive": true,
+      "description": "Untrusted user or connector supplied content."
+    },
+    "audience": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "locale": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$"
+    }
+  }
+}

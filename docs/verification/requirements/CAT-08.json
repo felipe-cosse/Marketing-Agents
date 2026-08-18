@@ -1,0 +1,68 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-08",
+  "matrix_statement_sha256": "a8852704ca9e172a3a175360469d3d7be2e3f42dd6500615d2408caf25a20344",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/v1/templates/partnerships.yaml",
+      "catalog/v1/instances/partnerships.yaml",
+      "catalog/v1/prompts/tpl.partnerships.*",
+      "catalog/v1/schemas/tpl.partnerships.*/**",
+      "tests/catalog/test_cat_08_partnerships.py",
+      "docs/verification/requirements/CAT-08.json",
+      "docs/verification/requirements/CAT-08.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/templates/partnerships.yaml",
+          "catalog/v1/instances/partnerships.yaml",
+          "catalog/v1/prompts/tpl.partnerships.*",
+          "catalog/v1/schemas/tpl.partnerships.*/**"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_08_partnerships.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-partnership-inventory",
+      "type": "contract",
+      "statement": "All six source-named Partnerships roles preserve the five-and-one function split, exact purposes, and stable single instances.",
+      "test_refs": ["tests/catalog/test_cat_08_partnerships.py::test_cat_08_exact_partnerships_inventory_and_distribution"]
+    },
+    {
+      "id": "advisory-no-scraping",
+      "type": "negative_control",
+      "statement": "Partnership review and tracking stay advisory or read-only without fulfillment creation, spreadsheet writes, crawlers, browsers, or generic HTTP authority.",
+      "test_refs": ["tests/catalog/test_cat_08_partnerships.py::test_cat_08_has_no_write_or_scraping_authority"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-08-partnerships-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_08_partnerships.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-partnership-inventory", "advisory-no-scraping"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/v1/templates/partnerships.yaml",
+      "catalog/v1/instances/partnerships.yaml",
+      "catalog/v1/prompts/tpl.partnerships.*",
+      "catalog/v1/schemas/tpl.partnerships.*/**"
+    ],
+    "gate_id": "cat-08-partnerships-tests"
+  },
+  "limitations": [
+    "This complete department slice stays unlisted until CAT-01 activates the authoritative all-department catalog manifest."
+  ]
+}
