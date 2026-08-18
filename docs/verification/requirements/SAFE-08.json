@@ -1,0 +1,62 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-08",
+  "matrix_statement_sha256": "79dfc9a2cc8e48908e56943ac17c9229616e59e2f11ee5be11989f2bad13e5a9",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/provenance.py",
+      "tests/unit/domain/test_safe_08_artifact_provenance.py",
+      "docs/verification/requirements/SAFE-08.json",
+      "docs/verification/requirements/SAFE-08.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": ["apps/api/src/marketing_agents/domain/provenance.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/domain/test_safe_08_artifact_provenance.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "immutable-complete-provenance",
+      "type": "contract",
+      "statement": "Artifacts retain immutable work, run, step, workflow, template, instance, catalog, configuration, source, parent, provider, schema, time, and sensitivity lineage.",
+      "test_refs": [
+        "tests/unit/domain/test_safe_08_artifact_provenance.py::test_safe_08_child_artifact_retains_parent_and_source_lineage",
+        "tests/unit/domain/test_safe_08_artifact_provenance.py::test_safe_08_sensitive_source_classification_propagates"
+      ]
+    },
+    {
+      "id": "payload-lineage-drift-detected",
+      "type": "negative_control",
+      "statement": "Canonical payload hashing detects mutation, while missing or inconsistent lineage, invalid hashes, naive timestamps, and classification downgrades fail construction.",
+      "test_refs": [
+        "tests/unit/domain/test_safe_08_artifact_provenance.py::test_safe_08_equivalent_payloads_hash_identically_and_mutation_is_detected",
+        "tests/unit/domain/test_safe_08_artifact_provenance.py::test_safe_08_missing_duplicate_self_parent_hash_and_time_fail"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-08-provenance-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/domain/test_safe_08_artifact_provenance.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["immutable-complete-provenance", "payload-lineage-drift-detected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/domain/provenance.py"],
+    "gate_id": "safe-08-provenance-tests"
+  },
+  "limitations": []
+}
