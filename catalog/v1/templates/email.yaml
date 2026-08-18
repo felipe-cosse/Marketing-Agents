@@ -1,0 +1,101 @@
+templates:
+  - id: tpl.email.newsletter.newsletter-subscriber
+    display_name: Newsletter Subscriber
+    department_id: dept.email
+    function_id: func.email.newsletter
+    display_order: 10
+    purpose: Add new website signups to the configured newsletter system; the source chart names Loops.
+    system_prompt_ref: prompts/tpl.email.newsletter.newsletter-subscriber.md
+    input_schema_ref: schemas/tpl.email.newsletter.newsletter-subscriber/input.schema.json
+    output_schema_ref: schemas/tpl.email.newsletter.newsletter-subscriber/output.schema.json
+    allowed_tool_capability_ids: [cap.newsletter.subscribe]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 0, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#newsletter--2]
+    implementation_notes: Loops is preserved only as source-chart evidence; the connector binding is configurable and write execution requires exact approval.
+  - id: tpl.email.newsletter.unsubscribe-assistant
+    display_name: Unsubscribe Assistant
+    department_id: dept.email
+    function_id: func.email.newsletter
+    display_order: 20
+    purpose: Handle unsubscribe requests safely.
+    system_prompt_ref: prompts/tpl.email.newsletter.unsubscribe-assistant.md
+    input_schema_ref: schemas/tpl.email.newsletter.unsubscribe-assistant/input.schema.json
+    output_schema_ref: schemas/tpl.email.newsletter.unsubscribe-assistant/output.schema.json
+    allowed_tool_capability_ids: [cap.newsletter.unsubscribe]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 0, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#newsletter--2]
+    implementation_notes: The exact address, destination list, and operation remain inert until independently approved.
+  - id: tpl.email.lifecycle-marketing.customer-onboarder
+    display_name: Customer Onboarder
+    department_id: dept.email
+    function_id: func.email.lifecycle-marketing
+    display_order: 10
+    purpose: Add new users to the configured CRM and prepare a welcome message.
+    system_prompt_ref: prompts/tpl.email.lifecycle-marketing.customer-onboarder.md
+    input_schema_ref: schemas/tpl.email.lifecycle-marketing.customer-onboarder/input.schema.json
+    output_schema_ref: schemas/tpl.email.lifecycle-marketing.customer-onboarder/output.schema.json
+    allowed_tool_capability_ids: [cap.crm.upsert-contact, cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#lifecycle-marketing--3]
+    implementation_notes: CRM upsert requires approval; the welcome message is a draft and email send is not assigned.
+  - id: tpl.email.lifecycle-marketing.new-customer-tracker
+    display_name: New Customer Tracker
+    department_id: dept.email
+    function_id: func.email.lifecycle-marketing
+    display_order: 20
+    purpose: Track new customers and highlight interesting cases.
+    system_prompt_ref: prompts/tpl.email.lifecycle-marketing.new-customer-tracker.md
+    input_schema_ref: schemas/tpl.email.lifecycle-marketing.new-customer-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.email.lifecycle-marketing.new-customer-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.crm.read-customer, cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#lifecycle-marketing--3]
+    implementation_notes: Highlights are advisory and must minimize personal data.
+  - id: tpl.email.lifecycle-marketing.churned-user-monitor
+    display_name: Churned User Monitor
+    department_id: dept.email
+    function_id: func.email.lifecycle-marketing
+    display_order: 30
+    purpose: Identify churned users and prepare a check-in draft.
+    system_prompt_ref: prompts/tpl.email.lifecycle-marketing.churned-user-monitor.md
+    input_schema_ref: schemas/tpl.email.lifecycle-marketing.churned-user-monitor/input.schema.json
+    output_schema_ref: schemas/tpl.email.lifecycle-marketing.churned-user-monitor/output.schema.json
+    allowed_tool_capability_ids: [cap.crm.read-customer, cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#lifecycle-marketing--3]
+    implementation_notes: Churn classification remains advisory and the check-in is never sent automatically.

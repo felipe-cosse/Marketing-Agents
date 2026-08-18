@@ -1,0 +1,68 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-06",
+  "matrix_statement_sha256": "11eb667c0d131f67895f17b95f7a6955a15eb46d4e6ab7c14a9fc305018fd0dd",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/v1/templates/email.yaml",
+      "catalog/v1/instances/email.yaml",
+      "catalog/v1/prompts/tpl.email.*",
+      "catalog/v1/schemas/tpl.email.*/**",
+      "tests/catalog/test_cat_06_email.py",
+      "docs/verification/requirements/CAT-06.json",
+      "docs/verification/requirements/CAT-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/templates/email.yaml",
+          "catalog/v1/instances/email.yaml",
+          "catalog/v1/prompts/tpl.email.*",
+          "catalog/v1/schemas/tpl.email.*/**"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_06_email.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-email-inventory",
+      "type": "contract",
+      "statement": "All five source-named Email roles preserve the exact two-and-three function split, source purposes, and stable single instances.",
+      "test_refs": ["tests/catalog/test_cat_06_email.py::test_cat_06_exact_email_inventory_and_distribution"]
+    },
+    {
+      "id": "email-write-boundary",
+      "type": "negative_control",
+      "statement": "Subscribe, unsubscribe, and CRM upsert roles are mutating and approval-bound while welcome and churn messages cannot send email.",
+      "test_refs": ["tests/catalog/test_cat_06_email.py::test_cat_06_write_roles_require_human_approval"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-06-email-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_06_email.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-email-inventory", "email-write-boundary"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/v1/templates/email.yaml",
+      "catalog/v1/instances/email.yaml",
+      "catalog/v1/prompts/tpl.email.*",
+      "catalog/v1/schemas/tpl.email.*/**"
+    ],
+    "gate_id": "cat-06-email-tests"
+  },
+  "limitations": [
+    "This complete department slice stays unlisted until CAT-01 activates the authoritative all-department catalog manifest."
+  ]
+}
