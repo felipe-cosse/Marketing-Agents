@@ -1,0 +1,59 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-01",
+  "matrix_statement_sha256": "808bb0d07be4e5532c7bc91f5bfab85aacc70d25526f14099d621ea6422f0b7f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/organization.py",
+      "tests/unit/application/test_obj_01_five_department_organization.py",
+      "docs/verification/requirements/OBJ-01.json",
+      "docs/verification/requirements/OBJ-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/application/organization.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/test_obj_01_five_department_organization.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-organization-projection",
+      "type": "contract",
+      "statement": "The immutable organization read model resolves the exact ordered five departments and their 12 functions, 36 templates, and 43 instances.",
+      "test_refs": ["tests/unit/application/test_obj_01_five_department_organization.py::test_obj_01_projection_preserves_exact_five_department_organization"]
+    },
+    {
+      "id": "hierarchy-drift-rejected",
+      "type": "negative_control",
+      "statement": "The projection rejects orphaned hierarchy references and derives deployment names from their shared role template.",
+      "test_refs": [
+        "tests/unit/application/test_obj_01_five_department_organization.py::test_obj_01_projection_is_immutable_and_resolves_instance_names_from_templates",
+        "tests/unit/application/test_obj_01_five_department_organization.py::test_obj_01_unknown_hierarchy_reference_fails_closed"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-01-organization-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/application/test_obj_01_five_department_organization.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-organization-projection", "hierarchy-drift-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/application/organization.py"],
+    "gate_id": "obj-01-organization-tests"
+  },
+  "limitations": []
+}
