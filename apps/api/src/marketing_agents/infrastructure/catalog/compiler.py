@@ -30,7 +30,11 @@ from .models import (
     ToolCapabilityRecord,
 )
 from .references import reject_remote_or_escaped_refs
-from .semantics import marketing_v1_multiplicity_issues
+from .semantics import (
+    instance_field_ownership_issues,
+    marketing_v1_identity_issues,
+    marketing_v1_multiplicity_issues,
+)
 
 ID_PATTERNS = {
     "department": re.compile(r"^dept\.[a-z0-9]+(?:-[a-z0-9]+)*$"),
@@ -138,6 +142,8 @@ def _load_record_group[ModelT: BaseModel](
                 source_path=relative,
             )
             continue
+        if wrapper_key == "instances":
+            issues.extend(instance_field_ownership_issues(records, relative))
         for index, record in enumerate(records):
             before = len(issues)
             _structural_validate(schema_root, schema_name, record, relative, issues)
@@ -439,6 +445,7 @@ def compile_catalog(
     )
     if contract is MARKETING_AGENTS_V1_CONTRACT:
         issues.extend(marketing_v1_multiplicity_issues(templates, instances))
+        issues.extend(marketing_v1_identity_issues(templates, instances))
     if issues:
         raise CatalogCompilationError(tuple(issues))
 

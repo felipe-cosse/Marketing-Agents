@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-03",
+  "matrix_statement_sha256": "2dbf92186353c54166e0bfc827385da4bf105158a165b71ab9bbb28effd71fd3",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_cat_03_stable_instance_identities.py",
+      "docs/verification/requirements/CAT-03.json",
+      "docs/verification/requirements/CAT-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_03_stable_instance_identities.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "stable-unique-instance-ids",
+      "type": "contract",
+      "statement": "All 43 deployment IDs are globally unique, derive from one referenced template, and carry a matching source ordinal.",
+      "test_refs": ["tests/catalog/test_cat_03_stable_instance_identities.py::test_cat_03_all_43_instance_ids_are_unique_derived_and_source_ordinal_only"]
+    },
+    {
+      "id": "no-invented-instance-purpose",
+      "type": "negative_control",
+      "statement": "Instance documents reject copied template-owned role definitions and any source-unbacked business variant label.",
+      "test_refs": ["tests/catalog/test_cat_03_stable_instance_identities.py::test_cat_03_template_owned_fields_are_rejected_from_instances"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-03-identity-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_03_stable_instance_identities.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["stable-unique-instance-ids", "no-invented-instance-purpose"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "cat-03-identity-tests"
+  },
+  "limitations": []
+}
