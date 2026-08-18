@@ -44,7 +44,7 @@ Allowed status values:
 |---|---|---|---|---|---|
 | ARCH-01 | Use Python 3.12/FastAPI/Pydantic/SQLAlchemy/Alembic when greenfield. | 01 | Backend workspace | Toolchain/build checks | verified |
 | ARCH-02 | Use React/TypeScript/Vite and accessible graph/tree. | 01, 12 | Web workspace/chart | Build/a11y/browser tests | planned |
-| ARCH-03 | SQLite default and configurable PostgreSQL URL without domain redesign. | 04 | DB config/repositories | SQLite suite + optional PostgreSQL job | planned |
+| ARCH-03 | SQLite default and configurable PostgreSQL URL without domain redesign. | 04 | DB config/repositories | SQLite suite + optional PostgreSQL job | verified |
 | ARCH-04 | Version-controlled validated YAML/JSON catalog. | 02 | `catalog/` + JSON Schema compiler | Catalog suite | implemented |
 | ARCH-05 | Framework-independent orchestration core. | 03, 05 | Domain/application layers | Import-boundary tests | verified |
 | ARCH-06 | `LLMProvider`, default deterministic mock, opt-in real provider. | 10 | Provider port/registry | Provider contracts/settings tests | verified |
