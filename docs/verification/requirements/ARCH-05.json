@@ -1,0 +1,72 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-05",
+  "matrix_statement_sha256": "5ff3aa97f954281894e385b0b1e2e0c9cfb627f5480593bb4cd38bfca993ff88",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/clock.py",
+      "apps/api/src/marketing_agents/application/ports/id_generator.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/orchestration/**",
+      "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+      "docs/verification/requirements/ARCH-05.json",
+      "docs/verification/requirements/ARCH-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+          "apps/api/src/marketing_agents/application/orchestration/**"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/architecture/test_arch_05_framework_boundaries.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "inward-typed-orchestration-ports",
+      "type": "contract",
+      "statement": "Orchestration receives UTC time, namespaced IDs, domain repositories, and transaction boundaries only through framework-neutral typed ports.",
+      "test_refs": ["tests/unit/architecture/test_arch_05_framework_boundaries.py::test_arch_05_orchestration_dependencies_run_with_in_memory_fakes"]
+    },
+    {
+      "id": "framework-imports-rejected",
+      "type": "negative_control",
+      "statement": "Domain and application code contain no FastAPI, SQLAlchemy, Alembic, Uvicorn, infrastructure, adapter, API, or worker imports; malformed injected primitives fail at the core boundary.",
+      "test_refs": [
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py::test_arch_05_domain_and_application_have_no_framework_or_outward_imports",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py::test_arch_05_invalid_clock_id_and_namespace_fail_at_the_core_boundary"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-05-boundary-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/architecture/test_arch_05_framework_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["inward-typed-orchestration-ports", "framework-imports-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/clock.py",
+      "apps/api/src/marketing_agents/application/ports/id_generator.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/orchestration/**"
+    ],
+    "gate_id": "arch-05-boundary-tests"
+  },
+  "limitations": []
+}
