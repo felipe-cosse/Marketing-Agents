@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-02",
+  "matrix_statement_sha256": "0d79357e933ff1d8542f63269ef3dec338ff7410b49cf2fa5d8a1d543a93d6b8",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/canonical_json.py",
+      "apps/api/src/marketing_agents/domain/action_hash.py",
+      "apps/api/src/marketing_agents/application/policies/write_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/connectors.py",
+      "tests/security/test_safe_02_external_write_authorization.py",
+      "docs/verification/requirements/SAFE-02.json",
+      "docs/verification/requirements/SAFE-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/policies/write_authorization.py",
+          "apps/api/src/marketing_agents/application/ports/connectors.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_02_external_write_authorization.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "sealed-exact-write-proof",
+      "type": "contract",
+      "statement": "A mutating connector accepts only a sealed proof matching the immutable action, authorization set, capability, binding, hash, and idempotency key.",
+      "test_refs": [
+        "tests/security/test_safe_02_external_write_authorization.py::test_safe_02_exact_reserved_action_produces_one_connector_call",
+        "tests/security/test_safe_02_external_write_authorization.py::test_safe_02_authorized_write_cannot_be_forged_and_catalog_writes_are_guarded"
+      ]
+    },
+    {
+      "id": "unapproved-writes-have-zero-calls",
+      "type": "negative_control",
+      "statement": "Publish, send, enroll, unsubscribe, CRM, CMS, messaging, and fulfillment mutations have zero connector calls without an exact reserved proof; tampering or scope mismatch fails.",
+      "test_refs": [
+        "tests/security/test_safe_02_external_write_authorization.py::test_safe_02_mutation_families_have_zero_calls_without_exact_proof",
+        "tests/security/test_safe_02_external_write_authorization.py::test_safe_02_tampering_any_canonical_action_field_invalidates_approval",
+        "tests/security/test_safe_02_external_write_authorization.py::test_safe_02_reservation_scope_mismatch_fails_closed"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-02-write-authorization-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_02_external_write_authorization.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["sealed-exact-write-proof", "unapproved-writes-have-zero-calls"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/canonical_json.py",
+      "apps/api/src/marketing_agents/domain/action_hash.py",
+      "apps/api/src/marketing_agents/application/policies/write_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/connectors.py"
+    ],
+    "gate_id": "safe-02-write-authorization-tests"
+  },
+  "limitations": ["Atomic database consumption of a complete approval set is implemented by the later approval repository/service branch; this guard consumes only its reserved snapshot."]
+}
