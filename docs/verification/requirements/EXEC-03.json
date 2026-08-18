@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-03",
+  "matrix_statement_sha256": "ace99bff3615d0d55f4b25f7e10ffd73d180702eec59c47a9b03eae92f3dc4ce",
+  "evidence_class": "process_gate",
+  "scope": {
+    "allowed_path_globs": [
+      ".github/workflows/ci.yml",
+      "Makefile",
+      "scripts/verify_ci_order.py",
+      "tests/tooling/test_exec_03_catalog_first_ci.py",
+      "docs/verification/requirements/EXEC-03.json",
+      "docs/verification/requirements/EXEC-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          ".github/workflows/ci.yml",
+          "scripts/verify_ci_order.py",
+          "Makefile"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/tooling/test_exec_03_catalog_first_ci.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "catalog-first-ci-dependency",
+      "type": "contract",
+      "statement": "CI acquires pinned dependencies, verifies the hash-pinned catalog, and runs all catalog tests before backend or governance jobs can start.",
+      "test_refs": ["tests/tooling/test_exec_03_catalog_first_ci.py::test_exec_03_repository_ci_enforces_catalog_first"]
+    },
+    {
+      "id": "ci-order-bypass-rejected",
+      "type": "negative_control",
+      "statement": "Missing catalog dependencies, missing release verification, duplicated commands, and reordered catalog gates fail the CI policy verifier.",
+      "test_refs": ["tests/tooling/test_exec_03_catalog_first_ci.py::test_exec_03_missing_catalog_dependency_is_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-03-order-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/tooling/test_exec_03_catalog_first_ci.py"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["catalog-first-ci-dependency", "ci-order-bypass-rejected"]
+    },
+    {
+      "id": "exec-03-order-command",
+      "runner": "argv",
+      "argv": ["make", "verify-ci-order"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["catalog-first-ci-dependency"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      ".github/workflows/ci.yml",
+      "Makefile",
+      "scripts/verify_ci_order.py"
+    ],
+    "gate_id": "exec-03-order-tests"
+  },
+  "limitations": [
+    "CI dependency acquisition may use the package registry; catalog compilation and tests themselves use no provider or connector network access."
+  ]
+}

@@ -5,7 +5,7 @@ export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling verify-backend verify-catalog-release verify-source verify-history verify-requirement verify-governance
+.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -49,6 +49,9 @@ catalog-validate:
 
 verify-catalog-release:
 	$(UV) run python scripts/verify_catalog_release.py
+
+verify-ci-order:
+	$(UV) run python scripts/verify_ci_order.py
 
 test-network:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.network.test_safe_11_network_isolation
