@@ -125,7 +125,7 @@ Allowed status values:
 | SAFE-04 | External content is untrusted, not executable instructions. | 05, 10, 13 | Trust-separated requests | Injection tests | verified |
 | SAFE-05 | Separate system instructions/retrieved/tool content. | 10, 13 | `LLMRequest` fields | Provider contract tests | verified |
 | SAFE-06 | Enforce allowlists, schemas, URL/content/rate/time bounds. | 02, 05, 13 | Validators/policies | Boundary/security tests | verified |
-| SAFE-07 | Minimize/redact PII and configure retention. | 04, 13 | Redactor/retention | Canary/retention tests | planned |
+| SAFE-07 | Minimize/redact PII and configure retention. | 04, 13 | Redactor/retention | Canary/retention tests | verified |
 | SAFE-08 | Preserve artifact provenance. | 03, 05, 11 | Artifact/provenance model | Provenance tests | planned |
 | SAFE-09 | Partner/churn outputs remain advisory. | 02, 11, 12 | Schemas/UI labels | Demo/UI tests | planned |
 | SAFE-10 | Never commit secrets; safe `.env.example`. | 01, 13, 15 | Config/ignore/CI scan | Secret scan/settings tests | verified |
