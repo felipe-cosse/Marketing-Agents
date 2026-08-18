@@ -44,6 +44,82 @@ INSTANCE_TEMPLATE_OWNED_FIELDS = frozenset(
 )
 
 
+def template_core_issues(
+    templates: Sequence[AgentTemplateRecord], prompts: Mapping[str, str]
+) -> tuple[CatalogIssue, ...]:
+    """Validate stable hierarchy identity and the local instructions for every role template."""
+
+    issues: list[CatalogIssue] = []
+    sibling_orders: Counter[tuple[str, int]] = Counter(
+        (template.function_id, template.display_order) for template in templates
+    )
+    for (function_id, display_order), count in sorted(sibling_orders.items()):
+        if count > 1:
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-display-order-collision",
+                    f"display order {display_order} appears {count} times in one function",
+                    function_id,
+                )
+            )
+    for template in templates:
+        department_slug = template.department_id.removeprefix("dept.")
+        function_prefix = f"func.{department_slug}."
+        function_slug = template.function_id.removeprefix(function_prefix)
+        expected_prefix = f"tpl.{department_slug}.{function_slug}."
+        if not template.function_id.startswith(function_prefix) or not template.id.startswith(
+            expected_prefix
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-hierarchy-identity",
+                    "template ID must derive from its department and function namespaces",
+                    template.id,
+                )
+            )
+        if (
+            not template.display_name.strip()
+            or template.display_name != template.display_name.strip()
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-display-name",
+                    "template display name must be nonempty and trimmed",
+                    template.id,
+                )
+            )
+        if not template.purpose.strip() or template.purpose != template.purpose.strip():
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-purpose",
+                    "template purpose must be nonempty and trimmed",
+                    template.id,
+                )
+            )
+        prompt = prompts.get(template.id, "")
+        if not prompt.startswith(f"# {template.display_name}\n") or (
+            f"Purpose: {template.purpose}" not in prompt
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "template-instructions-identity",
+                    "local instructions must identify the exact template name and purpose",
+                    template.id,
+                )
+            )
+    return tuple(sorted(issues))
+
+
 def instance_field_ownership_issues(
     records: Sequence[Mapping[str, Any]], source_path: str
 ) -> tuple[CatalogIssue, ...]:
