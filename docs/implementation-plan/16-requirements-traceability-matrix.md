@@ -47,7 +47,7 @@ Allowed status values:
 | ARCH-03 | SQLite default and configurable PostgreSQL URL without domain redesign. | 04 | DB config/repositories | SQLite suite + optional PostgreSQL job | planned |
 | ARCH-04 | Version-controlled validated YAML/JSON catalog. | 02 | `catalog/` + JSON Schema compiler | Catalog suite | implemented |
 | ARCH-05 | Framework-independent orchestration core. | 03, 05 | Domain/application layers | Import-boundary tests | verified |
-| ARCH-06 | `LLMProvider`, default deterministic mock, opt-in real provider. | 10 | Provider port/registry | Provider contracts/settings tests | planned |
+| ARCH-06 | `LLMProvider`, default deterministic mock, opt-in real provider. | 10 | Provider port/registry | Provider contracts/settings tests | verified |
 | ARCH-07 | Typed connector interfaces/mocks for all eight families. | 10 | Connector ports/mocks | Connector contract matrix | planned |
 | ARCH-08 | Domain/runtime/adapters/API/UI/tests visibly separated. | 01, 17 | Monorepo layout | Architecture test/review | planned |
 | ORCH-01 | Visible root remains Marketing Agents; orchestrator is not instance 44. | 00, 12 | Hierarchy/control-plane badge | Count/UI assertions | planned |

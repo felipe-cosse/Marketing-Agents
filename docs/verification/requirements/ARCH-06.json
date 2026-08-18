@@ -1,0 +1,80 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-06",
+  "matrix_statement_sha256": "e153fc0ac20591224f77e1073aaf67c3a0581a9d0645ab359fe76b9e01ab8fa7",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/adapters/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/**",
+      "tests/contract/test_arch_06_llm_provider.py",
+      "docs/verification/requirements/ARCH-06.json",
+      "docs/verification/requirements/ARCH-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/infrastructure/adapters/llm/**"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/contract/test_arch_06_llm_provider.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-deterministic-mock",
+      "type": "contract",
+      "statement": "Default composition selects an offline deterministic provider whose immutable registry requires an exact template and output-schema pair and whose stable result excludes volatile run metadata.",
+      "test_refs": [
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_default_factory_is_offline_deterministic_and_exact_keyed",
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_duplicate_renderers_and_network_capable_imports_are_rejected"
+      ]
+    },
+    {
+      "id": "independent-structured-validation",
+      "type": "negative_control",
+      "statement": "Mock and registered real responses are independently checked against the requested JSON Schema, central byte and depth limits, request token budget, and selected provider identity.",
+      "test_refs": [
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_mock_output_is_independently_schema_and_bounds_validated",
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_real_errors_propagate_without_mock_fallback_and_outputs_are_checked"
+      ]
+    },
+    {
+      "id": "explicit-real-provider-only",
+      "type": "negative_control",
+      "statement": "A real provider requires external-network and real-provider opt-ins, a credential, and an exact case-sensitive registered factory; missing configuration and factory failures never fall back to mock mode.",
+      "test_refs": [
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_real_provider_requires_all_settings_and_exact_registered_factory",
+        "tests/contract/test_arch_06_llm_provider.py::test_arch_06_real_errors_propagate_without_mock_fallback_and_outputs_are_checked"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-06-provider-contracts",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/contract/test_arch_06_llm_provider.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "exact-deterministic-mock",
+        "independent-structured-validation",
+        "explicit-real-provider-only"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/**"
+    ],
+    "gate_id": "arch-06-provider-contracts"
+  },
+  "limitations": [
+    "No vendor SDK is shipped by this requirement; future real adapters must be separately implemented and explicitly registered."
+  ]
+}
