@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "inspected_at": "2026-08-18",
+  "repository_root": ".",
+  "initial_state": "greenfield: implementation prompt and six reference frames; no application stack",
+  "required_prompt": "IMPLEMENTATION_PROMPT.md",
+  "reference_index": "catalog/source-evidence.json",
+  "guidance_names_checked": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    ".cursorrules",
+    ".agents",
+    ".codex"
+  ],
+  "repository_guidance_files_found": [],
+  "session_guidance": "User- and environment-provided instructions remain authoritative even when no repository guidance file exists.",
+  "inspected_subjects": [
+    "repository guidance",
+    "implementation prompt",
+    "overview frame",
+    "Social media frame",
+    "Blog & SEO frame",
+    "Email frame",
+    "Community frame",
+    "Partnerships frame"
+  ]
+}
