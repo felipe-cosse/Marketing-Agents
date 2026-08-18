@@ -1,0 +1,72 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-02",
+  "matrix_statement_sha256": "5c1d941e126e7e616e173052c8b287ffb1a6d80be0028e3ae917f2e717070242",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "catalog/v1/release.lock.json",
+      "scripts/verify_catalog_release.py",
+      "tests/catalog/test_del_02_validated_catalog_release.py",
+      "docs/verification/requirements/DEL-02.json",
+      "docs/verification/requirements/DEL-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/release.lock.json",
+          "scripts/verify_catalog_release.py",
+          "Makefile"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_del_02_validated_catalog_release.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "hash-pinned-catalog-deliverable",
+      "type": "contract",
+      "statement": "The shipped catalog release lock matches the compiled 5/12/36/43 semantic projection, department distribution, content version, and content hash.",
+      "test_refs": ["tests/catalog/test_del_02_validated_catalog_release.py::test_del_02_release_lock_matches_authoritative_catalog"]
+    },
+    {
+      "id": "catalog-release-tamper-detected",
+      "type": "negative_control",
+      "statement": "Changed hashes, changed counts, unsupported lock versions, and unknown release-lock fields fail the deliverable verification command.",
+      "test_refs": ["tests/catalog/test_del_02_validated_catalog_release.py::test_del_02_hash_or_count_tampering_fails_closed"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-02-release-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_del_02_validated_catalog_release.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["hash-pinned-catalog-deliverable", "catalog-release-tamper-detected"]
+    },
+    {
+      "id": "del-02-release-command",
+      "runner": "argv",
+      "argv": ["make", "verify-catalog-release"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["hash-pinned-catalog-deliverable"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "Makefile",
+      "catalog/v1/release.lock.json",
+      "scripts/verify_catalog_release.py"
+    ],
+    "gate_id": "del-02-release-tests"
+  },
+  "limitations": []
+}
