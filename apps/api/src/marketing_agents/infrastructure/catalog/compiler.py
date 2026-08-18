@@ -31,6 +31,7 @@ from .models import (
 )
 from .references import reject_remote_or_escaped_refs
 from .semantics import (
+    capability_source_policy_issues,
     deployment_configuration_issues,
     instance_field_ownership_issues,
     marketing_v1_identity_issues,
@@ -448,6 +449,7 @@ def compile_catalog(
         issues,
     )
     if contract is MARKETING_AGENTS_V1_CONTRACT:
+        issues.extend(capability_source_policy_issues(capabilities))
         issues.extend(template_core_issues(templates, prompts))
         issues.extend(template_io_schema_issues(templates, input_schemas, output_schemas))
         issues.extend(template_runtime_policy_issues(templates, capabilities, policies))
