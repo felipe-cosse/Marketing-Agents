@@ -1,0 +1,241 @@
+templates:
+  - id: tpl.social-media.new-content.linkedin-post-drafter
+    display_name: LinkedIn Post Drafter
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 10
+    purpose: Draft new posts from content ideas.
+    system_prompt_ref: prompts/tpl.social-media.new-content.linkedin-post-drafter.md
+    input_schema_ref: schemas/tpl.social-media.new-content.linkedin-post-drafter/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.linkedin-post-drafter/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Produces an inert draft and has no publish capability.
+  - id: tpl.social-media.new-content.linkedin-comment-replier
+    display_name: LinkedIn Comment Replier
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 20
+    purpose: Draft replies to LinkedIn comments.
+    system_prompt_ref: prompts/tpl.social-media.new-content.linkedin-comment-replier.md
+    input_schema_ref: schemas/tpl.social-media.new-content.linkedin-comment-replier/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.linkedin-comment-replier/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-comments]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Replies remain drafts; webhook is an implementation trigger, not source evidence of an integration.
+  - id: tpl.social-media.new-content.youtube-description-generator
+    display_name: YouTube Description Generator
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 30
+    purpose: Generate a description and chapters from a transcript.
+    system_prompt_ref: prompts/tpl.social-media.new-content.youtube-description-generator.md
+    input_schema_ref: schemas/tpl.social-media.new-content.youtube-description-generator/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.youtube-description-generator/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Uses supplied transcripts and creates no remote video mutation.
+  - id: tpl.social-media.new-content.youtube-script-generator
+    display_name: YouTube Script Generator
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 40
+    purpose: Generate a script based on a topic and previous videos.
+    system_prompt_ref: prompts/tpl.social-media.new-content.youtube-script-generator.md
+    input_schema_ref: schemas/tpl.social-media.new-content.youtube-script-generator/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.youtube-script-generator/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Previous-video material must be supplied explicitly and is treated as untrusted content.
+  - id: tpl.social-media.new-content.linkedin-post-writer-new-youtube-videos
+    display_name: LinkedIn Post Writer for New YouTube Videos
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 50
+    purpose: Prepare a LinkedIn post for every new video.
+    system_prompt_ref: prompts/tpl.social-media.new-content.linkedin-post-writer-new-youtube-videos.md
+    input_schema_ref: schemas/tpl.social-media.new-content.linkedin-post-writer-new-youtube-videos/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.linkedin-post-writer-new-youtube-videos/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Produces a draft only; it cannot publish to LinkedIn.
+  - id: tpl.social-media.new-content.tweet-writer-new-youtube-videos
+    display_name: Tweet Writer for New YouTube Videos
+    department_id: dept.social-media
+    function_id: func.social-media.new-content
+    display_order: 60
+    purpose: Prepare an X post for every new video.
+    system_prompt_ref: prompts/tpl.social-media.new-content.tweet-writer-new-youtube-videos.md
+    input_schema_ref: schemas/tpl.social-media.new-content.tweet-writer-new-youtube-videos/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.new-content.tweet-writer-new-youtube-videos/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+    implementation_notes: Produces a draft only; X is a display-purpose reference, not a connector binding.
+  - id: tpl.social-media.research.linkedin-lead-enricher
+    display_name: LinkedIn Lead Enricher
+    department_id: dept.social-media
+    function_id: func.social-media.research
+    display_order: 10
+    purpose: Enrich leads based on comments and draft replies.
+    system_prompt_ref: prompts/tpl.social-media.research.linkedin-lead-enricher.md
+    input_schema_ref: schemas/tpl.social-media.research.linkedin-lead-enricher/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.research.linkedin-lead-enricher/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-comments, cap.social.read-profiles]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#research--2]
+    implementation_notes: Advisory enrichment is bounded to explicitly supplied or configured data; no unofficial scraping.
+  - id: tpl.social-media.research.linkedin-influencer-post-researcher
+    display_name: LinkedIn Influencer Post Researcher
+    department_id: dept.social-media
+    function_id: func.social-media.research
+    display_order: 20
+    purpose: Look up and report on recent influencer posts.
+    system_prompt_ref: prompts/tpl.social-media.research.linkedin-influencer-post-researcher.md
+    input_schema_ref: schemas/tpl.social-media.research.linkedin-influencer-post-researcher/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.research.linkedin-influencer-post-researcher/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-posts]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#research--2]
+    implementation_notes: Reads only supplied fixtures or an explicitly configured compliant adapter.
+  - id: tpl.social-media.tracking-analysis.linkedin-post-tracker
+    display_name: LinkedIn Post Tracker
+    department_id: dept.social-media
+    function_id: func.social-media.tracking-analysis
+    display_order: 10
+    purpose: Analyze company posts and write a daily report.
+    system_prompt_ref: prompts/tpl.social-media.tracking-analysis.linkedin-post-tracker.md
+    input_schema_ref: schemas/tpl.social-media.tracking-analysis.linkedin-post-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.tracking-analysis.linkedin-post-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-posts, cap.social.read-metrics]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
+    implementation_notes: Produces an internal report artifact and performs no social write.
+  - id: tpl.social-media.tracking-analysis.linkedin-comment-helper
+    display_name: LinkedIn Comment Helper
+    department_id: dept.social-media
+    function_id: func.social-media.tracking-analysis
+    display_order: 20
+    purpose: Track replies to comments and identify leads.
+    system_prompt_ref: prompts/tpl.social-media.tracking-analysis.linkedin-comment-helper.md
+    input_schema_ref: schemas/tpl.social-media.tracking-analysis.linkedin-comment-helper/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.tracking-analysis.linkedin-comment-helper/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-comments]
+    supported_trigger_types: [manual, webhook, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
+    implementation_notes: Lead identification is advisory and does not create CRM records.
+  - id: tpl.social-media.tracking-analysis.tweet-tracker
+    display_name: Tweet Tracker
+    department_id: dept.social-media
+    function_id: func.social-media.tracking-analysis
+    display_order: 30
+    purpose: Analyze company posts and write a monthly report.
+    system_prompt_ref: prompts/tpl.social-media.tracking-analysis.tweet-tracker.md
+    input_schema_ref: schemas/tpl.social-media.tracking-analysis.tweet-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.tracking-analysis.tweet-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-posts, cap.social.read-metrics]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
+    implementation_notes: Produces an internal report from supplied metrics.
+  - id: tpl.social-media.tracking-analysis.bluesky-monitor
+    display_name: Bluesky Monitor
+    department_id: dept.social-media
+    function_id: func.social-media.tracking-analysis
+    display_order: 40
+    purpose: Track new mentions, followers, and posts.
+    system_prompt_ref: prompts/tpl.social-media.tracking-analysis.bluesky-monitor.md
+    input_schema_ref: schemas/tpl.social-media.tracking-analysis.bluesky-monitor/input.schema.json
+    output_schema_ref: schemas/tpl.social-media.tracking-analysis.bluesky-monitor/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.social.read-posts, cap.social.read-metrics]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
+    implementation_notes: The provider name preserves the source role; connector access remains an explicit later binding.

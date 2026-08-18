@@ -1,0 +1,72 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-04",
+  "matrix_statement_sha256": "200d580974bf1c55440cf330fa7dcf703121636f62bba5928857767793542d1e",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "scripts/generate_catalog_assets.py",
+      "catalog/v1/source-evidence.md",
+      "catalog/v1/templates/social-media.yaml",
+      "catalog/v1/instances/social-media.yaml",
+      "catalog/v1/prompts/tpl.social-media.*",
+      "catalog/v1/schemas/tpl.social-media.*/**",
+      "tests/catalog/test_cat_04_social_media.py",
+      "docs/verification/requirements/CAT-04.json",
+      "docs/verification/requirements/CAT-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/templates/social-media.yaml",
+          "catalog/v1/instances/social-media.yaml",
+          "catalog/v1/prompts/tpl.social-media.*",
+          "catalog/v1/schemas/tpl.social-media.*/**"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_04_social_media.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-social-inventory",
+      "type": "contract",
+      "statement": "All twelve source-named Social roles preserve their exact function distribution, purpose, identity, and single deployment instance.",
+      "test_refs": ["tests/catalog/test_cat_04_social_media.py::test_cat_04_exact_social_inventory_and_function_distribution"]
+    },
+    {
+      "id": "bounded-social-assets",
+      "type": "negative_control",
+      "statement": "Every Social role has reproducible bounded schemas and inert trusted instructions with no external publish capability.",
+      "test_refs": ["tests/catalog/test_cat_04_social_media.py::test_cat_04_assets_are_bounded_schema_valid_and_reproducible"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-04-social-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_04_social_media.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-social-inventory", "bounded-social-assets"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "scripts/generate_catalog_assets.py",
+      "catalog/v1/source-evidence.md",
+      "catalog/v1/templates/social-media.yaml",
+      "catalog/v1/instances/social-media.yaml",
+      "catalog/v1/prompts/tpl.social-media.*",
+      "catalog/v1/schemas/tpl.social-media.*/**"
+    ],
+    "gate_id": "cat-04-social-tests"
+  },
+  "limitations": [
+    "This department slice remains intentionally absent from a production manifest until CAT-01 can activate the non-partial 5/12/36/43 contract."
+  ]
+}
