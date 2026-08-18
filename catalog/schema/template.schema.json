@@ -23,6 +23,7 @@
     "allowed_tool_capability_ids": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "^cap\\."}},
     "supported_trigger_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["manual", "webhook", "schedule"]}},
     "operation_classification": {"enum": ["read_only", "mutating"]},
+    "output_handling": {"enum": ["standard", "advisory"], "default": "standard"},
     "approval_policy_id": {"type": "string", "pattern": "^policy\\."},
     "retry_policy": {
       "type": "object", "additionalProperties": false, "required": ["max_attempts", "backoff"],

@@ -31,6 +31,7 @@ from .models import (
 )
 from .references import reject_remote_or_escaped_refs
 from .semantics import (
+    advisory_output_issues,
     capability_source_policy_issues,
     deployment_configuration_issues,
     instance_field_ownership_issues,
@@ -453,6 +454,7 @@ def compile_catalog(
         issues.extend(template_core_issues(templates, prompts))
         issues.extend(template_io_schema_issues(templates, input_schemas, output_schemas))
         issues.extend(template_runtime_policy_issues(templates, capabilities, policies))
+        issues.extend(advisory_output_issues(templates, capabilities, policies, output_schemas))
         issues.extend(deployment_configuration_issues(templates, instances, capabilities))
         issues.extend(marketing_v1_multiplicity_issues(templates, instances))
         issues.extend(marketing_v1_identity_issues(templates, instances))

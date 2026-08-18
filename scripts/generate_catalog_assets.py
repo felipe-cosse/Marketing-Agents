@@ -48,7 +48,8 @@ def _input_schema(template: dict[str, Any]) -> dict[str, Any]:
 
 
 def _output_schema(template: dict[str, Any]) -> dict[str, Any]:
-    return {
+    advisory = template.get("output_handling", "standard") == "advisory"
+    schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": _schema_id(template["id"], "output"),
         "title": f"{template['display_name']} output",
@@ -66,7 +67,7 @@ def _output_schema(template: dict[str, Any]) -> dict[str, Any]:
             "artifact": {"type": "string", "minLength": 1, "maxLength": 20000},
             "proposed_actions": {
                 "type": "array",
-                "maxItems": 4,
+                "maxItems": 0 if advisory else 4,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -93,9 +94,28 @@ def _output_schema(template: dict[str, Any]) -> dict[str, Any]:
             },
         },
     }
+    if advisory:
+        schema["required"].append("advisory")
+        schema["properties"]["advisory"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["status", "automated_decision", "external_action"],
+            "properties": {
+                "status": {"const": "advisory_only"},
+                "automated_decision": {"const": False},
+                "external_action": {"const": "none"},
+            },
+        }
+    return schema
 
 
 def _prompt(template: dict[str, Any]) -> str:
+    advisory_policy = (
+        "- This outcome is advisory only: never make an automated decision or propose an "
+        "external action.\n"
+        if template.get("output_handling", "standard") == "advisory"
+        else ""
+    )
     return (
         f"# {template['display_name']}\n\n"
         f"Purpose: {template['purpose']}\n\n"
@@ -107,6 +127,7 @@ def _prompt(template: dict[str, Any]) -> str:
         "- Never publish, send, enroll, unsubscribe, upload, or mutate an external system.\n"
         "- Proposed actions are inert data and require the runtime's independent policy "
         "and approval checks.\n"
+        f"{advisory_policy}"
         "- Minimize personal data and do not reproduce secrets or credentials.\n"
     )
 

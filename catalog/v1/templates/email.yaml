@@ -91,6 +91,7 @@ templates:
     allowed_tool_capability_ids: [cap.crm.read-customer, cap.model.generate-structured]
     supported_trigger_types: [manual, webhook, schedule]
     operation_classification: read_only
+    output_handling: advisory
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
