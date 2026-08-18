@@ -11,6 +11,19 @@ from .bindings import (
     WorkInputBinding,
 )
 from .dependencies import OrchestrationDependencies, OrchestrationDependencyError
+from .router import (
+    DeterministicInstanceRouter,
+    RoutingAssignment,
+    RoutingError,
+    RoutingInstanceSource,
+    RoutingInstanceVariantSource,
+    RoutingRequest,
+    RoutingResult,
+    RoutingSlot,
+    RoutingTemplateSource,
+    SelectedInstanceSnapshot,
+    WorkflowRoutingDefinition,
+)
 
 __all__ = [
     "ArtifactInputBinding",
@@ -18,9 +31,20 @@ __all__ = [
     "BindingError",
     "BoundArtifactReference",
     "BoundStepInput",
+    "DeterministicInstanceRouter",
     "OrchestrationDependencies",
     "OrchestrationDependencyError",
+    "RoutingAssignment",
+    "RoutingError",
+    "RoutingInstanceSource",
+    "RoutingInstanceVariantSource",
+    "RoutingRequest",
+    "RoutingResult",
+    "RoutingSlot",
+    "RoutingTemplateSource",
+    "SelectedInstanceSnapshot",
     "StepInputContract",
     "TypedInputBinder",
     "WorkInputBinding",
+    "WorkflowRoutingDefinition",
 ]

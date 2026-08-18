@@ -1,0 +1,100 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-04",
+  "matrix_statement_sha256": "42c8520b69df13aac536df3ad23de193692bc0515b260899fb8566fbf4bf46e2",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/__init__.py",
+      "apps/api/src/marketing_agents/application/orchestration/router.py",
+      "tests/unit/application/test_orch_04_deterministic_router.py",
+      "docs/verification/requirements/ORCH-04.json",
+      "docs/verification/requirements/ORCH-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/application/orchestration/router.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/test_orch_04_deterministic_router.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-minimum-instance-cover",
+      "type": "contract",
+      "statement": "Routing retains the enabled eligible explicit target and uses bounded exact set-cover dynamic programming to select the global minimum number of unique additional instances; one deployment may cover multiple required slots.",
+      "test_refs": [
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_real_community_01_covers_two_slots_and_02_is_excluded",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_exact_global_minimum_beats_greedy_template_priority",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_matches_bruteforce_oracle_for_small_cover_spaces",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_exact_dp_retains_partial_ties_that_later_reverse",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_enabled_eligible_target_is_retained_without_extra_slots",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_template_only_slot_needs_no_tool_capability"
+      ]
+    },
+    {
+      "id": "deterministic-priority-snapshots",
+      "type": "contract",
+      "statement": "Equal-cardinality covers use declared per-slot template priority followed by display order, source ordinal, and stable ID; results retain slot assignments, snapshotted configuration revisions, and a semantic hash independent of catalog input ordering.",
+      "test_refs": [
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_template_then_display_ordinal_and_stable_id_break_ties",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_tertiary_instance_tie_survives_later_priority_equalization",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_sources_are_snapshotted_and_semantic_hash_covers_trusted_inputs"
+      ]
+    },
+    {
+      "id": "fail-closed-pure-routing-boundary",
+      "type": "negative_control",
+      "statement": "The pure structural router accepts only explicit target and trigger metadata and rejects over-limit or ambiguous workflow definitions, catalog drift, unsupported target or trigger, and missing capability coverage without persistence, repository, provider, connector, payload, model, or chat inputs.",
+      "test_refs": [
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_rejects_ambiguous_or_over_limit_workflow_definitions",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_rejects_drift_unsupported_target_and_trigger",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_rejects_missing_capability_and_uncoverable_slot",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_rejects_ambiguous_or_structurally_drifted_catalog_sources",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_only_explicit_target_must_support_external_trigger",
+        "tests/unit/application/test_orch_04_deterministic_router.py::test_orch_04_request_and_module_exclude_untrusted_or_adapter_inputs"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-04-deterministic-routing",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_orch_04_deterministic_router.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "exact-minimum-instance-cover",
+        "deterministic-priority-snapshots",
+        "fail-closed-pure-routing-boundary"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/router.py"
+    ],
+    "gate_id": "orch-04-deterministic-routing"
+  },
+  "limitations": [
+    "ORCH-04 selects immutable instance snapshots only; graph materialization, plan persistence, execution, approvals, and general audit events remain owned by their dedicated requirements.",
+    "Workflow registration supplies trusted routing definitions; ORCH-04 validates their bounded structural references but does not implement the registry lifecycle.",
+    "ORCH-02 remains the authority for exact admitted trigger, source, target, catalog, and configuration-revision validation; planner integration must revalidate that sealed snapshot before invoking this router.",
+    "Effective connector-binding availability is rechecked during plan materialization and action proposal; template capability membership alone is not dispatch authorization."
+  ]
+}
