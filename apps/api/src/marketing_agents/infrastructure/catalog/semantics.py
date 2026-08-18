@@ -370,6 +370,76 @@ def template_runtime_policy_issues(
     return tuple(sorted(issues))
 
 
+def deployment_configuration_issues(
+    templates: Sequence[AgentTemplateRecord],
+    instances: Sequence[AgentInstanceRecord],
+    capabilities: Sequence[ToolCapabilityRecord],
+) -> tuple[CatalogIssue, ...]:
+    """Validate that instances add only bounded deployment bindings supported by a template."""
+
+    issues: list[CatalogIssue] = []
+    template_by_id = {item.id: item for item in templates}
+    capability_by_id = {item.id: item for item in capabilities}
+    for instance in instances:
+        template = template_by_id.get(instance.template_id)
+        if template is None:
+            continue
+        trigger_types = [item.type for item in instance.trigger_bindings]
+        if len(trigger_types) != len(set(trigger_types)):
+            issues.append(
+                CatalogIssue(
+                    "instances",
+                    "",
+                    "instance-trigger-duplicate",
+                    "an instance cannot bind the same trigger type more than once",
+                    instance.id,
+                )
+            )
+        unsupported = sorted(set(trigger_types) - set(template.supported_trigger_types))
+        if unsupported:
+            issues.append(
+                CatalogIssue(
+                    "instances",
+                    "",
+                    "instance-trigger-unsupported",
+                    "instance trigger bindings must be declared by the referenced template",
+                    instance.id,
+                )
+            )
+        enabled_schedule = any(
+            item.type == "schedule" and item.enabled for item in instance.trigger_bindings
+        )
+        if (instance.schedule is None) != (not enabled_schedule):
+            issues.append(
+                CatalogIssue(
+                    "instances",
+                    "",
+                    "instance-schedule-binding",
+                    "schedule configuration and one enabled schedule trigger must appear together",
+                    instance.id,
+                )
+            )
+        allowed_families = {
+            capability_by_id[identifier].connector_family
+            for identifier in template.allowed_tool_capability_ids
+            if identifier in capability_by_id
+        }
+        if any(
+            binding.connector_family not in allowed_families
+            for binding in instance.connector_bindings.values()
+        ):
+            issues.append(
+                CatalogIssue(
+                    "instances",
+                    "",
+                    "instance-connector-unsupported",
+                    "connector bindings must belong to a template-authorized capability family",
+                    instance.id,
+                )
+            )
+    return tuple(sorted(issues))
+
+
 def instance_field_ownership_issues(
     records: Sequence[Mapping[str, Any]], source_path: str
 ) -> tuple[CatalogIssue, ...]:
