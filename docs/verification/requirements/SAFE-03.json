@@ -1,0 +1,72 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-03",
+  "matrix_statement_sha256": "54a2dd77d5f0cffd3dcbb1144a714e9915d2cde574310fdec9b9f2f8b634672a",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/security/source_access.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "tests/security/test_safe_03_compliant_source_access.py",
+      "docs/verification/requirements/SAFE-03.json",
+      "docs/verification/requirements/SAFE-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/security/source_access.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_03_compliant_source_access.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "declared-compliant-sources",
+      "type": "contract",
+      "statement": "Sources are limited to supplied input, committed fixtures, or reviewed official APIs with explicit resource identifiers.",
+      "test_refs": [
+        "tests/security/test_safe_03_compliant_source_access.py::test_safe_03_supplied_inputs_and_committed_fixtures_are_offline_sources",
+        "tests/security/test_safe_03_compliant_source_access.py::test_safe_03_reviewed_official_api_requires_explicit_resource_ids"
+      ]
+    },
+    {
+      "id": "no-scraping-or-generic-fetch",
+      "type": "negative_control",
+      "statement": "Browser, crawler, scraper, unofficial API, generic HTTP, and reference-URL fetch authority fail in declarations and across the complete capability catalog.",
+      "test_refs": [
+        "tests/security/test_safe_03_compliant_source_access.py::test_safe_03_unofficial_and_generic_source_families_fail",
+        "tests/security/test_safe_03_compliant_source_access.py::test_safe_03_reference_urls_cannot_be_promoted_to_fetch_targets",
+        "tests/security/test_safe_03_compliant_source_access.py::test_safe_03_catalog_rejects_forbidden_families_even_when_unassigned"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-03-source-policy-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_03_compliant_source_access.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["declared-compliant-sources", "no-scraping-or-generic-fetch"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/security/source_access.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py"
+    ],
+    "gate_id": "safe-03-source-policy-tests"
+  },
+  "limitations": ["Any future real connector requires an implementation-specific legal/terms review outside this offline software control."]
+}

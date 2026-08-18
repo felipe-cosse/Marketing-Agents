@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from marketing_agents.security.source_access import FORBIDDEN_SOURCE_FAMILIES
+
 from .errors import CatalogIssue
 from .models import (
     AgentInstanceRecord,
@@ -47,6 +49,24 @@ INSTANCE_TEMPLATE_OWNED_FIELDS = frozenset(
         "implementation_notes",
     }
 )
+
+
+def capability_source_policy_issues(
+    capabilities: Sequence[ToolCapabilityRecord],
+) -> tuple[CatalogIssue, ...]:
+    """Reject forbidden source authority even when no template currently selects it."""
+
+    return tuple(
+        CatalogIssue(
+            "tool-capabilities.yaml",
+            "",
+            "capability-forbidden-source-family",
+            "generic HTTP, browser, crawler, scraper, and unofficial API families are forbidden",
+            capability.id,
+        )
+        for capability in capabilities
+        if capability.connector_family in FORBIDDEN_SOURCE_FAMILIES
+    )
 
 
 def template_core_issues(
@@ -260,7 +280,7 @@ def template_runtime_policy_issues(
     issues: list[CatalogIssue] = []
     capability_by_id = {item.id: item for item in capabilities}
     policy_by_id = {item.id: item for item in policies}
-    forbidden_families = {"browser", "generic-http", "shell", "sql"}
+    forbidden_families = FORBIDDEN_SOURCE_FAMILIES | {"shell", "sql"}
     for template in templates:
         selected = [
             capability_by_id[item]
