@@ -5,21 +5,21 @@ export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: bootstrap format format-check lint typecheck test test-backend test-network test-source test-tooling verify-backend verify-source verify-history verify-requirement verify-governance
+.PHONY: bootstrap format format-check lint typecheck test test-backend test-catalog-compiler test-network test-source test-tooling verify-backend verify-source verify-history verify-requirement verify-governance
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
 
 format:
-	$(UV) run ruff format apps/api/src tests/unit tests/integration
-	$(UV) run ruff check --fix apps/api/src tests/unit tests/integration
+	$(UV) run ruff format apps/api/src tests/unit tests/integration tests/catalog
+	$(UV) run ruff check --fix apps/api/src tests/unit tests/integration tests/catalog
 
 format-check:
 	git diff --check
-	$(UV) run ruff format --check apps/api/src tests/unit tests/integration
+	$(UV) run ruff format --check apps/api/src tests/unit tests/integration tests/catalog
 
 lint:
-	$(UV) run ruff check apps/api/src tests/unit tests/integration
+	$(UV) run ruff check apps/api/src tests/unit tests/integration tests/catalog
 
 typecheck:
 	$(UV) run mypy apps/api/src/marketing_agents
@@ -37,6 +37,9 @@ test-tooling:
 
 test-backend:
 	$(UV) run pytest -q
+
+test-catalog-compiler:
+	$(UV) run pytest -q tests/catalog/test_arch_04_catalog_compiler.py
 
 test-network:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.network.test_safe_11_network_isolation
