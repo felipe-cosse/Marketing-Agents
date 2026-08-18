@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -28,6 +28,9 @@ class Run:
     configuration_revision: int
     created_at: datetime
     version: int = 1
+    updated_at: datetime = field(kw_only=True)
+    approval_required: bool | None = field(default=None, kw_only=True)
+    terminal_reason_code: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         require_id(self.id, "run ID")
@@ -37,8 +40,43 @@ class Run:
         else:
             require_digest(self.catalog_hash, "catalog hash")
         require_utc(self.created_at, "run creation time")
+        require_utc(self.updated_at, "run update time")
+        if self.updated_at < self.created_at:
+            raise ValueError("run update time cannot precede creation")
         if self.configuration_revision < 1 or self.version < 1:
             raise ValueError("run revisions must be positive")
+        if (
+            self.state in {RunState.RECEIVED, RunState.VALIDATED}
+            and self.approval_required is not None
+        ):
+            raise ValueError("pre-plan run cannot have an approval disposition")
+        if (
+            self.state
+            in {
+                RunState.PLANNED,
+                RunState.AWAITING_APPROVAL,
+                RunState.EXECUTING,
+                RunState.COMPLETED,
+                RunState.REJECTED,
+            }
+            and self.approval_required is None
+        ):
+            raise ValueError("planned run must retain its approval disposition")
+        if (
+            self.state in {RunState.AWAITING_APPROVAL, RunState.REJECTED}
+            and not self.approval_required
+        ):
+            raise ValueError("approval states require a write-bearing plan")
+        terminal = self.state in {
+            RunState.COMPLETED,
+            RunState.FAILED,
+            RunState.REJECTED,
+            RunState.CANCELLED,
+        }
+        if terminal != (self.terminal_reason_code is not None):
+            raise ValueError("only terminal runs require a terminal reason code")
+        if self.terminal_reason_code is not None:
+            require_id(self.terminal_reason_code, "terminal reason code")
 
 
 @dataclass(frozen=True, slots=True)

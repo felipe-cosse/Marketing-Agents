@@ -1,0 +1,115 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-01",
+  "matrix_statement_sha256": "59e0dc626a0c95419452aafddbbc239ce11919e1ec417bd570f8a3d69e063cd6",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_run_01_run_lifecycle.py",
+      "tests/integration/db/test_run_01_lifecycle_persistence.py",
+      "docs/verification/requirements/RUN-01.json",
+      "docs/verification/requirements/RUN-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/run_lifecycle.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/domain/test_run_01_run_lifecycle.py",
+          "tests/integration/db/test_run_01_lifecycle_persistence.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "adr-0004-command-only-lifecycle",
+      "type": "contract",
+      "statement": "Every existing Run state and public lifecycle command pair is explicit: legal commands create one contiguous versioned transition, illegal or terminal commands fail closed with safe evidence, and no API accepts an arbitrary target state.",
+      "test_refs": [
+        "tests/unit/domain/test_run_01_run_lifecycle.py::test_run_01_every_state_command_pair_is_explicit",
+        "tests/unit/domain/test_run_01_run_lifecycle.py::test_run_01_read_only_path_is_contiguous_and_completes",
+        "tests/unit/domain/test_run_01_run_lifecycle.py::test_run_01_write_path_requires_exact_current_unexpired_approval",
+        "tests/unit/domain/test_run_01_run_lifecycle.py::test_run_01_failures_are_phase_bound_and_completion_is_fail_closed",
+        "tests/unit/domain/test_run_01_run_lifecycle.py::test_run_01_cancellation_reports_effects_only_after_execution_started"
+      ]
+    },
+    {
+      "id": "durable-ordered-primary-run",
+      "type": "positive",
+      "statement": "One primary Run and one valid initial receipt per admitted WorkItem survive concurrent receipt and process restart with append-only ordered history through a terminal state, while caller-owned rollback removes both WorkItem and initial Run receipt.",
+      "test_refs": [
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_lifecycle_survives_restart_with_ordered_terminal_history",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_work_and_initial_run_share_caller_transaction",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_repository_rejects_non_initial_transition_on_receipt",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_two_sessions_receive_one_primary_run_and_initial_transition"
+      ]
+    },
+    {
+      "id": "atomic-version-state-cas",
+      "type": "negative_control",
+      "statement": "Independent sessions competing on the same expected Run version and state admit exactly one transition; stale SQLite snapshots map to the same safe stale-CAS result, and a history-insert fault rolls back the primary Run update.",
+      "test_refs": [
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_two_sessions_allow_exactly_one_expected_version_transition",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_transition_insert_fault_rolls_back_primary_run_update"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-01-persisted-lifecycle",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/domain/test_run_01_run_lifecycle.py",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "adr-0004-command-only-lifecycle",
+        "durable-ordered-primary-run",
+        "atomic-version-state-cas"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py"
+    ],
+    "gate_id": "run-01-persisted-lifecycle"
+  },
+  "limitations": [
+    "ORCH-09 owns the general redacted audit-event repository and merged timeline; RUN-01 exposes accepted and rejected lifecycle evidence without claiming that broader audit implementation.",
+    "RUN-02 and RUN-03 retain ownership of end-to-end effect-aware plan release and cancellation coordination beyond the lifecycle invariants exercised here.",
+    "DEL-04 owns Alembic revisions and upgrade or downgrade verification for the data-bearing Run and transition tables."
+  ]
+}
