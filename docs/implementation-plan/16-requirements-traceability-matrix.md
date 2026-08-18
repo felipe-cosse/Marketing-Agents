@@ -54,7 +54,7 @@ Allowed status values:
 | ORCH-02 | Validate incoming work. | 05, 07 | Intake/planner | Schema/intake tests | planned |
 | ORCH-03 | Construct explicit dependency graph. | 03, 05 | Workflow/DAG models | Graph/unit/runtime tests | verified |
 | ORCH-04 | Select only necessary instances. | 05 | Deterministic router | Selection tests/snapshots | planned |
-| ORCH-05 | Pass typed artifacts, not unbounded chat. | 03, 05 | Bindings/artifacts | Binding/provenance tests | planned |
+| ORCH-05 | Pass typed artifacts, not unbounded chat. | 03, 05 | Bindings/artifacts | Binding/provenance tests | verified |
 | ORCH-06 | Enforce budgets, timeouts, rate limits, retries, cancellation. | 03, 05 | Policies/executor | Boundary/failure tests | planned |
 | ORCH-07 | Deduplicate events and external actions. | 06, 07, 08 | Unique keys/receipts | Replay/crash/race tests | planned |
 | ORCH-08 | Pause at approval boundaries. | 06 | Approval/action service | Zero-call tests | planned |
