@@ -35,7 +35,7 @@ Allowed status values:
 | CAT-04 | Preserve every named Social media role and function/count. | 02 | Social media template/instance files | Function distribution/inventory test | verified |
 | CAT-05 | Preserve every named Blog & SEO role and function/count. | 02 | Blog & SEO files | Function distribution/inventory test | verified |
 | CAT-06 | Preserve every named Email role and function/count. | 02 | Email files | Function distribution/inventory test | verified |
-| CAT-07 | Preserve every named Community role twice. | 02 | Community files | Exact ordinal inventory test | planned |
+| CAT-07 | Preserve every named Community role twice. | 02 | Community files | Exact ordinal inventory test | verified |
 | CAT-08 | Preserve every named Partnerships role and function/count. | 02 | Partnerships files | Function distribution/inventory test | planned |
 
 ## Architecture, control plane, and domain
