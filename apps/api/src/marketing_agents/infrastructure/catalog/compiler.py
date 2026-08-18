@@ -36,6 +36,7 @@ from .semantics import (
     marketing_v1_multiplicity_issues,
     template_core_issues,
     template_io_schema_issues,
+    template_runtime_policy_issues,
 )
 
 ID_PATTERNS = {
@@ -448,6 +449,7 @@ def compile_catalog(
     if contract is MARKETING_AGENTS_V1_CONTRACT:
         issues.extend(template_core_issues(templates, prompts))
         issues.extend(template_io_schema_issues(templates, input_schemas, output_schemas))
+        issues.extend(template_runtime_policy_issues(templates, capabilities, policies))
         issues.extend(marketing_v1_multiplicity_issues(templates, instances))
         issues.extend(marketing_v1_identity_issues(templates, instances))
     if issues:
