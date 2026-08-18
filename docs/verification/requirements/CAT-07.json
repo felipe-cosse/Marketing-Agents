@@ -1,0 +1,68 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-07",
+  "matrix_statement_sha256": "079edd9509566a16ca098f834c2b346b4602a136f975dd5f051593a2aaab7325",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/v1/templates/community.yaml",
+      "catalog/v1/instances/community.yaml",
+      "catalog/v1/prompts/tpl.community.*",
+      "catalog/v1/schemas/tpl.community.*/**",
+      "tests/catalog/test_cat_07_community.py",
+      "docs/verification/requirements/CAT-07.json",
+      "docs/verification/requirements/CAT-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/templates/community.yaml",
+          "catalog/v1/instances/community.yaml",
+          "catalog/v1/prompts/tpl.community.*",
+          "catalog/v1/schemas/tpl.community.*/**"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_07_community.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "seven-source-roles",
+      "type": "contract",
+      "statement": "All seven source-named Community roles preserve the three-three-one function split and exact source purposes.",
+      "test_refs": ["tests/catalog/test_cat_07_community.py::test_cat_07_exact_community_role_inventory"]
+    },
+    {
+      "id": "fourteen-unexplained-deployments",
+      "type": "negative_control",
+      "statement": "Each Community template has exactly ordinal instances 01 and 02 with null labels and no duplicated template-owned fields or invented business variant.",
+      "test_refs": ["tests/catalog/test_cat_07_community.py::test_cat_07_every_template_has_two_ordinal_instances_without_invented_variant"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-07-community-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_cat_07_community.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["seven-source-roles", "fourteen-unexplained-deployments"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/v1/templates/community.yaml",
+      "catalog/v1/instances/community.yaml",
+      "catalog/v1/prompts/tpl.community.*",
+      "catalog/v1/schemas/tpl.community.*/**"
+    ],
+    "gate_id": "cat-07-community-tests"
+  },
+  "limitations": [
+    "This complete department slice stays unlisted until CAT-01 activates the authoritative all-department catalog manifest."
+  ]
+}

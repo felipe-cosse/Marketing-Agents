@@ -1,0 +1,141 @@
+templates:
+  - id: tpl.community.events.attendee-scheduler
+    display_name: Attendee Scheduler
+    department_id: dept.community
+    function_id: func.community.events
+    display_order: 10
+    purpose: Add new signups to live-event sessions.
+    system_prompt_ref: prompts/tpl.community.events.attendee-scheduler.md
+    input_schema_ref: schemas/tpl.community.events.attendee-scheduler/input.schema.json
+    output_schema_ref: schemas/tpl.community.events.attendee-scheduler/output.schema.json
+    allowed_tool_capability_ids: [cap.events.enroll-attendee]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 5, max_model_calls: 0, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#events--6]
+    implementation_notes: Enrollment is an external write and requires exact human approval.
+  - id: tpl.community.events.live-session-reminder
+    display_name: Live Session Reminder
+    department_id: dept.community
+    function_id: func.community.events
+    display_order: 20
+    purpose: Communicate with attendees about live events.
+    system_prompt_ref: prompts/tpl.community.events.live-session-reminder.md
+    input_schema_ref: schemas/tpl.community.events.live-session-reminder/input.schema.json
+    output_schema_ref: schemas/tpl.community.events.live-session-reminder/output.schema.json
+    allowed_tool_capability_ids: [cap.events.read-sessions, cap.model.generate-structured]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#events--6]
+    implementation_notes: Communication is a reminder draft in v1; no messaging send capability is assigned.
+  - id: tpl.community.events.event-stats-tracker
+    display_name: Event Stats Tracker
+    department_id: dept.community
+    function_id: func.community.events
+    display_order: 30
+    purpose: Report event signups and attendance to the team.
+    system_prompt_ref: prompts/tpl.community.events.event-stats-tracker.md
+    input_schema_ref: schemas/tpl.community.events.event-stats-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.community.events.event-stats-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.events.read-attendance, cap.model.generate-structured]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#events--6]
+    implementation_notes: Attendance data is minimized and the result is a local report artifact.
+  - id: tpl.community.education.course-cohort-onboarder
+    display_name: Course Cohort Onboarder
+    department_id: dept.community
+    function_id: func.community.education
+    display_order: 10
+    purpose: Add and welcome course participants.
+    system_prompt_ref: prompts/tpl.community.education.course-cohort-onboarder.md
+    input_schema_ref: schemas/tpl.community.education.course-cohort-onboarder/input.schema.json
+    output_schema_ref: schemas/tpl.community.education.course-cohort-onboarder/output.schema.json
+    allowed_tool_capability_ids: [cap.community.read-membership, cap.messaging.send-message]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#education--6]
+    implementation_notes: The exact welcome action remains inert until human approval.
+  - id: tpl.community.education.material-builder
+    display_name: Material Builder
+    department_id: dept.community
+    function_id: func.community.education
+    display_order: 20
+    purpose: Create, personalize, and share course materials.
+    system_prompt_ref: prompts/tpl.community.education.material-builder.md
+    input_schema_ref: schemas/tpl.community.education.material-builder/input.schema.json
+    output_schema_ref: schemas/tpl.community.education.material-builder/output.schema.json
+    allowed_tool_capability_ids: [cap.model.generate-structured, cap.messaging.share-material]
+    supported_trigger_types: [manual]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#education--6]
+    implementation_notes: Local material generation can precede approval, but sharing is an exact approval-bound action.
+  - id: tpl.community.education.course-progress-reminders
+    display_name: Course Progress Reminders
+    department_id: dept.community
+    function_id: func.community.education
+    display_order: 30
+    purpose: Check in with participants about progress.
+    system_prompt_ref: prompts/tpl.community.education.course-progress-reminders.md
+    input_schema_ref: schemas/tpl.community.education.course-progress-reminders/input.schema.json
+    output_schema_ref: schemas/tpl.community.education.course-progress-reminders/output.schema.json
+    allowed_tool_capability_ids: [cap.community.read-course-progress, cap.model.generate-structured, cap.messaging.send-message]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 7, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#education--6]
+    implementation_notes: Reading progress is bounded; each reminder message is a separately approved external action.
+  - id: tpl.community.discussion.new-member-onboarder
+    display_name: New Member Onboarder
+    department_id: dept.community
+    function_id: func.community.discussion
+    display_order: 10
+    purpose: Welcome new members to the Slack community.
+    system_prompt_ref: prompts/tpl.community.discussion.new-member-onboarder.md
+    input_schema_ref: schemas/tpl.community.discussion.new-member-onboarder/input.schema.json
+    output_schema_ref: schemas/tpl.community.discussion.new-member-onboarder/output.schema.json
+    allowed_tool_capability_ids: [cap.community.read-membership, cap.model.generate-structured, cap.messaging.send-message]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: mutating
+    approval_policy_id: policy.human-approval.external-write.v1
+    retry_policy: {max_attempts: 1, backoff: none}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 7, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#discussion--2]
+    implementation_notes: Slack preserves the source role wording; the configured messaging binding and exact message require approval.
