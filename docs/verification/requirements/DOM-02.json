@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DOM-02",
+  "matrix_statement_sha256": "3b7f9145391f91af78e4a95052d3c189b1f09626a14a2c318c1af38c8f97dc4f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "tests/catalog/test_dom_02_template_core_contract.py",
+      "docs/verification/requirements/DOM-02.json",
+      "docs/verification/requirements/DOM-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_dom_02_template_core_contract.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-template-core",
+      "type": "contract",
+      "statement": "All 36 templates have stable identity, display name, department, function, source purpose, and nonempty local instructions.",
+      "test_refs": ["tests/catalog/test_dom_02_template_core_contract.py::test_dom_02_all_36_templates_have_complete_core_fields"]
+    },
+    {
+      "id": "template-core-drift-rejected",
+      "type": "negative_control",
+      "statement": "Cross-hierarchy IDs, whitespace-only fields, instruction identity drift, and sibling display-order collisions fail compilation.",
+      "test_refs": ["tests/catalog/test_dom_02_template_core_contract.py::test_dom_02_name_purpose_and_instruction_drift_is_rejected"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "dom-02-template-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_dom_02_template_core_contract.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["complete-template-core", "template-core-drift-rejected"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py"
+    ],
+    "gate_id": "dom-02-template-tests"
+  },
+  "limitations": []
+}

@@ -34,6 +34,7 @@ from .semantics import (
     instance_field_ownership_issues,
     marketing_v1_identity_issues,
     marketing_v1_multiplicity_issues,
+    template_core_issues,
 )
 
 ID_PATTERNS = {
@@ -444,6 +445,7 @@ def compile_catalog(
         issues,
     )
     if contract is MARKETING_AGENTS_V1_CONTRACT:
+        issues.extend(template_core_issues(templates, prompts))
         issues.extend(marketing_v1_multiplicity_issues(templates, instances))
         issues.extend(marketing_v1_identity_issues(templates, instances))
     if issues:
