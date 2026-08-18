@@ -1,0 +1,11 @@
+approval_policies:
+  - id: policy.no-approval.read-only.v1
+    kind: none
+    required_roles: []
+    expiry_seconds: 3600
+    allow_self_approval: false
+  - id: policy.human-approval.external-write.v1
+    kind: human_external_write
+    required_roles: [approver]
+    expiry_seconds: 1800
+    allow_self_approval: true

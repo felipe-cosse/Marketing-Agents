@@ -1,0 +1,79 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "CAT-01",
+  "matrix_statement_sha256": "bc56c5284233af36c0b19428b4472983b4cf0bab20553945f3289d7cc2ff5c28",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "catalog/v1/manifest.yaml",
+      "catalog/v1/departments.yaml",
+      "catalog/v1/functions.yaml",
+      "catalog/v1/tool-capabilities.yaml",
+      "catalog/v1/approval-policies.yaml",
+      "tests/catalog/test_cat_01_authoritative_catalog.py",
+      "docs/verification/requirements/CAT-01.json",
+      "docs/verification/requirements/CAT-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "catalog/v1/manifest.yaml",
+          "catalog/v1/departments.yaml",
+          "catalog/v1/functions.yaml",
+          "catalog/v1/tool-capabilities.yaml",
+          "catalog/v1/approval-policies.yaml"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/catalog/test_cat_01_authoritative_catalog.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-five-twelve-thirty-six-forty-three",
+      "type": "contract",
+      "statement": "The authoritative manifest compiles exactly five departments, twelve functions, thirty-six templates, and forty-three source-named instances.",
+      "test_refs": ["tests/catalog/test_cat_01_authoritative_catalog.py::test_cat_01_exact_authoritative_inventory_compiles"]
+    },
+    {
+      "id": "deterministic-safe-release",
+      "type": "negative_control",
+      "statement": "All prompt and schema assets resolve deterministically and every assigned write capability is mutating and human-approval bound.",
+      "test_refs": ["tests/catalog/test_cat_01_authoritative_catalog.py::test_cat_01_capability_and_approval_policy_resolution_is_fail_closed"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "cat-01-release-tests",
+      "runner": "argv",
+      "argv": ["make", "test-catalog-release"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-five-twelve-thirty-six-forty-three", "deterministic-safe-release"]
+    },
+    {
+      "id": "cat-01-cli-validation",
+      "runner": "argv",
+      "argv": ["make", "catalog-validate"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-five-twelve-thirty-six-forty-three"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/v1/manifest.yaml",
+      "catalog/v1/departments.yaml",
+      "catalog/v1/functions.yaml",
+      "catalog/v1/tool-capabilities.yaml",
+      "catalog/v1/approval-policies.yaml"
+    ],
+    "gate_id": "cat-01-release-tests"
+  },
+  "limitations": []
+}
