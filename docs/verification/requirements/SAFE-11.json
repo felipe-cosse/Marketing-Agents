@@ -1,0 +1,93 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-11",
+  "matrix_statement_sha256": "7c7126b9192a47582c1a53cc9503c6cebc41b62fd9ea087f1f0525a2a1c7a21e",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/security/__init__.py",
+      "apps/api/src/marketing_agents/security/network_policy.py",
+      "scripts/node-network-guard.mjs",
+      "scripts/browser-network-policy.mjs",
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/network/**",
+      "docs/verification/requirements/SAFE-11.json",
+      "docs/verification/requirements/SAFE-11.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "tests/conftest.py",
+          "tests/network/python_network_guard.py",
+          "scripts/node-network-guard.mjs",
+          "scripts/browser-network-policy.mjs",
+          "apps/api/src/marketing_agents/security/network_policy.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/network/test_safe_11_network_isolation.py",
+          "tests/network/node_network_guard.test.mjs",
+          "tests/network/browser_network_policy.test.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "python-socket-and-dns-denied",
+      "type": "negative_control",
+      "statement": "Python test processes reject non-loopback DNS, TCP, UDP, and create-connection attempts before system calls can egress.",
+      "test_refs": ["tests/network/test_safe_11_network_isolation.py::NetworkIsolationTests"]
+    },
+    {
+      "id": "node-and-browser-egress-denied",
+      "type": "negative_control",
+      "statement": "Node net, HTTP, HTTPS, DNS, fetch, and Playwright-style browser routes reject non-loopback destinations with canary assertions.",
+      "test_refs": [
+        "tests/network/node_network_guard.test.mjs",
+        "tests/network/browser_network_policy.test.mjs"
+      ]
+    },
+    {
+      "id": "real-mode-fails-closed",
+      "type": "contract",
+      "statement": "Real model or connector mode requires external-network permission plus an independent adapter-specific opt-in.",
+      "test_refs": ["tests/network/test_safe_11_network_isolation.py::NetworkIsolationTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-11-cross-language",
+      "runner": "argv",
+      "argv": ["make", "test-network"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": ["python-socket-and-dns-denied", "node-and-browser-egress-denied", "real-mode-fails-closed"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/security/network_policy.py",
+      "scripts/node-network-guard.mjs",
+      "scripts/browser-network-policy.mjs",
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/network/__init__.py",
+      "tests/network/python_network_guard.py"
+    ],
+    "gate_id": "safe-11-cross-language"
+  },
+  "limitations": [
+    "The current gate proves application-level Python, Node, and browser-route blockers but does not claim kernel-level network denial.",
+    "Container execution with network disabled and a real Playwright page are completed by the later clean-state and AC-15 acceptance branches.",
+    "The matrix status remains implemented rather than verified until those container and browser gates pass."
+  ]
+}

@@ -2,7 +2,7 @@ PYTHON ?= python3
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: format-check test test-source test-tooling verify-source verify-history verify-requirement verify-governance
+.PHONY: format-check test test-network test-source test-tooling verify-source verify-history verify-requirement verify-governance
 
 format-check:
 	git diff --check
@@ -18,7 +18,11 @@ test-source:
 test-tooling:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.tooling.test_verify_requirement_evidence
 
-test: test-source test-tooling
+test-network:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.network.test_safe_11_network_isolation
+	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs
+
+test: test-source test-tooling test-network
 
 verify-source:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_source_evidence.py --json
