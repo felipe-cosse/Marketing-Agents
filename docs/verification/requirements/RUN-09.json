@@ -1,0 +1,60 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-09",
+  "matrix_statement_sha256": "01fbdaf227c5281aeeccf186cee3673c78aed286af54dc2c06001b8961956eab",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_integrity.py",
+      "tests/unit/application/test_run_09_approval_invalidation.py",
+      "docs/verification/requirements/RUN-09.json",
+      "docs/verification/requirements/RUN-09.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/application/services/approval_integrity.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/test_run_09_approval_invalidation.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "changed-action-supersedes-approval",
+      "type": "contract",
+      "statement": "Any semantic action mutation invalidates the current request, irreversibly supersedes it, and creates only generation plus one under the same logical action scope.",
+      "test_refs": ["tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_action_mutation_invalidates_and_creates_next_generation"]
+    },
+    {
+      "id": "canonical-equivalence-and-stale-hash",
+      "type": "negative_control",
+      "statement": "Canonical key-order and Unicode equivalence do not cause false invalidation, while stale client hashes and replacement scope changes fail closed.",
+      "test_refs": [
+        "tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_canonical_key_order_and_unicode_equivalence_do_not_invalidate",
+        "tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_stale_client_hash_and_replacement_scope_fail_closed"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-09-invalidation-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/application/test_run_09_approval_invalidation.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["changed-action-supersedes-approval", "canonical-equivalence-and-stale-hash"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/application/services/approval_integrity.py"],
+    "gate_id": "run-09-invalidation-tests"
+  },
+  "limitations": ["Atomic persistence of supersession and replacement is implemented with the approval repository later."]
+}
