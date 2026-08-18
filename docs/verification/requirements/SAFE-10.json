@@ -1,0 +1,87 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-10",
+  "matrix_statement_sha256": "22449b8b8dff7a006c77cad98edcf30d30743599aba86aad232ea4ed0552183c",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      ".gitignore",
+      ".dockerignore",
+      ".env.example",
+      "apps/api/src/marketing_agents/security/**",
+      "scripts/scan_secrets.py",
+      "tests/security/test_safe_10_secret_hygiene.py",
+      "docs/verification/requirements/SAFE-10.json",
+      "docs/verification/requirements/SAFE-10.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          ".gitignore",
+          ".dockerignore",
+          ".env.example",
+          "apps/api/src/marketing_agents/security/**",
+          "scripts/scan_secrets.py"
+        ]
+      },
+      {"kind": "test", "one_of": ["tests/security/test_safe_10_secret_hygiene.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "safe-local-configuration",
+      "type": "negative_control",
+      "statement": "Tracked and Docker contexts exclude local secrets and state while the example environment stays mock-only and loopback-bound.",
+      "test_refs": ["tests/security/test_safe_10_secret_hygiene.py::SecretHygieneTests"]
+    },
+    {
+      "id": "secret-detection-and-masking",
+      "type": "negative_control",
+      "statement": "High-confidence credential canaries and forbidden secret filenames are detected, while nested diagnostic fields and secret reprs are masked.",
+      "test_refs": ["tests/security/test_safe_10_secret_hygiene.py::SecretHygieneTests"]
+    },
+    {
+      "id": "restart-safe-digest-key",
+      "type": "contract",
+      "statement": "The local digest key is atomically created once with private permissions and fails closed on missing, mismatched, symlinked, or unsafe material.",
+      "test_refs": ["tests/security/test_safe_10_secret_hygiene.py::SecretHygieneTests"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-10-unit",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.security.test_safe_10_secret_hygiene"],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_enforced",
+      "covers": ["safe-local-configuration", "secret-detection-and-masking", "restart-safe-digest-key"]
+    },
+    {
+      "id": "safe-10-tree-scan",
+      "runner": "argv",
+      "argv": ["python3", "scripts/scan_secrets.py", "--tracked", "--base", "main"],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_enforced",
+      "covers": ["safe-local-configuration", "secret-detection-and-masking"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      ".gitignore",
+      ".dockerignore",
+      ".env.example",
+      "apps/api/src/marketing_agents/security/**",
+      "scripts/scan_secrets.py"
+    ],
+    "gate_id": "safe-10-unit"
+  },
+  "limitations": [
+    "Kernel-level network denial is not part of secret hygiene and is implemented by SAFE-11.",
+    "Framework settings validation is added with the Python application scaffold; this branch supplies framework-independent masking and key lifecycle primitives."
+  ]
+}

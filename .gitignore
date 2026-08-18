@@ -1,0 +1,39 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Local state
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node and browser tooling
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
