@@ -1,0 +1,117 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-04",
+  "matrix_statement_sha256": "41f68c7f4c070db2230017611a471021e73e1194df347089b286c5d0a14ba135",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/admission.py",
+      "apps/api/src/marketing_agents/domain/entities/_validation.py",
+      "apps/api/src/marketing_agents/domain/entities/work.py",
+      "apps/api/src/marketing_agents/security/__init__.py",
+      "apps/api/src/marketing_agents/security/admission_digest.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/work_admission.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/**",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/**",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_run_04_admission_digest.py",
+      "tests/integration/db/test_run_04_work_idempotency.py",
+      "docs/verification/requirements/RUN-04.json",
+      "docs/verification/requirements/RUN-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/work_admission.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/work.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/domain/test_run_04_admission_digest.py",
+          "tests/integration/db/test_run_04_work_idempotency.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "canonical-keyed-admission",
+      "type": "contract",
+      "statement": "Admitted payload and complete routing, mode, brief, and configuration context use separate canonical HMAC-SHA256 domains bound to the installed digest-key fingerprint version.",
+      "test_refs": [
+        "tests/unit/domain/test_run_04_admission_digest.py::test_run_04_digest_is_restart_stable_canonical_keyed_and_secret_safe",
+        "tests/unit/domain/test_run_04_admission_digest.py::test_run_04_every_routing_context_or_payload_change_changes_admission_digest",
+        "tests/unit/domain/test_run_04_admission_digest.py::test_run_04_different_install_key_changes_version_and_both_digests",
+        "tests/unit/domain/test_run_04_admission_digest.py::test_run_04_invalid_or_ambiguous_admission_context_is_rejected"
+      ]
+    },
+    {
+      "id": "replay-versus-collision",
+      "type": "negative_control",
+      "statement": "An identical source-event-instance replay returns the original work identity across restart, while changed payload or installed digest-key version fails closed without another row.",
+      "test_refs": [
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_identical_replay_returns_original_and_changed_payload_conflicts",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_same_source_key_rejects_changed_routing_mode_or_context",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_restart_with_same_database_and_key_returns_original_work"
+      ]
+    },
+    {
+      "id": "concurrent-source-key-uniqueness",
+      "type": "contract",
+      "statement": "Independent file-backed SQLite sessions use distinct candidate IDs and atomically resolve the same source-event-instance key to one row, one creator, and either one replay or one collision; caller rollback remains authoritative.",
+      "test_refs": [
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_two_sessions_resolve_identical_race_to_created_and_replayed",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_two_sessions_resolve_changed_race_to_one_row_and_conflict",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_admit_in_uow_never_commits_the_outer_transaction"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-04-work-idempotency",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/domain/test_run_04_admission_digest.py",
+        "tests/integration/db/test_run_04_work_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "canonical-keyed-admission",
+        "replay-versus-collision",
+        "concurrent-source-key-uniqueness"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/admission.py",
+      "apps/api/src/marketing_agents/security/admission_digest.py",
+      "apps/api/src/marketing_agents/application/services/work_admission.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/work.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/work.py"
+    ],
+    "gate_id": "run-04-work-idempotency"
+  },
+  "limitations": [
+    "Primary Run creation, collision audit events, transport-level conflict mapping, webhook receipts, and schema or routing validation are owned by their dedicated runtime, audit, API, and ingress requirements.",
+    "DEL-04 owns Alembic revisions and upgrade or downgrade verification for the data-bearing work table."
+  ]
+}

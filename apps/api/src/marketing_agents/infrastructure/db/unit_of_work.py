@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from marketing_agents.application.ports.repositories import (
@@ -81,6 +82,10 @@ class SQLAlchemyUnitOfWork:
             raise SQLAlchemyUnitOfWorkError("unit of work cannot be entered more than once")
         self._session = self._session_factory()
         await self._session.begin()
+        if self._session.get_bind().dialect.name == "sqlite":
+            # Python's sqlite driver otherwise lets the first SAVEPOINT become the
+            # physical outer transaction, so releasing it would escape UoW rollback.
+            await self._session.execute(text("BEGIN DEFERRED"))
         self._repositories = self._repository_factories.build(self._session)
         return self
 

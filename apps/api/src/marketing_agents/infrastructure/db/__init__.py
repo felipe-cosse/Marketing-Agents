@@ -1,6 +1,8 @@
 """Portable asynchronous persistence primitives."""
 
 from .base import NAMING_CONVENTION, Base
+from .models import WorkItemRecord
+from .repositories import SQLAlchemyWorkRepository
 from .session import DatabaseRuntime, create_database_runtime
 from .types import UTCDateTime
 from .unit_of_work import (
@@ -22,7 +24,9 @@ __all__ = [
     "SQLAlchemyUnitOfWork",
     "SQLAlchemyUnitOfWorkError",
     "SQLAlchemyUnitOfWorkFactory",
+    "SQLAlchemyWorkRepository",
     "UTCDateTime",
+    "WorkItemRecord",
     "create_database_runtime",
     "parse_database_url",
     "safe_database_url",
