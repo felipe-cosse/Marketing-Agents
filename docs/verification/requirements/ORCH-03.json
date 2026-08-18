@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-03",
+  "matrix_statement_sha256": "37a016c31adb91a943dcab117e17bc2878a34220cbe5bcfb37b4acada4648490",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/domain/graph.py",
+      "tests/unit/domain/test_orch_03_dependency_graph.py",
+      "docs/verification/requirements/ORCH-03.json",
+      "docs/verification/requirements/ORCH-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/domain/graph.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/domain/test_orch_03_dependency_graph.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "deterministic-explicit-topology",
+      "type": "contract",
+      "statement": "Dependency graphs retain explicit steps and edges, deterministic topological order, roots, terminal results, ancestor relationships, and a semantic topology hash without routing or runtime identifiers.",
+      "test_refs": [
+        "tests/unit/domain/test_orch_03_dependency_graph.py::test_orch_03_builds_explicit_graph_with_deterministic_topology_and_ancestors",
+        "tests/unit/domain/test_orch_03_dependency_graph.py::test_orch_03_input_and_dependency_order_do_not_change_semantic_graph"
+      ]
+    },
+    {
+      "id": "invalid-topology-rejected",
+      "type": "negative_control",
+      "statement": "Duplicate or unknown dependencies, self-edges, cycles, over-limit graphs, missing or non-sink terminal results, and branches without a terminal-result path fail closed.",
+      "test_refs": [
+        "tests/unit/domain/test_orch_03_dependency_graph.py::test_orch_03_duplicate_unknown_self_cycle_and_limits_fail_closed",
+        "tests/unit/domain/test_orch_03_dependency_graph.py::test_orch_03_missing_terminal_dependent_terminal_and_dead_branch_fail_closed"
+      ]
+    },
+    {
+      "id": "routing-excluded",
+      "type": "contract",
+      "statement": "Topology contracts contain no selected agent, template, capability, effect, model, or connector fields, leaving routing to its dedicated requirement.",
+      "test_refs": ["tests/unit/domain/test_orch_03_dependency_graph.py::test_orch_03_graph_contract_contains_no_agent_selection_or_routing_fields"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-03-graph-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/domain/test_orch_03_dependency_graph.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "deterministic-explicit-topology",
+        "invalid-topology-rejected",
+        "routing-excluded"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/domain/graph.py"],
+    "gate_id": "orch-03-graph-tests"
+  },
+  "limitations": [
+    "Agent selection, capability policy, plan materialization, persistence, and execution remain separate orchestration requirements."
+  ]
+}
