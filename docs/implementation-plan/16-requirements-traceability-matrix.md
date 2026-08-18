@@ -52,7 +52,7 @@ Allowed status values:
 | ARCH-08 | Domain/runtime/adapters/API/UI/tests visibly separated. | 01, 17 | Monorepo layout | Architecture test/review | planned |
 | ORCH-01 | Visible root remains Marketing Agents; orchestrator is not instance 44. | 00, 12 | Hierarchy/control-plane badge | Count/UI assertions | planned |
 | ORCH-02 | Validate incoming work. | 05, 07 | Intake/planner | Schema/intake tests | planned |
-| ORCH-03 | Construct explicit dependency graph. | 03, 05 | Workflow/DAG models | Graph/unit/runtime tests | planned |
+| ORCH-03 | Construct explicit dependency graph. | 03, 05 | Workflow/DAG models | Graph/unit/runtime tests | verified |
 | ORCH-04 | Select only necessary instances. | 05 | Deterministic router | Selection tests/snapshots | planned |
 | ORCH-05 | Pass typed artifacts, not unbounded chat. | 03, 05 | Bindings/artifacts | Binding/provenance tests | planned |
 | ORCH-06 | Enforce budgets, timeouts, rate limits, retries, cancellation. | 03, 05 | Policies/executor | Boundary/failure tests | planned |
