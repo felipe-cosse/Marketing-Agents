@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from marketing_agents.domain.entities import AuditEvent, Run, WorkItem
+
+
+@dataclass(frozen=True, slots=True)
+class WorkInsertResult:
+    """Outcome of one atomic source-key insert-or-read operation."""
+
+    work_item: WorkItem
+    inserted: bool
 
 
 class WorkRepository(Protocol):
@@ -15,6 +24,8 @@ class WorkRepository(Protocol):
     ) -> WorkItem | None: ...
 
     async def add(self, work_item: WorkItem) -> None: ...
+
+    async def add_or_get(self, work_item: WorkItem) -> WorkInsertResult: ...
 
 
 class RunRepository(Protocol):

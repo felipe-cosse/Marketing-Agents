@@ -13,9 +13,14 @@ from marketing_agents.application.ports.repositories import (
 
 
 class UnitOfWork(Protocol):
-    works: WorkRepository
-    runs: RunRepository
-    audits: AuditRepository
+    @property
+    def works(self) -> WorkRepository: ...
+
+    @property
+    def runs(self) -> RunRepository: ...
+
+    @property
+    def audits(self) -> AuditRepository: ...
 
     async def __aenter__(self) -> UnitOfWork: ...
 
