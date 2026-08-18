@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:marketing-agents:catalog:v1:tpl.blog-seo.new-content.blog-post-writer:output",
+  "title": "Blog Post Writer output",
+  "description": "Structured local artifact; proposed actions are not execution authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "summary",
+    "artifact",
+    "proposed_actions",
+    "provenance"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^artifact_[A-Za-z0-9_-]{1,72}$"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "artifact": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "proposed_actions": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_type",
+          "destination",
+          "payload_preview"
+        ],
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+\\.[a-z0-9-]+$"
+          },
+          "destination": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "payload_preview": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template_id",
+        "source_request_id"
+      ],
+      "properties": {
+        "template_id": {
+          "const": "tpl.blog-seo.new-content.blog-post-writer"
+        },
+        "source_request_id": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    }
+  }
+}

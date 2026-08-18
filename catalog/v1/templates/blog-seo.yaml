@@ -1,0 +1,121 @@
+templates:
+  - id: tpl.blog-seo.new-content.blog-post-writer
+    display_name: Blog Post Writer
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.new-content
+    display_order: 10
+    purpose: Draft, review, and prepare new blog posts for upload.
+    system_prompt_ref: prompts/tpl.blog-seo.new-content.blog-post-writer.md
+    input_schema_ref: schemas/tpl.blog-seo.new-content.blog-post-writer/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.new-content.blog-post-writer/output.schema.json
+    allowed_tool_capability_ids: [cap.cms.read-content, cap.model.generate-structured]
+    supported_trigger_types: [manual]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--3]
+    implementation_notes: Preparation for upload is an artifact only; no CMS upload capability is assigned.
+  - id: tpl.blog-seo.new-content.blog-post-updater
+    display_name: Blog Post Updater
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.new-content
+    display_order: 20
+    purpose: Monitor blog posts and identify content that is no longer up to date.
+    system_prompt_ref: prompts/tpl.blog-seo.new-content.blog-post-updater.md
+    input_schema_ref: schemas/tpl.blog-seo.new-content.blog-post-updater/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.new-content.blog-post-updater/output.schema.json
+    allowed_tool_capability_ids: [cap.cms.read-content, cap.model.generate-structured]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--3]
+    implementation_notes: Monitoring uses bounded supplied or configured CMS data and returns advisory findings.
+  - id: tpl.blog-seo.new-content.linkedin-post-writer-new-blog-posts
+    display_name: LinkedIn Post Writer for New Blog Posts
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.new-content
+    display_order: 30
+    purpose: Prepare LinkedIn posts based on new blog posts.
+    system_prompt_ref: prompts/tpl.blog-seo.new-content.linkedin-post-writer-new-blog-posts.md
+    input_schema_ref: schemas/tpl.blog-seo.new-content.linkedin-post-writer-new-blog-posts/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.new-content.linkedin-post-writer-new-blog-posts/output.schema.json
+    allowed_tool_capability_ids: [cap.cms.read-content, cap.model.generate-structured]
+    supported_trigger_types: [manual, webhook]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--3]
+    implementation_notes: Produces an inert social draft and has no social publish capability.
+  - id: tpl.blog-seo.tracking-analysis.seo-ranking-tracker
+    display_name: SEO Ranking Tracker
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.tracking-analysis
+    display_order: 10
+    purpose: Analyze search-query performance over time.
+    system_prompt_ref: prompts/tpl.blog-seo.tracking-analysis.seo-ranking-tracker.md
+    input_schema_ref: schemas/tpl.blog-seo.tracking-analysis.seo-ranking-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.tracking-analysis.seo-ranking-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.spreadsheet.read-range, cap.artifact.transform-deterministic, cap.model.generate-structured]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 7, max_model_calls: 1, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--3]
+    implementation_notes: Analysis is limited to supplied query-performance records and performs no search scraping.
+  - id: tpl.blog-seo.tracking-analysis.feature-launch-tracker
+    display_name: Feature Launch Tracker
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.tracking-analysis
+    display_order: 20
+    purpose: Track whether the website reflects the latest features.
+    system_prompt_ref: prompts/tpl.blog-seo.tracking-analysis.feature-launch-tracker.md
+    input_schema_ref: schemas/tpl.blog-seo.tracking-analysis.feature-launch-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.tracking-analysis.feature-launch-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.cms.read-content, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--3]
+    implementation_notes: Compares supplied feature and site inventories; no generic network fetch is allowed.
+  - id: tpl.blog-seo.tracking-analysis.integration-tracker
+    display_name: Integration Tracker
+    department_id: dept.blog-seo
+    function_id: func.blog-seo.tracking-analysis
+    display_order: 30
+    purpose: Track whether the website reflects the latest integrations.
+    system_prompt_ref: prompts/tpl.blog-seo.tracking-analysis.integration-tracker.md
+    input_schema_ref: schemas/tpl.blog-seo.tracking-analysis.integration-tracker/input.schema.json
+    output_schema_ref: schemas/tpl.blog-seo.tracking-analysis.integration-tracker/output.schema.json
+    allowed_tool_capability_ids: [cap.cms.read-content, cap.artifact.transform-deterministic]
+    supported_trigger_types: [manual, schedule]
+    operation_classification: read_only
+    approval_policy_id: policy.no-approval.read-only.v1
+    retry_policy: {max_attempts: 2, backoff: bounded_exponential}
+    timeout_policy: {step_seconds: 30, run_seconds: 120}
+    budget_policy: {max_steps: 6, max_model_calls: 0, max_tool_calls: 2}
+    rate_limit_policy: {max_calls: 20, window_seconds: 60}
+    source_confidence: high
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--3]
+    implementation_notes: Compares supplied integration and site inventories; no generic network fetch is allowed.
