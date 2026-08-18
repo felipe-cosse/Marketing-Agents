@@ -1,4 +1,4 @@
-"""RUN-04: persisted source-key admission survives replay, races, and restart."""
+"""RUN-04 persistence compatibility after the ORCH-02 sealed validation boundary."""
 
 from __future__ import annotations
 
@@ -38,6 +38,8 @@ from marketing_agents.infrastructure.db.repositories import SQLAlchemyWorkReposi
 from marketing_agents.security.digest_key import DigestKey
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.support.incoming_work import validate_incoming_for_test
 
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 
@@ -177,8 +179,8 @@ async def test_run_04_identical_replay_returns_original_and_changed_payload_conf
     runtime = await _runtime(tmp_path / "sequential.db")
     service = _service(runtime)
     try:
-        created = await service.admit(_envelope())
-        replayed = await service.admit(_envelope())
+        created = await service.admit(validate_incoming_for_test(_envelope()))
+        replayed = await service.admit(validate_incoming_for_test(_envelope()))
 
         assert created.disposition is AdmissionDisposition.CREATED
         assert replayed.disposition is AdmissionDisposition.REPLAYED
@@ -187,12 +189,14 @@ async def test_run_04_identical_replay_returns_original_and_changed_payload_conf
         assert "person@example.test" not in repr(created.work_item)
         assert created.work_item.admission_digest not in repr(created.work_item)
         with pytest.raises(WorkIdempotencyError) as collision:
-            await service.admit(_envelope(payload={"email": "changed@example.test"}))
+            await service.admit(
+                validate_incoming_for_test(_envelope(payload={"email": "changed@example.test"}))
+            )
         assert collision.value.code == "idempotency_conflict"
         assert collision.value.existing_work_item_id == created.work_item.id
         different_key_service = _service(runtime, key=_key(1), ids=IncrementingIds(200))
         with pytest.raises(WorkIdempotencyError) as key_mismatch:
-            await different_key_service.admit(_envelope())
+            await different_key_service.admit(validate_incoming_for_test(_envelope()))
         assert key_mismatch.value.code == "digest_key_version_mismatch"
         assert key_mismatch.value.existing_work_item_id == created.work_item.id
         assert await _work_count(runtime) == 1
@@ -216,10 +220,10 @@ async def test_run_04_same_source_key_rejects_changed_routing_mode_or_context(
         replace(original, configuration_revision=3),
     )
     try:
-        created = await service.admit(original)
+        created = await service.admit(validate_incoming_for_test(original))
         for changed in changes:
             with pytest.raises(WorkIdempotencyError) as collision:
-                await service.admit(changed)
+                await service.admit(validate_incoming_for_test(changed))
             assert collision.value.code == "idempotency_conflict"
             assert collision.value.existing_work_item_id == created.work_item.id
         assert await _work_count(runtime) == 1
@@ -243,8 +247,8 @@ async def test_run_04_two_sessions_resolve_identical_race_to_created_and_replaye
     second_service = _service(runtime, ids=second_ids, work_factory=work_factory)
     try:
         results = await asyncio.gather(
-            first_service.admit(_envelope()),
-            second_service.admit(_envelope()),
+            first_service.admit(validate_incoming_for_test(_envelope())),
+            second_service.admit(validate_incoming_for_test(_envelope())),
         )
 
         assert {item.disposition for item in results} == {
@@ -276,8 +280,10 @@ async def test_run_04_two_sessions_resolve_changed_race_to_one_row_and_conflict(
     second_service = _service(runtime, ids=second_ids, work_factory=work_factory)
     try:
         outcomes = await asyncio.gather(
-            first_service.admit(_envelope(payload={"choice": "first"})),
-            second_service.admit(_envelope(payload={"choice": "second"})),
+            first_service.admit(validate_incoming_for_test(_envelope(payload={"choice": "first"}))),
+            second_service.admit(
+                validate_incoming_for_test(_envelope(payload={"choice": "second"}))
+            ),
             return_exceptions=True,
         )
 
@@ -302,13 +308,13 @@ async def test_run_04_restart_with_same_database_and_key_returns_original_work(
     database_path = tmp_path / "restart.db"
     first_runtime = await _runtime(database_path)
     first_service = _service(first_runtime, key=_key())
-    created = await first_service.admit(_envelope())
+    created = await first_service.admit(validate_incoming_for_test(_envelope()))
     await first_runtime.dispose()
 
     restarted_runtime = await _runtime(database_path)
     restarted_service = _service(restarted_runtime, key=_key())
     try:
-        replayed = await restarted_service.admit(_envelope())
+        replayed = await restarted_service.admit(validate_incoming_for_test(_envelope()))
         assert replayed.disposition is AdmissionDisposition.REPLAYED
         assert replayed.work_item.id == created.work_item.id
         assert replayed.work_item.input_digest == created.work_item.input_digest
@@ -327,7 +333,10 @@ async def test_run_04_admit_in_uow_never_commits_the_outer_transaction(
     unit_of_work = _unit_of_work_factory(runtime)()
     try:
         async with unit_of_work:
-            result = await service.admit_in_uow(unit_of_work, _envelope())
+            result = await service.admit_in_uow(
+                unit_of_work,
+                validate_incoming_for_test(_envelope()),
+            )
             assert result.disposition is AdmissionDisposition.CREATED
 
         assert await _work_count(runtime) == 0

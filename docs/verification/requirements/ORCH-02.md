@@ -1,0 +1,7 @@
+# ORCH-02 verification note
+
+Incoming work now crosses one pure application boundary that resolves the compiled catalog, enabled instance and template, exact configuration revision, trusted trigger source/target/workflow binding, workflow template/trigger/mode eligibility, optional exact campaign-brief revision, and compiled input schema. The validator copies recursively frozen envelope payloads back into canonical plain JSON before SAFE-06 applies strict JSON, byte, depth, and schema limits. All 43 catalog instances pass through this boundary with their own compiled template schema.
+
+Successful validation returns a constructor-closed, module-sealed marker and a trusted workflow-admission snapshot containing catalog, selection, configuration, and versioned schema identity. Validator construction takes a canonical deep copy of each schema, so later mutation of caller-owned mappings cannot alter the trusted snapshot. Worker-style revalidation compares schema content before generic catalog drift, so a changed schema with the same `$id` fails as `input_schema_drift`. Raw or fabricated markers are rejected before a public admission call creates a unit of work or touches clocks, IDs, digests, or repositories. Existing RUN-04 persistence tests now obtain real validator-issued markers and retain create/replay/collision/race/restart/rollback behavior.
+
+Machine authority: `ORCH-02.json`. Runtime evidence is generated outside Git.

@@ -13,6 +13,8 @@ from marketing_agents.domain.entities import WorkItem
 from marketing_agents.security.admission_digest import derive_admission_digests
 from marketing_agents.security.digest_key import DigestKey
 
+from .incoming_work_validation import ValidatedIncomingWork, _validated_envelope
+
 
 class WorkIdempotencyError(RuntimeError):
     """Safe stable failure for a source-key collision or key-version mismatch."""
@@ -51,19 +53,28 @@ class WorkAdmissionService:
         self._dependencies = dependencies
         self._digest_key = digest_key
 
-    async def admit(self, envelope: AdmissionEnvelope) -> WorkAdmissionResult:
+    async def admit(self, incoming: ValidatedIncomingWork) -> WorkAdmissionResult:
+        envelope = _validated_envelope(incoming)
         async with self._dependencies.unit_of_work() as unit_of_work:
-            result = await self.admit_in_uow(unit_of_work, envelope)
+            result = await self._admit_envelope_in_uow(unit_of_work, envelope)
             await unit_of_work.commit()
             return result
 
     async def admit_in_uow(
         self,
         unit_of_work: UnitOfWork,
-        envelope: AdmissionEnvelope,
+        incoming: ValidatedIncomingWork,
     ) -> WorkAdmissionResult:
         """Insert or replay inside the caller transaction without committing it."""
 
+        envelope = _validated_envelope(incoming)
+        return await self._admit_envelope_in_uow(unit_of_work, envelope)
+
+    async def _admit_envelope_in_uow(
+        self,
+        unit_of_work: UnitOfWork,
+        envelope: AdmissionEnvelope,
+    ) -> WorkAdmissionResult:
         digests = derive_admission_digests(envelope, self._digest_key)
         candidate = WorkItem(
             id=self._dependencies.new_id("work"),
