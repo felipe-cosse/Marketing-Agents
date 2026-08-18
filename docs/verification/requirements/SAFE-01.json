@@ -1,0 +1,56 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-01",
+  "matrix_statement_sha256": "197062bf19c4cc81565610669d9ca6faa2d0dafbc3b277ed0970b8362ebe739f",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/adapters/registry.py",
+      "tests/security/test_safe_01_default_mock_mode.py",
+      "docs/verification/requirements/SAFE-01.json",
+      "docs/verification/requirements/SAFE-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": ["apps/api/src/marketing_agents/adapters/registry.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/security/test_safe_01_default_mock_mode.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "safe-mock-default",
+      "type": "positive",
+      "statement": "The local adapter registry exposes an immutable dry-run status with deterministic mocks, no external network, and no external side effects.",
+      "test_refs": ["tests/security/test_safe_01_default_mock_mode.py::test_safe_01_default_session_is_explicitly_dry_run_and_mock_only"]
+    },
+    {
+      "id": "no-real-to-mock-fallback",
+      "type": "negative_control",
+      "statement": "Explicit real adapter selections fail when their implementation is not registered and never silently fall back to mocks.",
+      "test_refs": ["tests/security/test_safe_01_default_mock_mode.py::test_safe_01_unregistered_real_modes_fail_without_mock_fallback"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-01-registry-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/security/test_safe_01_default_mock_mode.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["safe-mock-default", "no-real-to-mock-fallback"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/adapters/registry.py"],
+    "gate_id": "safe-01-registry-tests"
+  },
+  "limitations": ["Real adapters remain unimplemented and therefore fail closed in this local-only registry."]
+}
