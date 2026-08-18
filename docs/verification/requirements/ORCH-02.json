@@ -1,0 +1,110 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-02",
+  "matrix_statement_sha256": "1843488ba763286a0de3454a6826a22f152e7fb79e84e94e7ca851ee87a061dd",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/incoming_work_validation.py",
+      "apps/api/src/marketing_agents/application/services/work_admission.py",
+      "tests/support/__init__.py",
+      "tests/support/incoming_work.py",
+      "tests/unit/application/test_orch_02_incoming_work_validation.py",
+      "tests/integration/db/test_run_01_lifecycle_persistence.py",
+      "tests/integration/db/test_run_04_work_idempotency.py",
+      "docs/verification/requirements/ORCH-02.json",
+      "docs/verification/requirements/ORCH-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/incoming_work_validation.py",
+          "apps/api/src/marketing_agents/application/services/work_admission.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/application/test_orch_02_incoming_work_validation.py",
+          "tests/integration/db/test_run_04_work_idempotency.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "catalog-bound-all-instance-intake",
+      "type": "contract",
+      "statement": "Every one of the 43 compiled instances resolves an enabled instance, template, active configuration revision, trigger source and target, workflow eligibility, execution mode, optional exact brief revision, and its compiled template input schema before validation succeeds.",
+      "test_refs": [
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_all_43_compiled_instances_validate_against_their_template_schema",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_unknown_disabled_mismatched_and_schema_invalid_inputs_fail_closed",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_exact_campaign_brief_revision_is_validated",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_malformed_compiled_input_schema_has_stable_rejection"
+      ]
+    },
+    {
+      "id": "safe-input-and-snapshot-revalidation",
+      "type": "negative_control",
+      "statement": "Frozen admitted payloads are copied back to plain canonical JSON before the central SAFE-06 guard enforces byte, depth, closed-schema, and Draft 2020-12 constraints; worker revalidation rejects catalog drift and same-schema-ID content drift against a trusted snapshot.",
+      "test_refs": [
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_central_guard_enforces_bytes_depth_and_closed_schema",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_thaws_nested_frozen_payload_before_safe_06_guard",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_worker_revalidation_detects_same_id_schema_content_drift",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_validator_snapshots_schema_content_at_construction"
+      ]
+    },
+    {
+      "id": "sealed-side-effect-free-admission-boundary",
+      "type": "contract",
+      "statement": "Only a validator-issued sealed marker reaches public work admission; raw and fabricated inputs fail before UoW, ID, clock, digest, or repository activity, while a real marker preserves RUN-04 create, replay, collision, race, restart, and caller-rollback behavior.",
+      "test_refs": [
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_public_admission_rejects_raw_or_fabricated_marker_before_side_effects",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py::test_orch_02_private_admission_helper_has_no_non_service_production_callers",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_identical_replay_returns_original_and_changed_payload_conflicts",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_two_sessions_resolve_identical_race_to_created_and_replayed",
+        "tests/integration/db/test_run_04_work_idempotency.py::test_run_04_admit_in_uow_never_commits_the_outer_transaction"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-02-incoming-work-validation",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py",
+        "tests/integration/db/test_run_04_work_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "catalog-bound-all-instance-intake",
+        "safe-input-and-snapshot-revalidation",
+        "sealed-side-effect-free-admission-boundary"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/incoming_work_validation.py",
+      "apps/api/src/marketing_agents/application/services/work_admission.py"
+    ],
+    "gate_id": "orch-02-incoming-work-validation"
+  },
+  "limitations": [
+    "API, webhook-signature, schedule-occurrence, source-mapping, identity, and transport error handling remain owned by their dedicated ingress, scheduling, and API requirements.",
+    "ORCH-02 defines and tests trusted workflow admission definitions and revalidation snapshots; workflow registry persistence, worker advancement, and general audit-event persistence remain separate requirements.",
+    "The test-only validator helper exists only under tests to adapt requirements merged before the sealed boundary and is not a production admission bypass."
+  ]
+}

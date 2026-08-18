@@ -55,6 +55,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.incoming_work import validate_incoming_for_test
+
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 CATALOG_HASH = "c" * 64
 
@@ -240,7 +242,7 @@ async def _admit_and_receive(
     work_service: WorkAdmissionService,
     run_service: RunLifecycleService,
 ) -> Run:
-    admitted = await work_service.admit(_envelope())
+    admitted = await work_service.admit(validate_incoming_for_test(_envelope()))
     received = await run_service.receive(ReceiveRunRequest(admitted.work_item, CATALOG_HASH))
     assert admitted.disposition is AdmissionDisposition.CREATED
     assert received.created is True
@@ -297,7 +299,7 @@ async def test_run_01_lifecycle_survives_restart_with_ordered_terminal_history(
         ids=IncrementingIds(100),
     )
     try:
-        replayed_work = await restarted_work.admit(_envelope())
+        replayed_work = await restarted_work.admit(validate_incoming_for_test(_envelope()))
         replayed_run = await restarted_lifecycle.receive(
             ReceiveRunRequest(replayed_work.work_item, CATALOG_HASH)
         )
@@ -352,7 +354,10 @@ async def test_run_01_work_and_initial_run_share_caller_transaction(tmp_path: Pa
     work_service, lifecycle, unit_of_work_factory = _services(runtime, clock)
     try:
         async with unit_of_work_factory() as unit_of_work:
-            admitted = await work_service.admit_in_uow(unit_of_work, _envelope())
+            admitted = await work_service.admit_in_uow(
+                unit_of_work,
+                validate_incoming_for_test(_envelope()),
+            )
             received = await lifecycle.receive_in_uow(
                 unit_of_work,
                 ReceiveRunRequest(admitted.work_item, CATALOG_HASH),
@@ -372,7 +377,7 @@ async def test_run_01_repository_rejects_non_initial_transition_on_receipt(
     clock = MutableClock()
     work_service, _, unit_of_work_factory = _services(runtime, clock)
     try:
-        admitted = await work_service.admit(_envelope())
+        admitted = await work_service.admit(validate_incoming_for_test(_envelope()))
         candidate = Run(
             id="run.invalid-initial",
             work_item_id=admitted.work_item.id,
@@ -411,7 +416,7 @@ async def test_run_01_two_sessions_receive_one_primary_run_and_initial_transitio
     runtime = await _runtime(tmp_path / "receipt-race.db")
     clock = MutableClock()
     base_work, _, _ = _services(runtime, clock)
-    admitted = await base_work.admit(_envelope())
+    admitted = await base_work.admit(validate_incoming_for_test(_envelope()))
     barrier = AsyncBarrier(2)
 
     def run_factory(session: AsyncSession) -> RunRepository:

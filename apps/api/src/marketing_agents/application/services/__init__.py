@@ -1,5 +1,15 @@
 """Framework-independent application services."""
 
+from .incoming_work_validation import (
+    CampaignBriefPolicy,
+    CampaignBriefRevision,
+    ConfiguredIncomingTrigger,
+    IncomingWorkValidationError,
+    IncomingWorkValidator,
+    ValidatedIncomingWork,
+    WorkflowAdmissionDefinition,
+    WorkflowAdmissionSnapshot,
+)
 from .run_lifecycle import (
     ReceiveRunRequest,
     ReceiveRunResult,
@@ -15,11 +25,19 @@ from .work_admission import (
 
 __all__ = [
     "AdmissionDisposition",
+    "CampaignBriefPolicy",
+    "CampaignBriefRevision",
+    "ConfiguredIncomingTrigger",
+    "IncomingWorkValidationError",
+    "IncomingWorkValidator",
     "ReceiveRunRequest",
     "ReceiveRunResult",
     "RunLifecycleService",
     "RunLifecycleServiceError",
+    "ValidatedIncomingWork",
     "WorkAdmissionResult",
     "WorkAdmissionService",
     "WorkIdempotencyError",
+    "WorkflowAdmissionDefinition",
+    "WorkflowAdmissionSnapshot",
 ]
