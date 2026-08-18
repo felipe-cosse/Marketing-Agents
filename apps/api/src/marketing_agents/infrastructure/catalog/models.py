@@ -100,6 +100,7 @@ class AgentTemplateRecord(FrozenModel):
     allowed_tool_capability_ids: tuple[str, ...]
     supported_trigger_types: tuple[Literal["manual", "webhook", "schedule"], ...]
     operation_classification: Literal["read_only", "mutating"]
+    output_handling: Literal["standard", "advisory"] = "standard"
     approval_policy_id: str
     retry_policy: RetryPolicy
     timeout_policy: TimeoutPolicy

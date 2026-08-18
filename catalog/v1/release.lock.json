@@ -2,7 +2,7 @@
   "schema_version": 1,
   "format_version": 1,
   "content_version": "1.0.0",
-  "content_hash": "catalog-sha256-v1:7e0076ca5eba815a6f897fefca635f65fd8c70731a650b22384879dd09bdd85a",
+  "content_hash": "catalog-sha256-v1:9b055108f14d992efdf86739d90e97ff89974fae49116545f6185a7f52f09dbe",
   "counts": {
     "departments": 5,
     "functions": 12,

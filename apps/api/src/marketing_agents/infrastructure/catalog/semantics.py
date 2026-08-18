@@ -27,6 +27,12 @@ COMMUNITY_FUNCTION_INSTANCE_COUNTS = {
     "func.community.education": 6,
     "func.community.discussion": 2,
 }
+REQUIRED_ADVISORY_TEMPLATE_IDS = frozenset(
+    {
+        "tpl.email.lifecycle-marketing.churned-user-monitor",
+        "tpl.partnerships.implementation-partners.partner-application-reviewer",
+    }
+)
 INSTANCE_TEMPLATE_OWNED_FIELDS = frozenset(
     {
         "display_name",
@@ -39,6 +45,7 @@ INSTANCE_TEMPLATE_OWNED_FIELDS = frozenset(
         "allowed_tool_capability_ids",
         "supported_trigger_types",
         "operation_classification",
+        "output_handling",
         "approval_policy_id",
         "retry_policy",
         "timeout_policy",
@@ -49,6 +56,86 @@ INSTANCE_TEMPLATE_OWNED_FIELDS = frozenset(
         "implementation_notes",
     }
 )
+
+
+def advisory_output_issues(
+    templates: Sequence[AgentTemplateRecord],
+    capabilities: Sequence[ToolCapabilityRecord],
+    policies: Sequence[ApprovalPolicyRecord],
+    output_schemas: Mapping[str, Mapping[str, Any]],
+) -> tuple[CatalogIssue, ...]:
+    """Require consequential outcome templates to remain labeled, inert advice."""
+
+    issues: list[CatalogIssue] = []
+    capability_by_id = {item.id: item for item in capabilities}
+    policy_by_id = {item.id: item for item in policies}
+    template_by_id = {item.id: item for item in templates}
+    for template_id in sorted(REQUIRED_ADVISORY_TEMPLATE_IDS):
+        template = template_by_id.get(template_id)
+        if template is None or template.output_handling != "advisory":
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "advisory-required",
+                    "consequential partner and churn outcomes must be explicitly advisory",
+                    template_id,
+                )
+            )
+    for template in templates:
+        if template.output_handling != "advisory":
+            continue
+        selected = [
+            capability_by_id[item]
+            for item in template.allowed_tool_capability_ids
+            if item in capability_by_id
+        ]
+        policy = policy_by_id.get(template.approval_policy_id)
+        schema = output_schemas.get(template.id, {})
+        properties = schema.get("properties", {})
+        advisory = properties.get("advisory", {}) if isinstance(properties, Mapping) else {}
+        advisory_properties = (
+            advisory.get("properties", {}) if isinstance(advisory, Mapping) else {}
+        )
+        proposed_actions = (
+            properties.get("proposed_actions", {}) if isinstance(properties, Mapping) else {}
+        )
+        required = schema.get("required", ())
+        valid_advisory_schema = (
+            "advisory" in required
+            and isinstance(advisory_properties, Mapping)
+            and advisory_properties.get("status", {}).get("const") == "advisory_only"
+            and advisory_properties.get("automated_decision", {}).get("const") is False
+            and advisory_properties.get("external_action", {}).get("const") == "none"
+            and isinstance(proposed_actions, Mapping)
+            and proposed_actions.get("maxItems") == 0
+        )
+        if (
+            template.operation_classification != "read_only"
+            or any(item.effect == "write" for item in selected)
+            or policy is None
+            or policy.kind != "none"
+        ):
+            issues.append(
+                CatalogIssue(
+                    "templates",
+                    "",
+                    "advisory-authority",
+                    "advisory outcomes must be read-only with no write authority",
+                    template.id,
+                )
+            )
+        if not valid_advisory_schema:
+            issues.append(
+                CatalogIssue(
+                    template.output_schema_ref,
+                    "",
+                    "advisory-output-schema",
+                    "advisory output must prohibit automation and external actions",
+                    template.id,
+                )
+            )
+    return tuple(sorted(issues))
 
 
 def capability_source_policy_issues(

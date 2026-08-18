@@ -40,6 +40,12 @@ def test_dom_03_positive_and_negative_payloads_obey_every_schema_pair() -> None:
             "proposed_actions": [],
             "provenance": {"template_id": template.id, "source_request_id": "request_1"},
         }
+        if template.output_handling == "advisory":
+            valid_output["advisory"] = {
+                "status": "advisory_only",
+                "automated_decision": False,
+                "external_action": "none",
+            }
         assert input_validator.is_valid(valid_input)
         assert output_validator.is_valid(valid_output)
         assert not input_validator.is_valid({**valid_input, "unexpected": True})

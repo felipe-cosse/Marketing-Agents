@@ -10,7 +10,8 @@
     "summary",
     "artifact",
     "proposed_actions",
-    "provenance"
+    "provenance",
+    "advisory"
   ],
   "properties": {
     "artifact_id": {
@@ -30,7 +31,7 @@
     },
     "proposed_actions": {
       "type": "array",
-      "maxItems": 4,
+      "maxItems": 0,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -71,6 +72,26 @@
         "source_request_id": {
           "type": "string",
           "maxLength": 80
+        }
+      }
+    },
+    "advisory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "automated_decision",
+        "external_action"
+      ],
+      "properties": {
+        "status": {
+          "const": "advisory_only"
+        },
+        "automated_decision": {
+          "const": false
+        },
+        "external_action": {
+          "const": "none"
         }
       }
     }

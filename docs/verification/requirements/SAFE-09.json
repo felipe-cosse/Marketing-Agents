@@ -1,0 +1,92 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SAFE-09",
+  "matrix_statement_sha256": "200ee13c6224f40e27bbd71c106f4f84fb6c91e40dc0edf8df7cccdc92aa4c92",
+  "evidence_class": "security_control",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/schema/template.schema.json",
+      "catalog/v1/templates/email.yaml",
+      "catalog/v1/templates/partnerships.yaml",
+      "catalog/v1/prompts/tpl.email.lifecycle-marketing.churned-user-monitor.md",
+      "catalog/v1/prompts/tpl.partnerships.implementation-partners.partner-application-reviewer.md",
+      "catalog/v1/schemas/tpl.email.lifecycle-marketing.churned-user-monitor/output.schema.json",
+      "catalog/v1/schemas/tpl.partnerships.implementation-partners.partner-application-reviewer/output.schema.json",
+      "catalog/v1/release.lock.json",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "scripts/generate_catalog_assets.py",
+      "tests/catalog/test_safe_09_advisory_outputs.py",
+      "tests/catalog/test_dom_03_template_io_schemas.py",
+      "docs/verification/requirements/SAFE-09.json",
+      "docs/verification/requirements/SAFE-09.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+          "catalog/v1/templates/email.yaml",
+          "catalog/v1/templates/partnerships.yaml"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/catalog/test_safe_09_advisory_outputs.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "consequential-outcomes-are-advisory",
+      "type": "contract",
+      "statement": "Partner application review and churn monitoring are explicitly advisory, read-only, non-actionable, and labeled in their prompt and output schema.",
+      "test_refs": ["tests/catalog/test_safe_09_advisory_outputs.py::test_safe_09_required_partner_and_churn_templates_are_advisory_only"]
+    },
+    {
+      "id": "advisory-downgrade-rejected",
+      "type": "negative_control",
+      "statement": "Missing labels, automated-decision claims, external actions, proposed actions, write authority, and removal of required advisory handling fail validation.",
+      "test_refs": [
+        "tests/catalog/test_safe_09_advisory_outputs.py::test_safe_09_unlabeled_automated_or_actionable_outputs_fail_schema",
+        "tests/catalog/test_safe_09_advisory_outputs.py::test_safe_09_advisory_label_and_read_only_authority_cannot_be_downgraded"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "safe-09-advisory-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/catalog/test_safe_09_advisory_outputs.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["consequential-outcomes-are-advisory", "advisory-downgrade-rejected"]
+    },
+    {
+      "id": "safe-09-catalog-release",
+      "runner": "argv",
+      "argv": ["make", "verify-catalog-release"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["consequential-outcomes-are-advisory"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/schema/template.schema.json",
+      "catalog/v1/templates/email.yaml",
+      "catalog/v1/templates/partnerships.yaml",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/semantics.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/compiler.py",
+      "scripts/generate_catalog_assets.py"
+    ],
+    "gate_id": "safe-09-advisory-tests"
+  },
+  "limitations": []
+}
