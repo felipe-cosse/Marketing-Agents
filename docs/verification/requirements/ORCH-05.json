@@ -1,0 +1,73 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-05",
+  "matrix_statement_sha256": "e3dc7e1544d37923a30269df60613e4775e6cf4b17110ecf045d0b20cd28c07e",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/__init__.py",
+      "apps/api/src/marketing_agents/application/orchestration/bindings.py",
+      "tests/unit/application/test_orch_05_typed_artifact_bindings.py",
+      "docs/verification/requirements/ORCH-05.json",
+      "docs/verification/requirements/ORCH-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/application/orchestration/bindings.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/test_orch_05_typed_artifact_bindings.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "declared-typed-flow",
+      "type": "contract",
+      "statement": "Step input is assembled only from declared admitted-input fields and schema-valid ancestor artifacts while retaining source hashes, schema IDs, producer identity, provenance scope, and propagated classification.",
+      "test_refs": ["tests/unit/application/test_orch_05_typed_artifact_bindings.py::test_orch_05_binds_declared_work_fields_and_ancestor_artifact_with_provenance"]
+    },
+    {
+      "id": "unbounded-or-unrelated-input-rejected",
+      "type": "negative_control",
+      "statement": "Root work pass-through, duplicate targets, undeclared accumulated chat, non-ancestor or cross-snapshot artifacts, producer, schema, or hash drift, and invalid pointers fail closed.",
+      "test_refs": [
+        "tests/unit/application/test_orch_05_typed_artifact_bindings.py::test_orch_05_rejects_root_work_duplicate_targets_and_undeclared_chat",
+        "tests/unit/application/test_orch_05_typed_artifact_bindings.py::test_orch_05_rejects_unrelated_or_drifted_artifacts",
+        "tests/unit/application/test_orch_05_typed_artifact_bindings.py::test_orch_05_json_pointer_is_bounded_and_deterministic"
+      ]
+    },
+    {
+      "id": "central-bounds-enforced",
+      "type": "contract",
+      "statement": "Artifact output and bound step input use the central runtime guard for JSON Schema, byte-size, and nesting-depth enforcement.",
+      "test_refs": ["tests/unit/application/test_orch_05_typed_artifact_bindings.py::test_orch_05_delegates_artifact_and_bound_input_schema_size_and_depth_to_runtime_guard"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-05-binding-tests",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "tests/unit/application/test_orch_05_typed_artifact_bindings.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "declared-typed-flow",
+        "unbounded-or-unrelated-input-rejected",
+        "central-bounds-enforced"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/application/orchestration/bindings.py"],
+    "gate_id": "orch-05-binding-tests"
+  },
+  "limitations": [
+    "Repository loading and executor persistence are integrated by later runtime requirements; this requirement defines and verifies the pure binding boundary."
+  ]
+}
