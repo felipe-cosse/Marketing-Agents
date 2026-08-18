@@ -136,7 +136,7 @@ Allowed status values:
 | ID | Requirement | Plan | Planned implementation | Verification | Status |
 |---|---|---|---|---|---|
 | DEL-01 | Working backend/frontend. | 01–15 | `apps/api`, `apps/web` | Clean-state/browser smoke | planned |
-| DEL-02 | Validated 36-template/43-instance catalog. | 02 | `catalog/v1` | Catalog suite | planned |
+| DEL-02 | Validated 36-template/43-instance catalog. | 02 | `catalog/v1` | Catalog suite | verified |
 | DEL-03 | Deterministic mock model/connectors. | 10 | Adapter mocks | Contract/demo tests | planned |
 | DEL-04 | Migrations and repeatable seed. | 04 | Alembic/seeder | Fresh/reseed tests | planned |
 | DEL-05 | One-command local startup; Docker if useful. | 15 | Compose/Makefile | `make verify-clean` | planned |

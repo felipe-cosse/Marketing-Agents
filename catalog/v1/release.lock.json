@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "format_version": 1,
+  "content_version": "1.0.0",
+  "content_hash": "catalog-sha256-v1:7e0076ca5eba815a6f897fefca635f65fd8c70731a650b22384879dd09bdd85a",
+  "counts": {
+    "departments": 5,
+    "functions": 12,
+    "templates": 36,
+    "instances": 43
+  },
+  "department_instance_counts": {
+    "dept.social-media": 12,
+    "dept.blog-seo": 6,
+    "dept.email": 5,
+    "dept.community": 14,
+    "dept.partnerships": 6
+  }
+}
