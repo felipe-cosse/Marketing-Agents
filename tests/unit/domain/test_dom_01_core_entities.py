@@ -100,7 +100,15 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         digest_key_version="admission-hmac-sha256-v1:" + ("d" * 64),
         admitted_payload={"email": "person@example.test"},
     )
-    run = Run("run.1", work.id, RunState.RECEIVED, "c" * 64, 1, NOW)
+    run = Run(
+        "run.1",
+        work.id,
+        RunState.RECEIVED,
+        "c" * 64,
+        1,
+        NOW,
+        updated_at=NOW,
+    )
     step = RunStep(
         "step.1",
         run.id,

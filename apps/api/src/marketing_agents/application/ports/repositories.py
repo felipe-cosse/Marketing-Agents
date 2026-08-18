@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from marketing_agents.domain.entities import AuditEvent, Run, WorkItem
+from marketing_agents.domain.enums import RunState
+from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,12 +30,34 @@ class WorkRepository(Protocol):
     async def add_or_get(self, work_item: WorkItem) -> WorkInsertResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RunInsertResult:
+    """Outcome of atomic primary-Run receipt for one admitted WorkItem."""
+
+    run: Run
+    inserted: bool
+
+
 class RunRepository(Protocol):
     async def get(self, run_id: str) -> Run | None: ...
 
-    async def add(self, run: Run) -> None: ...
+    async def get_by_work_item_id(self, work_item_id: str) -> Run | None: ...
 
-    async def replace(self, expected_version: int, run: Run) -> bool: ...
+    async def add_received_or_get(
+        self,
+        run: Run,
+        initial_transition: RunStateTransition,
+    ) -> RunInsertResult: ...
+
+    async def apply_transition(
+        self,
+        *,
+        expected_version: int,
+        expected_state: RunState,
+        result: RunTransitionResult,
+    ) -> bool: ...
+
+    async def list_transitions(self, run_id: str) -> tuple[RunStateTransition, ...]: ...
 
 
 class AuditRepository(Protocol):
