@@ -11,6 +11,24 @@ from .bindings import (
     WorkInputBinding,
 )
 from .dependencies import OrchestrationDependencies, OrchestrationDependencyError
+from .effect_planner import (
+    EFFECT_PLAN_HASH_DOMAIN,
+    EXTERNAL_WRITE_SCOPE,
+    EffectAwarePlanner,
+    EffectPlan,
+    EffectPlannedStep,
+    EffectPlanningError,
+    EffectPlanRelease,
+    EffectPlanRequest,
+    EffectStepSpec,
+    PlanningApprovalPolicySource,
+    PlanningBindingSource,
+    PlanningCapabilitySource,
+    PlanningOperationMetadataSource,
+    PlanningOperationSource,
+    PlanningTemplateSource,
+    WriteActionIntent,
+)
 from .router import (
     DeterministicInstanceRouter,
     RoutingAssignment,
@@ -26,14 +44,29 @@ from .router import (
 )
 
 __all__ = [
+    "EFFECT_PLAN_HASH_DOMAIN",
+    "EXTERNAL_WRITE_SCOPE",
     "ArtifactInputBinding",
     "BindingContext",
     "BindingError",
     "BoundArtifactReference",
     "BoundStepInput",
     "DeterministicInstanceRouter",
+    "EffectAwarePlanner",
+    "EffectPlan",
+    "EffectPlanRelease",
+    "EffectPlanRequest",
+    "EffectPlannedStep",
+    "EffectPlanningError",
+    "EffectStepSpec",
     "OrchestrationDependencies",
     "OrchestrationDependencyError",
+    "PlanningApprovalPolicySource",
+    "PlanningBindingSource",
+    "PlanningCapabilitySource",
+    "PlanningOperationMetadataSource",
+    "PlanningOperationSource",
+    "PlanningTemplateSource",
     "RoutingAssignment",
     "RoutingError",
     "RoutingInstanceSource",
@@ -47,4 +80,5 @@ __all__ = [
     "TypedInputBinder",
     "WorkInputBinding",
     "WorkflowRoutingDefinition",
+    "WriteActionIntent",
 ]

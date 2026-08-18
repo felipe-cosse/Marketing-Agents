@@ -70,7 +70,7 @@ Allowed status values:
 | ID | Requirement | Plan | Planned implementation | Verification | Status |
 |---|---|---|---|---|---|
 | RUN-01 | Persist required `received` through terminal lifecycle. | 03, 04, 05 | State machine/transition rows | Exhaustive transition tests | verified |
-| RUN-02 | Read-only may execute directly; writes must await approval. | 03, 05, 06 | Effect-aware planning | Direct/zero-call tests | planned |
+| RUN-02 | Read-only may execute directly; writes must await approval. | 03, 05, 06 | Effect-aware planning | Direct/zero-call tests | verified |
 | RUN-03 | Cancellation is best effort and cannot reverse completed actions. | 03, 05, 06 | Cancellation service/timeline | Cancellation race tests | planned |
 | RUN-04 | Work idempotency uses source/event/instance or stronger. | 04, 07 | Work unique constraint | Manual/webhook replay tests | verified |
 | RUN-05 | Every action has a unique persisted key passed to connector. | 04, 06, 10 | External action/dispatcher | Constraint/contract tests | planned |

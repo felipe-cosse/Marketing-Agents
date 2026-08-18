@@ -8,7 +8,11 @@ from datetime import datetime, timedelta
 from types import MappingProxyType
 from typing import Any
 
-from marketing_agents.domain.action_hash import CanonicalExternalAction, canonical_action_hash
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    ExternalActionKeyMaterial,
+    canonical_action_hash,
+)
 from marketing_agents.domain.entities._validation import require_digest, require_id, require_utc
 from marketing_agents.domain.enums import ApprovalStatus
 from marketing_agents.security.redaction import redact
@@ -38,12 +42,18 @@ class ApprovalPolicySnapshot:
 
     def __post_init__(self) -> None:
         require_id(self.policy_id, "approval policy ID")
-        if not self.required_roles or not self.required_scopes:
+        if isinstance(self.required_roles, str) or isinstance(self.required_scopes, str):
+            raise ValueError("approval authorities must be collections of identifiers")
+        roles = frozenset(self.required_roles)
+        scopes = frozenset(self.required_scopes)
+        if not roles or not scopes:
             raise ValueError("approval policy must retain required roles and scopes")
-        for value in (*self.required_roles, *self.required_scopes):
+        for value in (*roles, *scopes):
             require_id(value, "approval authority")
         if not 60 <= self.expires_after_seconds <= 86_400:
             raise ValueError("approval expiry must be finite from 60 through 86400 seconds")
+        object.__setattr__(self, "required_roles", roles)
+        object.__setattr__(self, "required_scopes", scopes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +94,12 @@ class ProposedExternalAction:
             raise ApprovalBindingError("proposal_hash_mismatch", "proposal hash is not current")
         object.__setattr__(self, "redacted_projection", _deep_freeze(self.redacted_projection))
 
+    @property
+    def key_material(self) -> ExternalActionKeyMaterial:
+        """Expose stable inputs without deriving RUN-05 persistence keys here."""
+
+        return self.envelope.key_material()
+
 
 @dataclass(frozen=True, slots=True)
 class ActionApprovalRequest:
@@ -93,12 +109,16 @@ class ActionApprovalRequest:
     action_hash: str
     authorization_set_id: str
     run_id: str
+    plan_hash: str
+    proposal_revision: int
     step_id: str
+    step_key: str
     template_id: str
     instance_id: str
     action_type: str
     capability_id: str
     binding_id: str
+    semantic_action_hash: str
     redacted_destination: str
     redacted_projection: Mapping[str, Any]
     policy: ApprovalPolicySnapshot
@@ -114,18 +134,28 @@ class ActionApprovalRequest:
             "authorization_set_id",
             "run_id",
             "step_id",
+            "step_key",
             "template_id",
             "instance_id",
+            "action_type",
             "capability_id",
             "binding_id",
             "requested_by",
         ):
             require_id(getattr(self, field_name), field_name)
         require_digest(self.action_hash, "approval request action hash")
+        require_digest(self.plan_hash, "approval request plan hash")
+        require_digest(self.semantic_action_hash, "approval request semantic action hash")
         require_utc(self.requested_at, "approval request time")
         require_utc(self.expires_at, "approval request expiry")
         if self.generation < 1:
             raise ValueError("approval generation must be positive")
+        if (
+            not isinstance(self.proposal_revision, int)
+            or isinstance(self.proposal_revision, bool)
+            or self.proposal_revision < 1
+        ):
+            raise ValueError("proposal revision must be positive")
         if self.expires_at <= self.requested_at:
             raise ValueError("approval expiry must follow request time")
         if self.status is not ApprovalStatus.PENDING:
@@ -151,12 +181,16 @@ def request_approval(
         action_hash=proposed_action.action_hash,
         authorization_set_id=envelope.authorization_set_id,
         run_id=envelope.run_id,
+        plan_hash=envelope.plan_hash,
+        proposal_revision=envelope.proposal_revision,
         step_id=envelope.step_id,
+        step_key=envelope.step_key,
         template_id=envelope.template_id,
         instance_id=envelope.instance_id,
         action_type=envelope.action_type,
         capability_id=envelope.capability_id,
         binding_id=envelope.binding_id,
+        semantic_action_hash=envelope.semantic_action_hash,
         redacted_destination=str(proposed_action.redacted_projection["destination"]),
         redacted_projection=proposed_action.redacted_projection,
         policy=policy,
@@ -177,12 +211,22 @@ def assert_request_binds_action(
             "approval_set_mismatch",
         ),
         (request.run_id == action.run_id, "approval_run_mismatch"),
+        (request.plan_hash == action.plan_hash, "approval_plan_mismatch"),
+        (
+            request.proposal_revision == action.proposal_revision,
+            "approval_revision_mismatch",
+        ),
         (request.step_id == action.step_id, "approval_step_mismatch"),
+        (request.step_key == action.step_key, "approval_step_key_mismatch"),
         (request.template_id == action.template_id, "approval_template_mismatch"),
         (request.instance_id == action.instance_id, "approval_instance_mismatch"),
         (request.action_type == action.action_type, "approval_type_mismatch"),
         (request.capability_id == action.capability_id, "approval_capability_mismatch"),
         (request.binding_id == action.binding_id, "approval_binding_mismatch"),
+        (
+            request.semantic_action_hash == action.semantic_action_hash,
+            "approval_semantic_hash_mismatch",
+        ),
     )
     for valid, code in checks:
         if not valid:

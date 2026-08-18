@@ -14,7 +14,12 @@ from marketing_agents.application.policies.write_authorization import (
     WriteAuthorizationGuard,
 )
 from marketing_agents.application.ports.connectors import ConnectorWriteResult
-from marketing_agents.domain.action_hash import CanonicalExternalAction, canonical_action_hash
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    SemanticExternalAction,
+    canonical_action_hash,
+    semantic_action_hash,
+)
 from marketing_agents.domain.canonical_json import CanonicalJsonError, canonical_json_bytes
 from marketing_agents.infrastructure.catalog import compile_catalog
 
@@ -23,11 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _action(action_type: str = "newsletter.subscribe") -> CanonicalExternalAction:
-    return CanonicalExternalAction(
-        action_id="action:1",
-        authorization_set_id="authorization-set:1",
-        run_id="run:1",
-        step_id="step:write",
+    semantic = SemanticExternalAction(
         template_id="tpl.email.newsletter.newsletter-subscriber",
         instance_id="inst.email.newsletter.newsletter-subscriber.01",
         action_type=action_type,
@@ -37,6 +38,25 @@ def _action(action_type: str = "newsletter.subscribe") -> CanonicalExternalActio
         destination="list:newsletter",
         payload_schema_id="schema:newsletter-subscribe:v1",
         minimized_payload={"contact_ref": "contact:1"},
+    )
+    return CanonicalExternalAction(
+        action_id="action:1",
+        authorization_set_id="authorization-set:1",
+        run_id="run:1",
+        plan_hash="a" * 64,
+        proposal_revision=1,
+        step_id="step:write",
+        step_key="write",
+        template_id=semantic.template_id,
+        instance_id=semantic.instance_id,
+        action_type=action_type,
+        capability_id=semantic.capability_id,
+        connector_family=semantic.connector_family,
+        binding_id=semantic.binding_id,
+        destination=semantic.destination,
+        payload_schema_id=semantic.payload_schema_id,
+        minimized_payload=semantic.minimized_payload,
+        semantic_action_hash=semantic_action_hash(semantic),
     )
 
 
@@ -111,7 +131,10 @@ def test_safe_02_exact_reserved_action_produces_one_connector_call() -> None:
     ("field", "changed"),
     [
         ("run_id", "run:changed"),
+        ("plan_hash", "b" * 64),
+        ("proposal_revision", 2),
         ("step_id", "step:changed"),
+        ("step_key", "changed"),
         ("template_id", "tpl.changed"),
         ("instance_id", "inst.changed"),
         ("action_type", "newsletter.unsubscribe"),
@@ -121,6 +144,7 @@ def test_safe_02_exact_reserved_action_produces_one_connector_call() -> None:
         ("destination", "list:changed"),
         ("payload_schema_id", "schema:changed"),
         ("minimized_payload", {"contact_ref": "contact:changed"}),
+        ("semantic_action_hash", "0" * 64),
     ],
 )
 def test_safe_02_tampering_any_canonical_action_field_invalidates_approval(

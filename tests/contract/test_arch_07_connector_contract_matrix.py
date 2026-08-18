@@ -37,7 +37,12 @@ from marketing_agents.application.ports.connectors import (
     ConnectorPortError,
 )
 from marketing_agents.config import Settings
-from marketing_agents.domain.action_hash import CanonicalExternalAction, canonical_action_hash
+from marketing_agents.domain.action_hash import (
+    CanonicalExternalAction,
+    SemanticExternalAction,
+    canonical_action_hash,
+    semantic_action_hash,
+)
 from marketing_agents.infrastructure.adapters.connectors import mock, registry
 from marketing_agents.infrastructure.adapters.connectors.mock import build_connector_bundle
 from marketing_agents.infrastructure.adapters.connectors.registry import (
@@ -76,11 +81,7 @@ def _authorized_command(
 ):
     registration = bundle.registry.declaration(capability_id)  # type: ignore[attr-defined]
     metadata = registration.metadata
-    action = CanonicalExternalAction(
-        action_id=f"action:{capability_id}",
-        authorization_set_id="authorization-set:arch-07",
-        run_id="run:arch-07",
-        step_id="step:connector-write",
+    semantic = SemanticExternalAction(
         template_id="tpl.email.newsletter.newsletter-subscriber",
         instance_id="inst.email.newsletter.newsletter-subscriber.01",
         action_type=capability_id.removeprefix("cap."),
@@ -90,6 +91,25 @@ def _authorized_command(
         destination="mock-destination:arch-07",
         payload_schema_id=metadata.request_schema_id,
         minimized_payload=command.model_dump(mode="json"),
+    )
+    action = CanonicalExternalAction(
+        action_id=f"action:{capability_id}",
+        authorization_set_id="authorization-set:arch-07",
+        run_id="run:arch-07",
+        plan_hash="a" * 64,
+        proposal_revision=1,
+        step_id="step:connector-write",
+        step_key="connector-write",
+        template_id=semantic.template_id,
+        instance_id=semantic.instance_id,
+        action_type=semantic.action_type,
+        capability_id=capability_id,
+        connector_family=semantic.connector_family,
+        binding_id=semantic.binding_id,
+        destination=semantic.destination,
+        payload_schema_id=semantic.payload_schema_id,
+        minimized_payload=semantic.minimized_payload,
+        semantic_action_hash=semantic_action_hash(semantic),
     )
     reservation = ApprovalReservation(
         reservation_id=f"reservation:{capability_id}",

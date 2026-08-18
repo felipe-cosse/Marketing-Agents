@@ -1,0 +1,137 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-02",
+  "matrix_statement_sha256": "2b784115434f1741c93bb0ffec136a86192685ff202f5adb0d50c1642cbf1939",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/__init__.py",
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/domain/action_hash.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "tests/unit/application/test_run_02_effect_aware_planning.py",
+      "tests/security/test_safe_02_external_write_authorization.py",
+      "tests/contract/test_arch_07_connector_contract_matrix.py",
+      "tests/unit/domain/test_run_07_exact_action_approval.py",
+      "tests/unit/application/test_run_09_approval_invalidation.py",
+      "docs/verification/requirements/RUN-02.json",
+      "docs/verification/requirements/RUN-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+          "apps/api/src/marketing_agents/domain/action_hash.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/unit/application/test_run_02_effect_aware_planning.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "trusted-effect-direct-or-paused",
+      "type": "contract",
+      "statement": "The planner snapshots catalog and registry metadata supplied by trusted composition and requires its catalog release label to match the route: reads release directly, while any validated write produces an approval-required disposition bound to the structural hash.",
+      "test_refs": [
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_read_only_plan_releases_directly_without_time_or_ids",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_real_mixed_route_proposes_exact_redacted_action_and_pauses",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_public_plan_cannot_forge_release_or_redacted_projection"
+      ]
+    },
+    {
+      "id": "all-write-proposals-before-release",
+      "type": "contract",
+      "statement": "Every write step receives one exact immutable proposal and one matching pending approval request in a shared authorization set before the plan can leave planning.",
+      "test_refs": [
+                "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_all_writes_are_proposed_before_one_authorization_set_releases",
+                "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_real_mixed_route_proposes_exact_redacted_action_and_pauses"
+      ]
+    },
+    {
+      "id": "zero-write-calls-before-approval",
+      "type": "negative_control",
+      "statement": "Planning accepts metadata, graph, route, typed command, effective binding, clock, and ID ports only; failures create no authority, no connector is injectable, and the gate denies network sockets.",
+      "test_refs": [
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_invalid_effective_binding_fails_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_missing_effective_binding_fails_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_effect_or_command_forgery_fails_closed"
+      ]
+    },
+    {
+      "id": "stable-action-key-boundary",
+      "type": "contract",
+      "statement": "Structural plan, semantic action, and exact action hashes are domain-separated; immutable RUN-05 key material excludes random action and authorization-set IDs while retaining run, plan, revision, step, type, binding, and semantic identity.",
+      "test_refs": [
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_replanning_reuses_structural_and_semantic_key_material",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_hash_domains_have_fixed_golden_vectors",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_command_and_action_payloads_are_deep_immutable_snapshots"
+      ]
+    },
+    {
+      "id": "effect-and-operation-drift-rejected",
+      "type": "negative_control",
+      "statement": "Catalog release-label drift, unilateral catalog-operation effect or idempotency drift, untyped commands, disabled operations, forged routes, and missing, disabled, wrong-family, wrong-ID, or stale-revision bindings fail before approval authority exists.",
+      "test_refs": [
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_catalog_release_label_drift_fails_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_operation_effect_or_idempotency_drift_fails_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_disabled_operation_and_forged_route_fail_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_invalid_effective_binding_fails_before_authority",
+        "tests/unit/application/test_run_02_effect_aware_planning.py::test_run_02_effect_or_command_forgery_fails_closed"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-02-effect-aware-planning",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_run_02_effect_aware_planning.py",
+        "tests/security/test_safe_02_external_write_authorization.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/unit/domain/test_run_07_exact_action_approval.py",
+        "tests/unit/application/test_run_09_approval_invalidation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "trusted-effect-direct-or-paused",
+        "all-write-proposals-before-release",
+        "zero-write-calls-before-approval",
+        "stable-action-key-boundary",
+        "effect-and-operation-drift-rejected"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/domain/action_hash.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/application/orchestration/router.py",
+      "apps/api/src/marketing_agents/domain/graph.py",
+      "apps/api/src/marketing_agents/domain/run_lifecycle.py"
+    ],
+    "gate_id": "run-02-effect-aware-planning"
+  },
+  "limitations": [
+    "RUN-02 creates pure in-memory plan snapshots and inert approval requests; RUN-05 owns action persistence, idempotency-key derivation, claims, replay recovery, dispatch, and receipts.",
+    "RUN-08 owns durable approval hydration and projection persistence; ORCH-08 owns approval-barrier consumption; RUN-10 owns decision authority and scope evaluation.",
+    "ORCH-09 owns durable audit events, ORCH-06 owns runtime retries and budgets, and DEL-04 owns database migrations and seeding.",
+    "The no-network gate proves the pure planner has no connector authority and failed validation produces zero IDs or clock reads; crash recovery remains a persistence concern.",
+    "Trusted runtime composition must atomically supply the content hash and records from the same validated CompiledCatalog plus its validated connector registry; the planner cannot recompute the compiler's full content hash from its structural subset, so coordinated forged metadata under a valid label is outside this contract.",
+    "The existing exact-action v1 hash was a pre-release, unpersisted development contract; RUN-02 finalizes its projection and locks structural, semantic, destination, and exact golden vectors before any RUN-05 persistence exists."
+  ]
+}
