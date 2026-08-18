@@ -1,0 +1,21 @@
+departments:
+  - id: dept.social-media
+    display_name: Social media
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#social-media--12-instances]
+  - id: dept.blog-seo
+    display_name: Blog & SEO
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#blog--seo--6-instances]
+  - id: dept.email
+    display_name: Email
+    display_order: 30
+    source_references: [IMPLEMENTATION_PROMPT.md#email--5-instances]
+  - id: dept.community
+    display_name: Community
+    display_order: 40
+    source_references: [IMPLEMENTATION_PROMPT.md#community--14-instances-from-7-templates]
+  - id: dept.partnerships
+    display_name: Partnerships
+    display_order: 50
+    source_references: [IMPLEMENTATION_PROMPT.md#partnerships--6-instances]

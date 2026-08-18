@@ -1,0 +1,61 @@
+functions:
+  - id: func.social-media.new-content
+    department_id: dept.social-media
+    display_name: New content
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
+  - id: func.social-media.research
+    department_id: dept.social-media
+    display_name: Research
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#research--2]
+  - id: func.social-media.tracking-analysis
+    department_id: dept.social-media
+    display_name: Tracking & analysis
+    display_order: 30
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
+  - id: func.blog-seo.new-content
+    department_id: dept.blog-seo
+    display_name: New content
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#new-content--3]
+  - id: func.blog-seo.tracking-analysis
+    department_id: dept.blog-seo
+    display_name: Tracking & analysis
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--3]
+  - id: func.email.newsletter
+    department_id: dept.email
+    display_name: Newsletter
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#newsletter--2]
+  - id: func.email.lifecycle-marketing
+    department_id: dept.email
+    display_name: Lifecycle marketing
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#lifecycle-marketing--3]
+  - id: func.community.events
+    department_id: dept.community
+    display_name: Events
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#events--6]
+  - id: func.community.education
+    department_id: dept.community
+    display_name: Education
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#education--6]
+  - id: func.community.discussion
+    department_id: dept.community
+    display_name: Discussion
+    display_order: 30
+    source_references: [IMPLEMENTATION_PROMPT.md#discussion--2]
+  - id: func.partnerships.implementation-partners
+    department_id: dept.partnerships
+    display_name: Implementation partners
+    display_order: 10
+    source_references: [IMPLEMENTATION_PROMPT.md#implementation-partners--5]
+  - id: func.partnerships.integration-partners
+    department_id: dept.partnerships
+    display_name: Integration partners
+    display_order: 20
+    source_references: [IMPLEMENTATION_PROMPT.md#integration-partners--1]

@@ -1,0 +1,22 @@
+format_version: 1
+content_version: 1.0.0
+json_schema_dialect: https://json-schema.org/draft/2020-12/schema
+files:
+  departments: departments.yaml
+  functions: functions.yaml
+  tool_capabilities: tool-capabilities.yaml
+  approval_policies: approval-policies.yaml
+  templates:
+    - templates/social-media.yaml
+    - templates/blog-seo.yaml
+    - templates/email.yaml
+    - templates/community.yaml
+    - templates/partnerships.yaml
+  instances:
+    - instances/social-media.yaml
+    - instances/blog-seo.yaml
+    - instances/email.yaml
+    - instances/community.yaml
+    - instances/partnerships.yaml
+source_evidence:
+  - source-evidence.md

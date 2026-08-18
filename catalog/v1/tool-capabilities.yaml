@@ -1,0 +1,155 @@
+tool_capabilities:
+  - id: cap.model.generate-structured
+    description: Generate schema-constrained structured content through the configured model provider.
+    effect: read
+    connector_family: model
+    idempotency_support: not_applicable
+    default_timeout_seconds: 60
+    data_classification: internal
+  - id: cap.artifact.transform-deterministic
+    description: Perform a bounded deterministic transformation on a local artifact.
+    effect: read
+    connector_family: artifact
+    idempotency_support: not_applicable
+    default_timeout_seconds: 10
+    data_classification: internal
+  - id: cap.social.read-posts
+    description: Read posts by explicit supplied identifiers without unofficial scraping.
+    effect: read
+    connector_family: social
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.social.read-comments
+    description: Read comments by explicit supplied identifiers without replying.
+    effect: read
+    connector_family: social
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.social.read-metrics
+    description: Read bounded social metrics for explicit supplied identifiers.
+    effect: read
+    connector_family: social
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.social.read-profiles
+    description: Read explicitly supplied public profile summaries without crawling.
+    effect: read
+    connector_family: social
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: public
+  - id: cap.newsletter.subscribe
+    description: Subscribe one approved contact to one configured newsletter list.
+    effect: write
+    connector_family: newsletter
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.newsletter.unsubscribe
+    description: Unsubscribe one approved contact from one configured newsletter list.
+    effect: write
+    connector_family: newsletter
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.email.send-message
+    description: Send one approved message through one configured email binding; unassigned in v1.
+    effect: write
+    connector_family: newsletter
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.crm.read-customer
+    description: Read a bounded customer or contact summary.
+    effect: read
+    connector_family: crm
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.crm.upsert-contact
+    description: Create or update one exact approved CRM contact.
+    effect: write
+    connector_family: crm
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.cms.read-content
+    description: Read supplied content metadata through a configured CMS binding.
+    effect: read
+    connector_family: cms
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.events.read-sessions
+    description: Read bounded live-event session metadata.
+    effect: read
+    connector_family: events
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.events.read-attendance
+    description: Read bounded event signup and attendance records.
+    effect: read
+    connector_family: events
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.events.enroll-attendee
+    description: Enroll one exact approved attendee in one configured event session.
+    effect: write
+    connector_family: events
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.community.read-membership
+    description: Read bounded community membership information.
+    effect: read
+    connector_family: community
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.community.read-course-progress
+    description: Read bounded participant course-progress information.
+    effect: read
+    connector_family: community
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.messaging.send-message
+    description: Send one exact approved community message.
+    effect: write
+    connector_family: community
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.messaging.share-material
+    description: Share one exact approved course-material artifact.
+    effect: write
+    connector_family: community
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: personal
+  - id: cap.spreadsheet.read-range
+    description: Read a bounded typed range through a configured spreadsheet binding.
+    effect: read
+    connector_family: spreadsheet
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.spreadsheet.update-rows
+    description: Update bounded approved typed rows; unassigned in v1.
+    effect: write
+    connector_family: spreadsheet
+    idempotency_support: required
+    default_timeout_seconds: 30
+    data_classification: internal
+  - id: cap.fulfillment.read-status
+    description: Read fulfillment status by an explicit supplied identifier.
+    effect: read
+    connector_family: fulfillment
+    idempotency_support: not_applicable
+    default_timeout_seconds: 30
+    data_classification: personal
