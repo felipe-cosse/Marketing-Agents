@@ -50,6 +50,7 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "step.recorded": _STEP_FIELDS | _PLAN_FIELDS,
     "step.transitioned": _RUN_FIELDS | _STEP_FIELDS,
     "action.proposed": frozenset({"idempotency_support"}),
+    "action.awaiting_approval": frozenset({"idempotency_support"}),
     "action.dispatch_claimed": frozenset({"idempotency_support"}),
     "action.call_started": frozenset({"idempotency_support"}),
     "action.retry_released": _ACTION_FIELDS,
@@ -58,16 +59,57 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "action.outcome_unknown": _ACTION_FIELDS,
     "action.receipt_reconciled": _ACTION_FIELDS,
     "connector.receipt_committed": frozenset({"connector_status"}),
+    "approval.requested": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+        }
+    ),
+    "approval.expired": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+        }
+    ),
+    "approval.renewed": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "replacement_request_id",
+            "status",
+        }
+    ),
 }
 _DIGEST_FIELDS = frozenset({"graph_hash", "plan_hash", "routing_hash", "workflow_definition_hash"})
 _POSITIVE_INTEGER_FIELDS = frozenset(
-    {"configuration_revision", "ordinal", "step_count", "workflow_version"}
+    {
+        "action_version",
+        "configuration_revision",
+        "generation",
+        "ordinal",
+        "proposal_revision",
+        "step_count",
+        "workflow_version",
+    }
 )
 _BOOLEAN_FIELDS = frozenset({"terminal_result"})
 _CONNECTOR_STATUSES = frozenset(
     {"accepted", "completed", "mock_committed", "mock_succeeded", "succeeded"}
 )
 _IDEMPOTENCY_SUPPORT = frozenset({"required", "supported", "unavailable"})
+_APPROVAL_STATUSES = frozenset({"pending", "expired"})
+_APPROVAL_ACTION_STATES = frozenset({"awaiting_approval"})
 _COMMANDS = frozenset(
     {
         "activate_plan",
@@ -191,6 +233,14 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
     if field_name == "conclusion" and value not in _CONCLUSIONS:
         raise AuditMetadataError(
             "metadata_value_invalid", "action conclusion is not an allowlisted value"
+        )
+    if field_name == "status" and value not in _APPROVAL_STATUSES:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "approval status is not an allowlisted safe code"
+        )
+    if field_name == "action_state" and value not in _APPROVAL_ACTION_STATES:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "approval action state is not an allowlisted safe code"
         )
 
 

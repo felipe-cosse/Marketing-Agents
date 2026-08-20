@@ -24,8 +24,10 @@ from marketing_agents.domain.approval import (
     ActionApprovalRequest,
     ApprovalPolicySnapshot,
     ProposedExternalAction,
+    approval_redaction_schema,
     assert_request_binds_action,
     request_approval,
+    safe_approval_destination,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities._validation import (
@@ -401,8 +403,8 @@ class EffectPlan:
                 raise ValueError("write proposal is outside its immutable plan step scope")
             expected_projection = ProposedExternalAction.create(
                 envelope,
-                redacted_destination=_safe_destination_summary(envelope.binding_id),
-                payload_schema=_redaction_schema(step.request_redaction_fields),
+                redacted_destination=safe_approval_destination(envelope.binding_id),
+                payload_schema=approval_redaction_schema(step.request_redaction_fields),
             ).redacted_projection
             if (
                 proposal.redacted_projection != expected_projection
@@ -653,8 +655,8 @@ class EffectAwarePlanner:
             )
             proposal = ProposedExternalAction.create(
                 envelope,
-                redacted_destination=_safe_destination_summary(envelope.binding_id),
-                payload_schema=_redaction_schema(operation.request_redaction_fields),
+                redacted_destination=safe_approval_destination(envelope.binding_id),
+                payload_schema=approval_redaction_schema(operation.request_redaction_fields),
             )
             proposed_actions.append(proposal)
             approval_requests.append(
@@ -1151,27 +1153,6 @@ def _action_type(capability_id: str) -> str:
     value = capability_id.removeprefix("cap.")
     require_id(value, "action type")
     return value
-
-
-def _redaction_schema(fields: tuple[str, ...]) -> Mapping[str, Any]:
-    """Build the schema used for approval projection from trusted registry pointers."""
-
-    root: dict[str, Any] = {"type": "object", "properties": {}}
-    for pointer in fields:
-        tokens = pointer.removeprefix("/").split("/")
-        properties = root["properties"]
-        for index, encoded in enumerate(tokens):
-            token = encoded.replace("~1", "/").replace("~0", "~")
-            if index == len(tokens) - 1:
-                properties[token] = {"x-sensitive": True}
-            else:
-                child = properties.setdefault(token, {"type": "object", "properties": {}})
-                properties = child["properties"]
-    return root
-
-
-def _safe_destination_summary(binding_id: str) -> str:
-    return f"configured destination via {binding_id}"
 
 
 def _canonical_destination(payload: Mapping[str, Any]) -> str:

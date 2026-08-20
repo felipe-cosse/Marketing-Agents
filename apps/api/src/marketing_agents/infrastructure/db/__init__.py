@@ -2,6 +2,9 @@
 
 from .base import NAMING_CONVENTION, Base
 from .models import (
+    ApprovalDecisionRecord,
+    ApprovalRequestRecord,
+    ApprovalUseRecord,
     AuditEventRecord,
     ConnectorActionReceiptRecord,
     ExternalActionDispatchAttemptRecord,
@@ -17,9 +20,11 @@ from .models import (
     WorkItemRecord,
 )
 from .repositories import (
+    ApprovalPersistenceConflict,
     AuditPersistenceInvariantError,
     ExternalActionPersistenceConflict,
     RunPersistenceInvariantError,
+    SQLAlchemyApprovalRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyConnectorReceiptRepository,
     SQLAlchemyExternalActionRepository,
@@ -41,6 +46,10 @@ from .url import DatabaseURLError, parse_database_url, safe_database_url
 
 __all__ = [
     "NAMING_CONVENTION",
+    "ApprovalDecisionRecord",
+    "ApprovalPersistenceConflict",
+    "ApprovalRequestRecord",
+    "ApprovalUseRecord",
     "AuditEventRecord",
     "AuditPersistenceInvariantError",
     "Base",
@@ -60,6 +69,7 @@ __all__ = [
     "RunStepDependencyRecord",
     "RunStepRecord",
     "RunStepStateTransitionRecord",
+    "SQLAlchemyApprovalRepository",
     "SQLAlchemyAuditRepository",
     "SQLAlchemyConnectorReceiptRepository",
     "SQLAlchemyExternalActionRepository",

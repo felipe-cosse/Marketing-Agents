@@ -1,62 +1,17 @@
-"""Approval and schedule-occurrence entities."""
+"""Schedule and occurrence entities."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from marketing_agents.domain.enums import (
-    ApprovalDecisionKind,
-    ApprovalStatus,
     MisfirePolicy,
     OccurrenceState,
 )
 
-from ._validation import frozen_mapping, require_digest, require_id, require_text, require_utc
-
-
-@dataclass(frozen=True, slots=True)
-class ApprovalRequest:
-    id: str
-    action_id: str
-    action_hash: str
-    redacted_payload: Mapping[str, Any]
-    policy_id: str
-    requested_by: str
-    requested_at: datetime
-    expires_at: datetime
-    status: ApprovalStatus
-
-    def __post_init__(self) -> None:
-        for field_name in ("id", "action_id", "policy_id", "requested_by"):
-            require_id(getattr(self, field_name), field_name)
-        require_digest(self.action_hash, "approval action hash")
-        require_utc(self.requested_at, "approval request time")
-        require_utc(self.expires_at, "approval expiry time")
-        if self.expires_at <= self.requested_at:
-            raise ValueError("approval must expire after it is requested")
-        object.__setattr__(self, "redacted_payload", frozen_mapping(self.redacted_payload))
-
-
-@dataclass(frozen=True, slots=True)
-class ApprovalDecision:
-    id: str
-    request_id: str
-    actor_id: str
-    decision: ApprovalDecisionKind
-    expected_action_hash: str
-    reason: str
-    decided_at: datetime
-
-    def __post_init__(self) -> None:
-        for field_name in ("id", "request_id", "actor_id"):
-            require_id(getattr(self, field_name), field_name)
-        require_digest(self.expected_action_hash, "decision action hash")
-        require_text(self.reason, "decision reason", maximum=1_000)
-        require_utc(self.decided_at, "decision time")
+from ._validation import require_id, require_text, require_utc
 
 
 @dataclass(frozen=True, slots=True)

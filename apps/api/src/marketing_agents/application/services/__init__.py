@@ -1,5 +1,11 @@
 """Framework-independent application services."""
 
+from .approval_records import (
+    ApprovalRecordService,
+    ApprovalRecordServiceError,
+    RegisteredApprovalSet,
+    RenewedApprovalRequest,
+)
 from .external_action_dispatcher import (
     DispatchDisposition,
     ExternalActionDispatcher,
@@ -55,6 +61,8 @@ from .work_admission import (
 
 __all__ = [
     "AdmissionDisposition",
+    "ApprovalRecordService",
+    "ApprovalRecordServiceError",
     "AuditedPlanPersistenceService",
     "CampaignBriefPolicy",
     "CampaignBriefRevision",
@@ -73,8 +81,10 @@ __all__ = [
     "PlanPersistenceError",
     "ReceiveRunRequest",
     "ReceiveRunResult",
+    "RegisteredApprovalSet",
     "RegisteredExternalAction",
     "RegisteredExternalActionSet",
+    "RenewedApprovalRequest",
     "RunAdvanceAttempt",
     "RunAdvanceDisposition",
     "RunLifecycleService",

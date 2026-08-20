@@ -14,6 +14,7 @@ from ._validation import (
     frozen_mapping,
     require_digest,
     require_id,
+    require_json_pointers,
     require_unique,
     require_utc,
 )
@@ -276,8 +277,11 @@ class RunStep:
             or self.binding_configuration_revision < 1
         ):
             raise ValueError("step binding configuration revision must be positive")
+        require_json_pointers(
+            self.request_redaction_fields,
+            "step request redaction fields",
+        )
         for values, name in (
-            (self.request_redaction_fields, "step request redaction fields"),
             (self.approval_required_roles, "step approval roles"),
             (self.approval_required_scopes, "step approval scopes"),
         ):

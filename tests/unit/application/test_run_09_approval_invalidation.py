@@ -1,4 +1,4 @@
-"""RUN-09: any action-payload change invalidates and supersedes approval."""
+"""RUN-08/RUN-09: action changes need a new set epoch; only expiry renews a leaf."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import pytest
 from marketing_agents.application.services.approval_integrity import (
     ApprovalIntegrityError,
     invalidate_and_replace,
+    renew_expired_request,
     validate_current_action,
 )
 from marketing_agents.domain.action_hash import (
@@ -18,6 +19,7 @@ from marketing_agents.domain.action_hash import (
 from marketing_agents.domain.approval import (
     ApprovalPolicySnapshot,
     ProposedExternalAction,
+    StoredActionApprovalRequest,
     request_approval,
 )
 
@@ -104,9 +106,11 @@ def _request() -> object:
         ("capability_id", "cap.email.unsubscribe"),
         ("binding_id", "binding.mock.other"),
         ("minimized_payload", {"display_name": "Changed", "details": {"a": 1}}),
+        ("plan_hash", "b" * 64),
+        ("authorization_set_id", "authorization-set.2"),
     ],
 )
-def test_run_09_action_mutation_invalidates_and_creates_next_generation(
+def test_run_09_action_mutation_invalidates_and_requires_new_set_epoch(
     field: str, changed: object
 ) -> None:
     current = _request()
@@ -115,20 +119,16 @@ def test_run_09_action_mutation_invalidates_and_creates_next_generation(
         validate_current_action(current, action)  # type: ignore[arg-type]
     assert captured.value.code == "approval_invalidated"
 
-    replacement = invalidate_and_replace(
-        current_request=current,  # type: ignore[arg-type]
-        replacement_request_id="approval-request.2",
-        replacement_action=_proposal(action),
-        requested_by="principal.local.operator",
-        now=NOW,
-        expected_client_hash=current.action_hash,  # type: ignore[attr-defined]
-    )
-    assert replacement.replacement.generation == 2
-    assert replacement.replacement.action_hash != current.action_hash  # type: ignore[attr-defined]
-    assert not replacement.superseded.authorizable
-    with pytest.raises(ApprovalIntegrityError) as superseded:
-        replacement.superseded.reject_authorization()
-    assert superseded.value.code == "approval_superseded"
+    with pytest.raises(ApprovalIntegrityError) as replacement:
+        invalidate_and_replace(
+            current_request=current,  # type: ignore[arg-type]
+            replacement_request_id="approval-request.2",
+            replacement_action=_proposal(action),
+            requested_by="principal.local.operator",
+            now=NOW,
+            expected_client_hash=current.action_hash,  # type: ignore[attr-defined]
+        )
+    assert replacement.value.code == "full_set_epoch_required"
 
 
 def test_run_09_canonical_key_order_and_unicode_equivalence_do_not_invalidate() -> None:
@@ -170,4 +170,21 @@ def test_run_09_stale_client_hash_and_replacement_scope_fail_closed() -> None:
             now=NOW,
             expected_client_hash=current.action_hash,  # type: ignore[attr-defined]
         )
-    assert mismatch.value.code == "replacement_scope_mismatch"
+    assert mismatch.value.code == "full_set_epoch_required"
+
+
+def test_run_09_expiry_renews_only_the_same_exact_action_leaf() -> None:
+    request = _request()
+    stored = StoredActionApprovalRequest.created(request)  # type: ignore[arg-type]
+    renewal = renew_expired_request(
+        current=stored,
+        replacement_request_id="approval-request.2",
+        exact_action=_proposal(_action()),
+        now=request.expires_at,  # type: ignore[attr-defined]
+        expected_client_hash=request.action_hash,  # type: ignore[attr-defined]
+    )
+    assert renewal.expired.replacement_request_id == renewal.replacement.id
+    assert renewal.replacement.generation == 2
+    assert renewal.replacement.action_id == request.action_id  # type: ignore[attr-defined]
+    assert renewal.replacement.authorization_set_id == request.authorization_set_id  # type: ignore[attr-defined]
+    assert renewal.replacement.proposal_revision == request.proposal_revision  # type: ignore[attr-defined]

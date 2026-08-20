@@ -11,7 +11,7 @@ from .catalog import (
     ToolCapability,
     TriggerDefinition,
 )
-from .control import ApprovalDecision, ApprovalRequest, Schedule, ScheduleOccurrence
+from .control import Schedule, ScheduleOccurrence
 from .external_action import (
     MAX_DELIVERY_ATTEMPTS,
     ActionReservationSnapshot,
@@ -36,9 +36,7 @@ __all__ = [
     "ActionReservationSnapshot",
     "AgentInstance",
     "AgentTemplate",
-    "ApprovalDecision",
     "ApprovalPolicy",
-    "ApprovalRequest",
     "Artifact",
     "AuditEvent",
     "CampaignBrief",
