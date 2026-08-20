@@ -1,5 +1,7 @@
 """Framework-independent immutable domain entities."""
 
+from marketing_agents.domain.audit import AuditEvent
+
 from .catalog import (
     AgentInstance,
     AgentTemplate,
@@ -9,7 +11,7 @@ from .catalog import (
     ToolCapability,
     TriggerDefinition,
 )
-from .control import ApprovalDecision, ApprovalRequest, AuditEvent, Schedule, ScheduleOccurrence
+from .control import ApprovalDecision, ApprovalRequest, Schedule, ScheduleOccurrence
 from .external_action import (
     MAX_DELIVERY_ATTEMPTS,
     ActionReservationSnapshot,
@@ -19,7 +21,14 @@ from .external_action import (
     ExternalAction,
     ExternalActionResultSnapshot,
 )
-from .runtime import Artifact, Run, RunStep
+from .runtime import (
+    Artifact,
+    Run,
+    RunPlanRoutingAssignment,
+    RunPlanSelectedInstance,
+    RunPlanSnapshot,
+    RunStep,
+)
 from .work import CampaignBrief, WorkItem
 
 __all__ = [
@@ -41,6 +50,9 @@ __all__ = [
     "ExternalActionResultSnapshot",
     "FunctionTeam",
     "Run",
+    "RunPlanRoutingAssignment",
+    "RunPlanSelectedInstance",
+    "RunPlanSnapshot",
     "RunStep",
     "Schedule",
     "ScheduleOccurrence",

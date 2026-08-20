@@ -29,11 +29,22 @@ from .incoming_work_validation import (
     WorkflowAdmissionDefinition,
     WorkflowAdmissionSnapshot,
 )
+from .plan_persistence import (
+    AuditedPlanPersistenceService,
+    PersistedRunPlan,
+    PlanPersistenceError,
+)
 from .run_lifecycle import (
     ReceiveRunRequest,
     ReceiveRunResult,
+    RunAdvanceAttempt,
+    RunAdvanceDisposition,
     RunLifecycleService,
     RunLifecycleServiceError,
+)
+from .run_step_lifecycle import (
+    RunStepLifecycleService,
+    RunStepLifecycleServiceError,
 )
 from .work_admission import (
     AdmissionDisposition,
@@ -44,6 +55,7 @@ from .work_admission import (
 
 __all__ = [
     "AdmissionDisposition",
+    "AuditedPlanPersistenceService",
     "CampaignBriefPolicy",
     "CampaignBriefRevision",
     "ConfiguredIncomingTrigger",
@@ -57,12 +69,18 @@ __all__ = [
     "IdempotentWorkRunReceiptService",
     "IncomingWorkValidationError",
     "IncomingWorkValidator",
+    "PersistedRunPlan",
+    "PlanPersistenceError",
     "ReceiveRunRequest",
     "ReceiveRunResult",
     "RegisteredExternalAction",
     "RegisteredExternalActionSet",
+    "RunAdvanceAttempt",
+    "RunAdvanceDisposition",
     "RunLifecycleService",
     "RunLifecycleServiceError",
+    "RunStepLifecycleService",
+    "RunStepLifecycleServiceError",
     "ValidatedIncomingWork",
     "WorkAdmissionResult",
     "WorkAdmissionService",

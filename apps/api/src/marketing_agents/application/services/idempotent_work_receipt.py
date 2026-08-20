@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
+from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.entities._validation import require_digest
 from marketing_agents.domain.enums import RunState
@@ -94,12 +95,21 @@ class IdempotentWorkRunReceiptService:
         self._work_admission = WorkAdmissionService(dependencies, digest_key)
         self._run_lifecycle = RunLifecycleService(dependencies)
 
-    async def receive(self, incoming: ValidatedIncomingWork) -> WorkRunReceiptResult:
+    async def receive(
+        self,
+        incoming: ValidatedIncomingWork,
+        *,
+        audit_context: AuditContext,
+    ) -> WorkRunReceiptResult:
         """Create or replay the authoritative pair without accepting caller IDs or time."""
 
         self._require_current_snapshot(incoming)
         async with self._dependencies.unit_of_work() as unit_of_work:
-            result = await self._receive_in_uow(unit_of_work, incoming)
+            result = await self._receive_in_uow(
+                unit_of_work,
+                incoming,
+                audit_context=audit_context,
+            )
             await unit_of_work.commit()
             return result
 
@@ -107,11 +117,17 @@ class IdempotentWorkRunReceiptService:
         self,
         unit_of_work: UnitOfWork,
         incoming: ValidatedIncomingWork,
+        *,
+        audit_context: AuditContext,
     ) -> WorkRunReceiptResult:
         """Create or replay inside a caller-owned transaction without committing it."""
 
         self._require_current_snapshot(incoming)
-        return await self._receive_in_uow(unit_of_work, incoming)
+        return await self._receive_in_uow(
+            unit_of_work,
+            incoming,
+            audit_context=audit_context,
+        )
 
     def _require_current_snapshot(self, incoming: ValidatedIncomingWork) -> None:
         snapshot = _validated_snapshot(incoming)
@@ -125,6 +141,8 @@ class IdempotentWorkRunReceiptService:
         self,
         unit_of_work: UnitOfWork,
         incoming: ValidatedIncomingWork,
+        *,
+        audit_context: AuditContext,
     ) -> WorkRunReceiptResult:
         snapshot = _validated_snapshot(incoming)
         admitted = await self._work_admission.admit_in_uow(unit_of_work, incoming)
@@ -134,6 +152,7 @@ class IdempotentWorkRunReceiptService:
                 work_item=admitted.work_item,
                 catalog_hash=snapshot.catalog_hash,
             ),
+            audit_context=audit_context,
         )
         work_created = admitted.disposition is AdmissionDisposition.CREATED
         if work_created != received.created:

@@ -175,6 +175,12 @@ class RunStateTransition:
         require_id(self.run_id, "transition run ID")
         require_id(self.reason_code, "transition reason code")
         require_utc(self.occurred_at, "transition time")
+        if type(self.command) is not RunLifecycleCommand:
+            raise ValueError("run transition command must use the exact enum")
+        if self.previous_state is not None and type(self.previous_state) is not RunState:
+            raise ValueError("run previous state must use the exact enum")
+        if type(self.new_state) is not RunState:
+            raise ValueError("run new state must use the exact enum")
         if (
             self.sequence != self.resulting_version
             or self.resulting_version != self.expected_version + 1
@@ -201,6 +207,38 @@ class RunStateTransition:
             or self.previous_state is self.new_state
         ):
             raise ValueError("subsequent transition must change an existing state")
+        else:
+            allowed_edges = {
+                RunLifecycleCommand.MARK_VALIDATED: {(RunState.RECEIVED, RunState.VALIDATED)},
+                RunLifecycleCommand.RECORD_PLAN: {(RunState.VALIDATED, RunState.PLANNED)},
+                RunLifecycleCommand.ACTIVATE_PLAN: {
+                    (RunState.PLANNED, RunState.AWAITING_APPROVAL),
+                    (RunState.PLANNED, RunState.EXECUTING),
+                },
+                RunLifecycleCommand.RELEASE_APPROVED_PLAN: {
+                    (RunState.AWAITING_APPROVAL, RunState.EXECUTING)
+                },
+                RunLifecycleCommand.REJECT_APPROVAL: {
+                    (RunState.AWAITING_APPROVAL, RunState.REJECTED)
+                },
+                RunLifecycleCommand.COMPLETE: {(RunState.EXECUTING, RunState.COMPLETED)},
+                RunLifecycleCommand.FAIL: {
+                    (RunState.RECEIVED, RunState.FAILED),
+                    (RunState.VALIDATED, RunState.FAILED),
+                    (RunState.PLANNED, RunState.FAILED),
+                    (RunState.AWAITING_APPROVAL, RunState.FAILED),
+                    (RunState.EXECUTING, RunState.FAILED),
+                },
+                RunLifecycleCommand.CANCEL: {
+                    (RunState.RECEIVED, RunState.CANCELLED),
+                    (RunState.VALIDATED, RunState.CANCELLED),
+                    (RunState.PLANNED, RunState.CANCELLED),
+                    (RunState.AWAITING_APPROVAL, RunState.CANCELLED),
+                    (RunState.EXECUTING, RunState.CANCELLED),
+                },
+            }
+            if (self.previous_state, self.new_state) not in allowed_edges.get(self.command, set()):
+                raise ValueError("run transition command and states are inconsistent")
         if self.command is not RunLifecycleCommand.CANCEL and (
             self.completed_effect_count or self.outcome_unknown_effect_count
         ):
@@ -226,6 +264,54 @@ class RunTransitionResult:
     run: Run
     transition: RunStateTransition
     audit_evidence: RunTransitionEvidence
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.run) is not Run
+            or type(self.transition) is not RunStateTransition
+            or type(self.audit_evidence) is not RunTransitionEvidence
+        ):
+            raise ValueError("run transition result requires exact immutable contracts")
+        self.transition.__post_init__()
+        if (
+            self.run.id != self.transition.run_id
+            or self.run.state is not self.transition.new_state
+            or self.run.version != self.transition.resulting_version
+            or self.run.updated_at != self.transition.occurred_at
+        ):
+            raise ValueError("run transition result does not match its updated Run")
+        evidence = self.audit_evidence
+        if (
+            not evidence.accepted
+            or evidence.run_id != self.run.id
+            or evidence.command is not self.transition.command
+            or evidence.previous_state is not self.transition.previous_state
+            or evidence.requested_state is not self.transition.new_state
+            or evidence.reason_code != self.transition.reason_code
+            or evidence.expected_version != self.transition.expected_version
+            or evidence.occurred_at != self.transition.occurred_at
+            or evidence.completed_effect_count != self.transition.completed_effect_count
+            or evidence.outcome_unknown_effect_count != self.transition.outcome_unknown_effect_count
+        ):
+            raise ValueError("run transition result audit evidence is inconsistent")
+        terminal = self.run.state in _TERMINAL_STATES
+        if terminal != (self.run.terminal_reason_code == self.transition.reason_code):
+            raise ValueError("run transition result terminal reason is inconsistent")
+        if self.transition.command is RunLifecycleCommand.ACTIVATE_PLAN:
+            expected_state = (
+                RunState.AWAITING_APPROVAL if self.run.approval_required else RunState.EXECUTING
+            )
+            if self.run.state is not expected_state:
+                raise ValueError("plan activation does not match its approval disposition")
+        if (
+            self.transition.command
+            in {
+                RunLifecycleCommand.RELEASE_APPROVED_PLAN,
+                RunLifecycleCommand.REJECT_APPROVAL,
+            }
+            and not self.run.approval_required
+        ):
+            raise ValueError("approval transition requires a write-bearing Run")
 
 
 class RunTransitionError(ValueError):

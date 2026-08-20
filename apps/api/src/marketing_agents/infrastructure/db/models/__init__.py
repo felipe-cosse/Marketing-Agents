@@ -5,14 +5,30 @@ from .action import (
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
 )
+from .audit import AuditEventRecord
 from .run import RunRecord, RunStateTransitionRecord
+from .step import (
+    RunPlanRecord,
+    RunPlanRoutingAssignmentRecord,
+    RunPlanSelectedInstanceRecord,
+    RunStepDependencyRecord,
+    RunStepRecord,
+    RunStepStateTransitionRecord,
+)
 from .work import WorkItemRecord
 
 __all__ = [
+    "AuditEventRecord",
     "ConnectorActionReceiptRecord",
     "ExternalActionDispatchAttemptRecord",
     "ExternalActionRecord",
+    "RunPlanRecord",
+    "RunPlanRoutingAssignmentRecord",
+    "RunPlanSelectedInstanceRecord",
     "RunRecord",
     "RunStateTransitionRecord",
+    "RunStepDependencyRecord",
+    "RunStepRecord",
+    "RunStepStateTransitionRecord",
     "WorkItemRecord",
 ]
