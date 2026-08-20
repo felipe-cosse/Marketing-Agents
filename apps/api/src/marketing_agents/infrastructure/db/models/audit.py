@@ -73,6 +73,16 @@ class AuditEventRecord(Base):
             ],
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["approval_request_id", "action_id", "run_id", "step_id"],
+            [
+                "approval_requests.id",
+                "approval_requests.action_id",
+                "approval_requests.run_id",
+                "approval_requests.step_id",
+            ],
+            ondelete="RESTRICT",
+        ),
         CheckConstraint("run_sequence >= 1", name="ck_audit_events_run_sequence_positive"),
         CheckConstraint("schema_version = 1", name="ck_audit_events_schema_version"),
         CheckConstraint(
@@ -100,7 +110,8 @@ class AuditEventRecord(Base):
             "AND step_transition_sequence IS NOT NULL AND action_id IS NULL "
             "AND action_attempt_number IS NULL AND receipt_id IS NULL AND attempt_id IS NULL) OR "
             "(aggregate_type = 'external_action' AND event_type IN "
-            "('action.proposed','action.dispatch_claimed','action.call_started',"
+            "('action.proposed','action.awaiting_approval',"
+            "'action.dispatch_claimed','action.call_started',"
             "'action.retry_released','action.succeeded','action.failed',"
             "'action.outcome_unknown','action.receipt_reconciled') AND "
             "step_id IS NOT NULL AND action_id IS NOT NULL AND aggregate_id = action_id AND "
@@ -118,15 +129,25 @@ class AuditEventRecord(Base):
             "AND step_id IS NULL AND action_id IS NULL AND action_attempt_number IS NULL "
             "AND receipt_id IS NULL AND attempt_id IS NOT NULL AND attempted_command IS NOT NULL "
             "AND expected_version IS NOT NULL AND observed_version IS NOT NULL "
-            "AND observed_state IS NOT NULL AND requested_state IS NOT NULL)",
+            "AND observed_state IS NOT NULL AND requested_state IS NOT NULL) OR "
+            "(aggregate_type = 'approval_request' AND event_type IN "
+            "('approval.requested','approval.expired','approval.renewed') AND "
+            "approval_request_id IS NOT NULL AND aggregate_id = approval_request_id AND "
+            "step_id IS NOT NULL AND action_id IS NOT NULL AND outcome = 'accepted' AND "
+            "mutation_version IS NOT NULL AND run_transition_sequence IS NULL AND "
+            "step_transition_sequence IS NULL AND action_attempt_number IS NULL AND "
+            "receipt_id IS NULL AND approval_decision_id IS NULL AND artifact_id IS NULL "
+            "AND attempt_id IS NULL)",
             name="ck_audit_events_aggregate_links",
         ),
         CheckConstraint(
-            "approval_request_id IS NULL AND approval_decision_id IS NULL AND artifact_id IS NULL",
+            "(aggregate_type = 'approval_request' OR approval_request_id IS NULL) AND "
+            "approval_decision_id IS NULL AND artifact_id IS NULL",
             name="ck_audit_events_future_links_null",
         ),
         CheckConstraint(
-            "(aggregate_type NOT IN ('run','step','run_attempt')) OR reason_code IS NOT NULL",
+            "(aggregate_type NOT IN ('run','step','run_attempt','approval_request')) OR "
+            "reason_code IS NOT NULL",
             name="ck_audit_events_lifecycle_reason",
         ),
         CheckConstraint(
@@ -150,10 +171,23 @@ class AuditEventRecord(Base):
             "(event_type IN ('action.dispatch_claimed','action.call_started',"
             "'action.retry_released','action.failed','action.outcome_unknown') AND "
             "action_attempt_number IS NOT NULL AND receipt_id IS NULL) OR "
+            "(event_type = 'action.awaiting_approval' "
+            "AND action_attempt_number IS NULL AND receipt_id IS NULL AND "
+            "mutation_version > 1) OR "
             "(event_type IN ('action.succeeded','action.receipt_reconciled') AND "
             "action_attempt_number IS NOT NULL AND receipt_id IS NOT NULL) OR "
             "aggregate_type <> 'external_action'",
             name="ck_audit_events_action_shape",
+        ),
+        CheckConstraint(
+            "(event_type = 'approval.requested' AND mutation_version = 1 AND "
+            "previous_state IS NULL AND new_state = 'pending') OR "
+            "(event_type = 'approval.expired' AND mutation_version >= 2 AND "
+            "previous_state IN ('pending','approved') AND new_state = 'expired') OR "
+            "(event_type = 'approval.renewed' AND mutation_version >= 3 AND "
+            "previous_state = 'expired' AND new_state = 'expired') OR "
+            "aggregate_type <> 'approval_request'",
+            name="ck_audit_events_approval_shape",
         ),
         CheckConstraint(
             "(aggregate_type = 'run_attempt') OR "

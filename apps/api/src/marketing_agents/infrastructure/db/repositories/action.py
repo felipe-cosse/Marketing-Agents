@@ -58,6 +58,45 @@ def _policy_projection(policy: ApprovalPolicySnapshot) -> dict[str, object]:
     }
 
 
+def _policy_from_json(value: object) -> ApprovalPolicySnapshot:
+    if type(value) is not dict or set(value) != {
+        "policy_id",
+        "required_roles",
+        "required_scopes",
+        "expires_after_seconds",
+        "allow_self_approval",
+    }:
+        raise ExternalActionPersistenceConflict(
+            "approval_policy_corrupt", "persisted approval policy has an invalid shape"
+        )
+    policy_json = cast(dict[str, object], value)
+    policy_id = policy_json["policy_id"]
+    roles = policy_json["required_roles"]
+    scopes = policy_json["required_scopes"]
+    expiry = policy_json["expires_after_seconds"]
+    allow_self = policy_json["allow_self_approval"]
+    if (
+        type(policy_id) is not str
+        or type(roles) is not list
+        or type(scopes) is not list
+        or any(type(item) is not str for item in (*roles, *scopes))
+        or len(set(roles)) != len(roles)
+        or len(set(scopes)) != len(scopes)
+        or type(expiry) is not int
+        or type(allow_self) is not bool
+    ):
+        raise ExternalActionPersistenceConflict(
+            "approval_policy_corrupt", "persisted approval policy types are invalid"
+        )
+    return ApprovalPolicySnapshot(
+        policy_id=policy_id,
+        required_roles=frozenset(cast(list[str], roles)),
+        required_scopes=frozenset(cast(list[str], scopes)),
+        expires_after_seconds=expiry,
+        allow_self_approval=allow_self,
+    )
+
+
 def _to_record(action: ExternalAction) -> ExternalActionRecord:
     envelope = action.envelope
     reservation = action.reservation
@@ -145,14 +184,7 @@ def _to_domain(record: ExternalActionRecord) -> ExternalAction:
             "action_identity_corrupt",
             "external action scalar identity differs from its canonical envelope",
         )
-    policy_json = record.approval_policy_snapshot
-    policy = ApprovalPolicySnapshot(
-        policy_id=str(policy_json["policy_id"]),
-        required_roles=frozenset(cast(list[str], policy_json["required_roles"])),
-        required_scopes=frozenset(cast(list[str], policy_json["required_scopes"])),
-        expires_after_seconds=int(cast(int, policy_json["expires_after_seconds"])),
-        allow_self_approval=bool(policy_json["allow_self_approval"]),
-    )
+    policy = _policy_from_json(record.approval_policy_snapshot)
     proposal = ProposedExternalAction(
         envelope=envelope,
         action_hash=record.action_hash,

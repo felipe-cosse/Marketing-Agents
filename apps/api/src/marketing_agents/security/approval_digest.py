@@ -1,0 +1,54 @@
+"""Keyed, domain-separated corruption-detection digests for approval records."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+from collections.abc import Mapping
+from typing import Any
+
+from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.security.digest_key import DigestKey
+
+_REQUEST_DOMAIN = b"marketing-agents:approval-request-record:hmac-sha256:v1\x00"
+_DECISION_DOMAIN = b"marketing-agents:approval-decision-record:hmac-sha256:v1\x00"
+_USE_DOMAIN = b"marketing-agents:approval-use-record:hmac-sha256:v1\x00"
+
+
+def _record_digest(
+    domain: bytes,
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    return hmac.new(
+        key.bytes_for_digest(),
+        domain + canonical_json_bytes(material),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def approval_request_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind every persisted request leaf and lifecycle scalar to the installed key."""
+
+    return _record_digest(_REQUEST_DOMAIN, material, key)
+
+
+def approval_decision_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind one append-only decision fact to the installed key."""
+
+    return _record_digest(_DECISION_DOMAIN, material, key)
+
+
+def approval_use_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind one reservation/use fact to the installed key."""
+
+    return _record_digest(_USE_DOMAIN, material, key)

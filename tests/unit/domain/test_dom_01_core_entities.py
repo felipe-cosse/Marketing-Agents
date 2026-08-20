@@ -10,21 +10,20 @@ from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.action_hash import (
     CanonicalExternalAction,
     SemanticExternalAction,
-    canonical_action_hash,
     semantic_action_hash,
 )
 from marketing_agents.domain.approval import (
+    ApprovalDecision,
     ApprovalPolicySnapshot,
     ProposedExternalAction,
+    request_approval,
 )
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import (
     AgentInstance,
     AgentTemplate,
-    ApprovalDecision,
     ApprovalPolicy,
-    ApprovalRequest,
     Artifact,
     AuditEvent,
     CampaignBrief,
@@ -42,7 +41,6 @@ from marketing_agents.domain.entities import (
 )
 from marketing_agents.domain.enums import (
     ApprovalDecisionKind,
-    ApprovalStatus,
     Effect,
     MisfirePolicy,
     OccurrenceState,
@@ -143,7 +141,7 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         binding_id="mock.newsletter.default",
         binding_configuration_revision=1,
         request_schema_id=capability.request_schema_id,
-        request_redaction_fields=("email",),
+        request_redaction_fields=("/email",),
         idempotency_support=capability.idempotency_support,
         timeout_seconds=30,
         approval_policy_id=policy.id,
@@ -196,12 +194,12 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         minimized_payload=semantic_action.minimized_payload,
         semantic_action_hash=semantic_action_hash(semantic_action),
     )
-    proposed_action = ProposedExternalAction(
-        envelope=action_envelope,
-        action_hash=canonical_action_hash(action_envelope),
-        redacted_projection={
-            "destination": "newsletter list",
-            "payload": {"email": "[REDACTED]"},
+    proposed_action = ProposedExternalAction.create(
+        action_envelope,
+        redacted_destination="configured destination via mock.newsletter.default",
+        payload_schema={
+            "type": "object",
+            "properties": {"email": {"x-sensitive": True}},
         },
     )
     action = ExternalAction.proposed(
@@ -224,25 +222,32 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         ),
         NOW,
     )
-    request = ApprovalRequest(
-        "approval-request.1",
-        action.id,
-        DIGEST,
-        {"destination": "[REDACTED]"},
-        policy.id,
-        "principal.local.operator",
-        NOW,
-        NOW + timedelta(minutes=30),
-        ApprovalStatus.PENDING,
+    request = request_approval(
+        request_id="approval-request.1",
+        proposed_action=proposed_action,
+        policy=action.approval_policy,
+        requested_by="principal.local.operator",
+        requested_at=NOW,
     )
     decision = ApprovalDecision(
-        "approval-decision.1",
-        request.id,
-        "principal.local.operator",
-        ApprovalDecisionKind.APPROVE,
-        DIGEST,
-        "Approved for the local mock demo.",
-        NOW,
+        id="approval-decision.1",
+        request_id=request.id,
+        action_id=request.action_id,
+        action_hash=request.action_hash,
+        authorization_set_id=request.authorization_set_id,
+        run_id=request.run_id,
+        plan_hash=request.plan_hash,
+        proposal_revision=request.proposal_revision,
+        step_id=request.step_id,
+        step_key=request.step_key,
+        actor_id="principal.local.approver",
+        authentication_method="local_session",
+        correlation_id="correlation.dom-01.approval",
+        decision=ApprovalDecisionKind.APPROVE,
+        authority_roles=frozenset({"role.operator"}),
+        authority_scopes=frozenset({"scope.external-write"}),
+        reason_code="approval_granted",
+        decided_at=NOW,
     )
     schedule = Schedule(
         "schedule.1",
@@ -358,17 +363,6 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
             ("artifact.1",),
             DataClassification.INTERNAL,
             NOW,
-        ),
-        lambda: ApprovalRequest(
-            "request.1",
-            "action.1",
-            DIGEST,
-            {},
-            "policy.1",
-            "actor.1",
-            NOW,
-            NOW,
-            ApprovalStatus.PENDING,
         ),
         lambda: Schedule(
             "schedule.1",

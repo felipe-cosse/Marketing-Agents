@@ -6,6 +6,7 @@ from types import TracebackType
 from typing import Protocol
 
 from marketing_agents.application.ports.repositories import (
+    ApprovalRepository,
     AuditRepository,
     ConnectorReceiptRepository,
     ExternalActionRepository,
@@ -24,6 +25,9 @@ class UnitOfWork(Protocol):
 
     @property
     def audits(self) -> AuditRepository: ...
+
+    @property
+    def approvals(self) -> ApprovalRepository: ...
 
     @property
     def run_steps(self) -> RunStepRepository: ...

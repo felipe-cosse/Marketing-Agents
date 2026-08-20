@@ -1,0 +1,165 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-08",
+  "matrix_statement_sha256": "829e64af4655c27f8d11993052a52209b2e669efa9ba61273958c653cb2b901f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_integrity.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/__init__.py",
+      "apps/api/src/marketing_agents/domain/entities/_validation.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/validation.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/security/approval_digest.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "tests/integration/db/test_run_08_approval_persistence.py",
+      "tests/unit/application/test_run_09_approval_invalidation.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_orch_09_audit_contracts.py",
+      "tests/unit/domain/test_run_08_approval_records.py",
+      "docs/verification/requirements/RUN-08.json",
+      "docs/verification/requirements/RUN-08.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/approval_records.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+          "apps/api/src/marketing_agents/infrastructure/db/models/approval.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_run_08_approval_persistence.py",
+          "tests/unit/domain/test_run_08_approval_records.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-safe-approval-records",
+      "type": "negative_control",
+      "statement": "Immutable approval requests retain the exact action, authorization-set epoch, Run, plan, step, policy, requester snapshot, bounded times, safe destination, and redacted payload projection; purpose-specific keyed corruption-detection digests cover request lifecycle, decision, and use facts before hydration, which also rejects coercion, projection canaries, contradictions, and partial sets.",
+      "test_refs": [
+        "tests/unit/domain/test_run_08_approval_records.py::test_run_08_request_ttl_policy_and_projection_are_exact",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_hydration_rejects_policy_action_and_projection_corruption",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_keyed_integrity_digests_reject_fact_rewrites_and_wrong_key",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_hydration_rejects_request_action_lifecycle_contradictions"
+      ]
+    },
+    {
+      "id": "atomic-complete-set-registration",
+      "type": "contract",
+      "statement": "For an already-persisted validated write plan, RUN-05 action creation, the complete PROPOSED-to-AWAITING_APPROVAL action set, generation-one approval requests, and their redacted audit witnesses commit in one unit of work; semantic replay returns original action, request, set, runtime-step, and time identities, while partial rows or audit gaps are never healed.",
+      "test_refs": [
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_create_replay_restart_preserves_exact_set_and_audits",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_two_write_set_replays_in_plan_order_and_never_heals_partial",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_audit_fault_rolls_back_actions_requests_and_timeline",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_replay_rejects_missing_request_audit_without_healing"
+      ]
+    },
+    {
+      "id": "one-winner-decision-and-expiry-renewal",
+      "type": "contract",
+      "statement": "The persistence port gives an exactly bound pending decision one winner and atomically advances its action; public expiry and same-action leaf renewal use optimistic action/request fences, append request and action-reopen audit witnesses in the same transaction, preserve one set-level proposal_revision, return the original linked replacement on replay, and normalize SQLite writer races to typed conflicts.",
+      "test_refs": [
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_decision_cas_has_one_winner_and_updates_exact_action",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_expire_renew_and_response_loss_replay_keep_one_leaf",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_approved_renewal_replay_uses_historical_action_version",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_service_renewal_race_commits_one_audited_leaf",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_expiry_audit_fault_rolls_back_request_and_action",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_replay_rejects_missing_renewal_history_without_healing"
+      ]
+    },
+    {
+      "id": "typed-use-storage-and-portable-schema",
+      "type": "negative_control",
+      "statement": "Approval decision and use rows have portable exact composite bindings to their request, action, set, Run, plan, revision, step, reservation, and reservation time; SQLite constraints and hydration reject cross-scope or time tampering, and every mapped table compiles for SQLite and PostgreSQL.",
+      "test_refs": [
+        "tests/unit/domain/test_run_08_approval_records.py::test_run_08_lifecycle_allows_only_exact_expiry_renewal_and_single_use",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_use_roundtrip_binds_exact_reservation_and_time",
+        "tests/integration/db/test_run_08_approval_persistence.py::test_run_08_approval_schema_compiles_for_sqlite_and_postgresql"
+      ]
+    },
+    {
+      "id": "semantic-change-needs-new-set-epoch",
+      "type": "contract",
+      "statement": "A request leaf may renew only after expiry for the unchanged exact action, policy, membership, plan, and proposal_revision; semantic, plan, or membership change fails with full_set_epoch_required because selecting and superseding an entirely new complete authorization-set epoch is deliberately owned by ORCH-08.",
+      "test_refs": [
+        "tests/unit/domain/test_run_08_approval_records.py::test_run_08_full_set_supersession_is_a_new_epoch_not_a_leaf_revision",
+        "tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_action_mutation_invalidates_and_requires_new_set_epoch",
+        "tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_expiry_renews_only_the_same_exact_action_leaf"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-08-approval-persistence",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/domain/test_run_08_approval_records.py",
+        "tests/unit/application/test_run_09_approval_invalidation.py",
+        "tests/integration/db/test_run_08_approval_persistence.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "exact-safe-approval-records",
+        "atomic-complete-set-registration",
+        "one-winner-decision-and-expiry-renewal",
+        "typed-use-storage-and-portable-schema",
+        "semantic-change-needs-new-set-epoch"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/security/approval_digest.py"
+    ],
+    "gate_id": "run-08-approval-persistence"
+  },
+  "limitations": [
+    "RUN-08 stores typed requester, decision actor, authentication-method, correlation, role, and scope snapshots but does not authenticate or authorize them. API-06 and RUN-10 must derive those values from a server-owned authenticated principal and own the public decision service plus approved/rejected audit events.",
+    "ApprovalUse has an exact durable schema and fail-closed hydration contract only. ORCH-08 owns complete-current-set reservation and batch consumption, use insertion, one-time barrier release, parent Run/step fencing, cancellation validity, and every connector-call decision; RUN-08 exposes no per-leaf consume mutation.",
+    "proposal_revision is a set-level epoch. RUN-08 permits expiry-only leaf replacement for the unchanged action/set/epoch, but ORCH-08 must add an authorization-set head and atomically create and select every member of a new epoch before semantic, plan, or membership replacement can supersede the old set.",
+    "ApprovalRecordService composes action and request records against an already-persisted validated plan. AuditedPlanPersistenceService still rejects write plans, so atomic Run/plan/step/action/request activation remains ORCH-08 composition scope rather than a RUN-08 claim.",
+    "RUN-08 stores the safe projection but does not expose an operator API projection. API-06/API-07 retain transport and presentation ownership, and DEL-04 retains database migration and upgrade ownership.",
+    "Deployment composition must inject the configured restart-stable root DigestKey. Fixed approval-request, decision, and use HMAC domains are distinct from admission-digest domains; key distribution and rotation are configuration/DEL-04 scope, and these digests detect corruption but do not authenticate actors.",
+    "Runtime races and constraints are exercised on file-backed SQLite. PostgreSQL table DDL is compiled for portability, but PostgreSQL concurrency execution requires its integration environment before a runtime parity claim."
+  ]
+}

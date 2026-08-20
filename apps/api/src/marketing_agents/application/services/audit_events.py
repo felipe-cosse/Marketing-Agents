@@ -7,6 +7,11 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from marketing_agents.domain.approval import (
+    ApprovalRenewal,
+    StoredActionApprovalRequest,
+    assert_request_binds_action,
+)
 from marketing_agents.domain.audit import (
     AuditContext,
     AuditEventDraft,
@@ -16,8 +21,8 @@ from marketing_agents.domain.audit import (
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
-from marketing_agents.domain.entities import Run, RunPlanSnapshot, RunStep
-from marketing_agents.domain.enums import RunState
+from marketing_agents.domain.entities import ExternalAction, Run, RunPlanSnapshot, RunStep
+from marketing_agents.domain.enums import ApprovalStatus, ExternalActionState, RunState
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
 from marketing_agents.domain.step_lifecycle import (
@@ -265,6 +270,210 @@ class AuditEventFactory:
             requested_state=_requested_run_state(run, command),
             mutation_version=None,
             reason_code=safe_reason,
+        )
+
+    def action_proposed(self, action: ExternalAction) -> AuditEventDraft:
+        if (
+            type(action) is not ExternalAction
+            or action.state is not ExternalActionState.PROPOSED
+            or action.version != 1
+            or action.updated_at != action.created_at
+            or action.reservation is not None
+            or action.delivery_attempt_count != 0
+        ):
+            raise ValueError("proposed-action audit requires the pristine exact action")
+        return self._build(
+            run_id=action.run_id,
+            event_type="action.proposed",
+            aggregate_type="external_action",
+            aggregate_id=action.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=action.created_at,
+            metadata={"idempotency_support": action.delivery_contract.idempotency_support},
+            step_id=action.step_id,
+            action_id=action.id,
+            mutation_version=1,
+            previous_state=None,
+            new_state=ExternalActionState.PROPOSED.value,
+        )
+
+    def action_awaiting_approval(
+        self,
+        action: ExternalAction,
+        *,
+        previous_state: ExternalActionState,
+    ) -> AuditEventDraft:
+        if (
+            type(action) is not ExternalAction
+            or type(previous_state) is not ExternalActionState
+            or previous_state
+            not in {
+                ExternalActionState.PROPOSED,
+                ExternalActionState.APPROVED,
+            }
+            or action.state is not ExternalActionState.AWAITING_APPROVAL
+            or action.version <= 1
+            or action.reservation is not None
+            or (previous_state is ExternalActionState.PROPOSED and action.version != 2)
+            or (
+                previous_state is ExternalActionState.APPROVED
+                and (action.version < 4 or action.version % 2 != 0)
+            )
+        ):
+            raise ValueError("approval-wait audit requires the exact action transition")
+        reason = (
+            "approval_requested"
+            if previous_state is ExternalActionState.PROPOSED
+            else "approval_expired"
+        )
+        return self._build(
+            run_id=action.run_id,
+            event_type="action.awaiting_approval",
+            aggregate_type="external_action",
+            aggregate_id=action.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=action.updated_at,
+            metadata={"idempotency_support": action.delivery_contract.idempotency_support},
+            step_id=action.step_id,
+            action_id=action.id,
+            mutation_version=action.version,
+            previous_state=previous_state.value,
+            new_state=ExternalActionState.AWAITING_APPROVAL.value,
+            reason_code=reason,
+        )
+
+    def approval_requested(
+        self,
+        stored: StoredActionApprovalRequest,
+        action: ExternalAction,
+    ) -> AuditEventDraft:
+        if (
+            type(stored) is not StoredActionApprovalRequest
+            or type(action) is not ExternalAction
+            or stored.status is not ApprovalStatus.PENDING
+            or stored.version != 1
+            or action.state is not ExternalActionState.AWAITING_APPROVAL
+            or stored.request.action_id != action.id
+            or stored.request.action_hash != action.action_hash
+            or stored.request.policy != action.approval_policy
+            or stored.request.redacted_projection != action.proposal.redacted_projection
+        ):
+            raise ValueError("approval-request audit requires its exact pending action leaf")
+        try:
+            assert_request_binds_action(stored.request, action.envelope)
+        except ValueError as exc:
+            raise ValueError("approval-request audit lost its exact action binding") from exc
+        request = stored.request
+        return self._build(
+            run_id=request.run_id,
+            event_type="approval.requested",
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=request.requested_at,
+            metadata={
+                "action_state": action.state.value,
+                "action_version": action.version,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "status": stored.status.value,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            mutation_version=1,
+            previous_state=None,
+            new_state=ApprovalStatus.PENDING.value,
+            reason_code="approval_requested",
+        )
+
+    def approval_expired(
+        self,
+        previous: StoredActionApprovalRequest,
+        expired: StoredActionApprovalRequest,
+        action: ExternalAction,
+    ) -> AuditEventDraft:
+        if (
+            type(previous) is not StoredActionApprovalRequest
+            or type(expired) is not StoredActionApprovalRequest
+            or type(action) is not ExternalAction
+            or previous.status not in {ApprovalStatus.PENDING, ApprovalStatus.APPROVED}
+            or expired.status is not ApprovalStatus.EXPIRED
+            or expired.request != previous.request
+            or expired.version != previous.version + 1
+            or expired.replacement_request_id is not None
+            or action.id != previous.request.action_id
+            or action.state is not ExternalActionState.AWAITING_APPROVAL
+        ):
+            raise ValueError("approval-expired audit requires the exact expiry transition")
+        request = previous.request
+        return self._build(
+            run_id=request.run_id,
+            event_type="approval.expired",
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=expired.updated_at,
+            metadata={
+                "action_state": action.state.value,
+                "action_version": action.version,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "status": expired.status.value,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            mutation_version=expired.version,
+            previous_state=previous.status.value,
+            new_state=ApprovalStatus.EXPIRED.value,
+            reason_code="approval_expired",
+        )
+
+    def approval_renewed(
+        self,
+        expired: StoredActionApprovalRequest,
+        renewal: ApprovalRenewal,
+        action: ExternalAction,
+    ) -> AuditEventDraft:
+        if (
+            type(expired) is not StoredActionApprovalRequest
+            or type(renewal) is not ApprovalRenewal
+            or type(action) is not ExternalAction
+            or expired.status is not ApprovalStatus.EXPIRED
+            or expired.replacement_request_id is not None
+            or renewal.expired.request != expired.request
+            or renewal.expired.version != expired.version + 1
+            or action.id != expired.request.action_id
+            or action.state is not ExternalActionState.AWAITING_APPROVAL
+        ):
+            raise ValueError("approval-renewed audit requires the exact linked generation")
+        request = expired.request
+        return self._build(
+            run_id=request.run_id,
+            event_type="approval.renewed",
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=renewal.expired.updated_at,
+            metadata={
+                "action_state": action.state.value,
+                "action_version": action.version,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "replacement_request_id": renewal.replacement.id,
+                "status": renewal.expired.status.value,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            mutation_version=renewal.expired.version,
+            previous_state=ApprovalStatus.EXPIRED.value,
+            new_state=ApprovalStatus.EXPIRED.value,
+            reason_code="approval_renewed",
         )
 
     def run_attempt_id(self, run_id: str, command: RunLifecycleCommand) -> str:

@@ -62,3 +62,27 @@ def require_unique(values: tuple[str, ...], field_name: str) -> None:
         raise ValueError(f"{field_name} must contain unique identifiers")
     for value in values:
         require_id(value, field_name)
+
+
+def require_json_pointers(values: tuple[str, ...], field_name: str) -> tuple[tuple[str, ...], ...]:
+    """Validate unique, non-root RFC 6901 paths and reject overlapping leaves."""
+
+    if type(values) is not tuple or any(type(value) is not str for value in values):
+        raise ValueError(f"{field_name} must be an immutable string tuple")
+    if len(values) != len(set(values)):
+        raise ValueError(f"{field_name} must contain unique JSON pointers")
+    decoded_paths: list[tuple[str, ...]] = []
+    for pointer in values:
+        if not pointer.startswith("/") or pointer == "/" or len(pointer) > 1_000:
+            raise ValueError(f"{field_name} must contain non-root JSON pointers")
+        encoded_tokens = pointer[1:].split("/")
+        if any(not token or re.search(r"~(?![01])", token) is not None for token in encoded_tokens):
+            raise ValueError(f"{field_name} contains an invalid JSON pointer")
+        decoded = tuple(token.replace("~1", "/").replace("~0", "~") for token in encoded_tokens)
+        if any(
+            decoded[: len(existing)] == existing or existing[: len(decoded)] == decoded
+            for existing in decoded_paths
+        ):
+            raise ValueError(f"{field_name} must not contain overlapping JSON pointers")
+        decoded_paths.append(decoded)
+    return tuple(decoded_paths)

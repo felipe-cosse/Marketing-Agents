@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from marketing_agents.domain.approval import (
+    ActionApprovalRequest,
+    ApprovalDecision,
+    ApprovalRenewal,
+    StoredActionApprovalRequest,
+)
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.entities import (
     ConnectorActionReceipt,
@@ -205,6 +211,59 @@ class ConnectorReceiptRepository(Protocol):
         self,
         receipt: ConnectorActionReceipt,
     ) -> ConnectorReceiptInsertResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRequestSetInsertResult:
+    requests: tuple[StoredActionApprovalRequest, ...]
+    inserted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalDecisionInsertResult:
+    request: StoredActionApprovalRequest
+    inserted: bool
+
+
+class ApprovalRepository(Protocol):
+    async def get(self, request_id: str) -> StoredActionApprovalRequest | None: ...
+
+    async def list_current_set(
+        self,
+        run_id: str,
+        plan_hash: str,
+        proposal_revision: int,
+    ) -> tuple[StoredActionApprovalRequest, ...]: ...
+
+    async def add_initial_set_or_get(
+        self,
+        requests: tuple[ActionApprovalRequest, ...],
+    ) -> ApprovalRequestSetInsertResult: ...
+
+    async def record_decision(
+        self,
+        *,
+        expected_version: int,
+        expected_action_version: int,
+        decision: ApprovalDecision,
+    ) -> ApprovalDecisionInsertResult: ...
+
+    async def mark_expired(
+        self,
+        *,
+        request_id: str,
+        expected_version: int,
+        expected_action_version: int,
+        expired_at: datetime,
+    ) -> StoredActionApprovalRequest: ...
+
+    async def renew_expired(
+        self,
+        *,
+        expected_version: int,
+        expected_action_version: int,
+        renewal: ApprovalRenewal,
+    ) -> StoredActionApprovalRequest: ...
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,6 +5,7 @@ from .action import (
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
 )
+from .approval import ApprovalDecisionRecord, ApprovalRequestRecord, ApprovalUseRecord
 from .audit import AuditEventRecord
 from .run import RunRecord, RunStateTransitionRecord
 from .step import (
@@ -18,6 +19,9 @@ from .step import (
 from .work import WorkItemRecord
 
 __all__ = [
+    "ApprovalDecisionRecord",
+    "ApprovalRequestRecord",
+    "ApprovalUseRecord",
     "AuditEventRecord",
     "ConnectorActionReceiptRecord",
     "ExternalActionDispatchAttemptRecord",
