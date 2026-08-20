@@ -12,7 +12,6 @@ from typing import cast
 import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
 from marketing_agents.application.ports.repositories import (
-    AuditRepository,
     RunInsertResult,
     RunRepository,
     WorkInsertResult,
@@ -20,9 +19,11 @@ from marketing_agents.application.ports.repositories import (
 )
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services import (
+    AuditedPlanPersistenceService,
     IdempotentWorkRunReceiptService,
     IncomingWorkValidationError,
     RunLifecycleService,
+    RunStepLifecycleService,
     WorkAdmissionService,
     WorkIdempotencyError,
     WorkRunReceiptDisposition,
@@ -32,22 +33,28 @@ from marketing_agents.application.services.incoming_work_validation import (
     ValidatedIncomingWork,
 )
 from marketing_agents.domain.admission import AdmissionEnvelope
+from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import RunState, WorkMode
 from marketing_agents.domain.run_lifecycle import (
     CompletionContext,
     NoRunTransitionContext,
-    PlanDispositionContext,
     RunLifecycleCommand,
     RunStateTransition,
     RunTransitionContext,
     RunTransitionResult,
 )
+from marketing_agents.domain.step_lifecycle import (
+    NoStepTransitionContext,
+    StepLifecycleCommand,
+)
 from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
+    SQLAlchemyAuditRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
+    SQLAlchemyRunStepRepository,
     SQLAlchemyUnitOfWorkFactory,
     create_database_runtime,
 )
@@ -63,6 +70,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.support.incoming_work import TEST_CATALOG_HASH, validate_incoming_for_test
+from tests.support.orch_09_planning import build_read_only_plan
 
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 CATALOG_B = "catalog-sha256-v1:" + ("b" * 64)
@@ -156,6 +164,19 @@ class FaultingRunRepository:
         await self._delegate.add_received_or_get(run, initial_transition)
         raise RuntimeError("injected fault after Run and transition flush")
 
+    async def fence(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        expected_state: RunState,
+    ) -> bool:
+        return await self._delegate.fence(
+            run_id=run_id,
+            expected_version=expected_version,
+            expected_state=expected_state,
+        )
+
     async def apply_transition(
         self,
         *,
@@ -205,16 +226,19 @@ class WrongCatalogRunRepository(FaultingRunRepository):
         )
 
 
-def _unused_audit_repository(_session: AsyncSession) -> AuditRepository:
-    return cast(AuditRepository, object())
-
-
 def _sqlite_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{path}"
 
 
 def _key() -> DigestKey:
     return DigestKey(bytes(range(32)))
+
+
+def _audit_context(correlation_id: str) -> AuditContext:
+    return AuditContext.system(
+        "test.orch-07.receipt",
+        correlation_id=correlation_id,
+    )
 
 
 def _envelope(
@@ -247,7 +271,8 @@ def _uow_factory(
         SQLAlchemyRepositoryFactories(
             works=work_factory,
             runs=run_factory,
-            audits=_unused_audit_repository,
+            audits=SQLAlchemyAuditRepository,
+            run_steps=SQLAlchemyRunStepRepository,
         ),
     )
 
@@ -314,7 +339,15 @@ async def _advance(
     command: RunLifecycleCommand,
     context: RunTransitionContext,
 ) -> Run:
-    return (await service.advance(run.id, run.version, command, context)).run
+    return (
+        await service.advance(
+            run.id,
+            run.version,
+            command,
+            context,
+            audit_context=_audit_context(f"orch-07.advance.{run.id}.{run.version}.{command.value}"),
+        )
+    ).run
 
 
 @pytest.mark.asyncio
@@ -330,7 +363,10 @@ async def test_orch_07_atomic_receipt_replays_original_after_terminal_and_catalo
     )
     marker_a = validate_incoming_for_test(_envelope())
     try:
-        created = await service_a.receive(marker_a)
+        created = await service_a.receive(
+            marker_a,
+            audit_context=_audit_context("orch-07.replay.create"),
+        )
         lifecycle = RunLifecycleService(dependencies)
         run = await _advance(
             lifecycle,
@@ -338,18 +374,45 @@ async def test_orch_07_atomic_receipt_replays_original_after_terminal_and_catalo
             RunLifecycleCommand.MARK_VALIDATED,
             NoRunTransitionContext(),
         )
-        run = await _advance(
-            lifecycle,
-            run,
-            RunLifecycleCommand.RECORD_PLAN,
-            PlanDispositionContext(contains_write_actions=False),
+        plan, graph, routing = build_read_only_plan(
+            run_id=run.id,
+            workflow_id=created.work_item.workflow_id,
+            target_instance_id=created.work_item.instance_id,
+            configuration_revision=created.work_item.configuration_revision,
+            catalog_hash=run.catalog_hash,
         )
+        persisted = await AuditedPlanPersistenceService(dependencies).persist(
+            plan,
+            graph,
+            routing,
+            expected_run_version=run.version,
+            audit_context=_audit_context("orch-07.persist-plan"),
+        )
+        run = persisted.run
         run = await _advance(
             lifecycle,
             run,
             RunLifecycleCommand.ACTIVATE_PLAN,
             NoRunTransitionContext(),
         )
+        step_service = RunStepLifecycleService(dependencies)
+        step = persisted.steps[0]
+        for command in (
+            StepLifecycleCommand.MARK_READY,
+            StepLifecycleCommand.START,
+            StepLifecycleCommand.SUCCEED,
+        ):
+            step = (
+                await step_service.advance(
+                    step.id,
+                    step.version,
+                    command,
+                    NoStepTransitionContext(),
+                    audit_context=_audit_context(
+                        f"orch-07.step.{step.id}.{step.version}.{command.value}"
+                    ),
+                )
+            ).step
         terminal = await _advance(
             lifecycle,
             run,
@@ -357,10 +420,16 @@ async def test_orch_07_atomic_receipt_replays_original_after_terminal_and_catalo
             CompletionContext(1, 1, 0, 0),
         )
 
-        replayed_terminal = await service_a.receive(marker_a)
+        replayed_terminal = await service_a.receive(
+            marker_a,
+            audit_context=_audit_context("orch-07.replay.terminal"),
+        )
         service_b = _service(runtime, catalog_hash=CATALOG_B, ids=IncrementingIds(100))
         marker_b = validate_incoming_for_test(_envelope(), catalog_hash=CATALOG_B)
-        replayed_release = await service_b.receive(marker_b)
+        replayed_release = await service_b.receive(
+            marker_b,
+            audit_context=_audit_context("orch-07.replay.catalog-release"),
+        )
 
         assert created.disposition is WorkRunReceiptDisposition.CREATED
         assert created.initial_transition is not None
@@ -392,7 +461,8 @@ async def test_orch_07_faults_and_caller_rollback_never_leave_partial_receipt(
         try:
             with pytest.raises(RuntimeError, match="injected fault"):
                 await _service(runtime, run_factory=run_factory).receive(
-                    validate_incoming_for_test(_envelope(event_id=f"event.{label}"))
+                    validate_incoming_for_test(_envelope(event_id=f"event.{label}")),
+                    audit_context=_audit_context(f"orch-07.fault.{label}"),
                 )
             assert await _counts(runtime) == (0, 0, 0)
         finally:
@@ -405,6 +475,7 @@ async def test_orch_07_faults_and_caller_rollback_never_leave_partial_receipt(
             result = await service.receive_in_uow(
                 unit_of_work,
                 validate_incoming_for_test(_envelope(event_id="event.caller-rollback")),
+                audit_context=_audit_context("orch-07.caller-rollback"),
             )
             assert result.disposition is WorkRunReceiptDisposition.CREATED
         assert await _counts(rollback_runtime) == (0, 0, 0)
@@ -427,7 +498,10 @@ async def test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed(
                 dependencies,
                 _key(),
                 current_catalog_hash=TEST_CATALOG_HASH,
-            ).receive(marker)
+            ).receive(
+                marker,
+                audit_context=_audit_context("orch-07.orphan-work"),
+            )
         assert mixed.value.code == "mixed_receipt_disposition"
         assert mixed.value.work_item_id == orphan.work_item.id
         assert await _counts(orphan_runtime) == (1, 0, 0)
@@ -436,7 +510,8 @@ async def test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed(
 
     mixed_runtime = await _runtime(tmp_path / "mixed-run.db")
     existing = await _service(mixed_runtime).receive(
-        validate_incoming_for_test(_envelope(event_id="event.existing"))
+        validate_incoming_for_test(_envelope(event_id="event.existing")),
+        audit_context=_audit_context("orch-07.mixed.existing"),
     )
 
     def existing_run_factory(session: AsyncSession) -> RunRepository:
@@ -448,7 +523,10 @@ async def test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed(
                 mixed_runtime,
                 ids=IncrementingIds(100),
                 run_factory=existing_run_factory,
-            ).receive(validate_incoming_for_test(_envelope(event_id="event.new-work")))
+            ).receive(
+                validate_incoming_for_test(_envelope(event_id="event.new-work")),
+                audit_context=_audit_context("orch-07.mixed.new-work"),
+            )
         assert mixed.value.code == "mixed_receipt_disposition"
         assert await _counts(mixed_runtime) == (1, 1, 1)
     finally:
@@ -456,10 +534,12 @@ async def test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed(
 
     wrong_runtime = await _runtime(tmp_path / "wrong-run.db")
     first = await _service(wrong_runtime).receive(
-        validate_incoming_for_test(_envelope(event_id="event.first"))
+        validate_incoming_for_test(_envelope(event_id="event.first")),
+        audit_context=_audit_context("orch-07.wrong.first"),
     )
     second = await _service(wrong_runtime, ids=IncrementingIds(100)).receive(
-        validate_incoming_for_test(_envelope(event_id="event.second"))
+        validate_incoming_for_test(_envelope(event_id="event.second")),
+        audit_context=_audit_context("orch-07.wrong.second"),
     )
 
     def wrong_run_factory(session: AsyncSession) -> RunRepository:
@@ -468,7 +548,8 @@ async def test_orch_07_orphan_work_and_mixed_or_misdirected_runs_fail_closed(
     try:
         with pytest.raises(WorkRunReceiptError) as mismatched:
             await _service(wrong_runtime, run_factory=wrong_run_factory).receive(
-                validate_incoming_for_test(_envelope(event_id="event.first"))
+                validate_incoming_for_test(_envelope(event_id="event.first")),
+                audit_context=_audit_context("orch-07.wrong.replay"),
             )
         assert mismatched.value.code == "receipt_correlation_mismatch"
         assert mismatched.value.work_item_id == first.work_item.id
@@ -489,7 +570,8 @@ async def test_orch_07_created_run_must_retain_marker_catalog_and_fk_blocks_orph
     try:
         with pytest.raises(WorkRunReceiptError) as mismatched:
             await _service(runtime, run_factory=wrong_catalog_factory).receive(
-                validate_incoming_for_test(_envelope())
+                validate_incoming_for_test(_envelope()),
+                audit_context=_audit_context("orch-07.wrong-catalog"),
             )
         assert mismatched.value.code == "receipt_correlation_mismatch"
         assert await _counts(runtime) == (0, 0, 0)
@@ -535,12 +617,18 @@ async def test_orch_07_identical_and_changed_two_session_races_are_pair_atomic(
                 identical_runtime,
                 ids=first_ids,
                 work_factory=work_factory,
-            ).receive(validate_incoming_for_test(_envelope())),
+            ).receive(
+                validate_incoming_for_test(_envelope()),
+                audit_context=_audit_context("orch-07.identical-race.first"),
+            ),
             _service(
                 identical_runtime,
                 ids=second_ids,
                 work_factory=work_factory,
-            ).receive(validate_incoming_for_test(_envelope())),
+            ).receive(
+                validate_incoming_for_test(_envelope()),
+                audit_context=_audit_context("orch-07.identical-race.second"),
+            ),
         )
         assert {item.disposition for item in results} == {
             WorkRunReceiptDisposition.CREATED,
@@ -562,13 +650,17 @@ async def test_orch_07_identical_and_changed_two_session_races_are_pair_atomic(
     try:
         outcomes = await asyncio.gather(
             _service(changed_runtime, work_factory=changed_work_factory).receive(
-                validate_incoming_for_test(_envelope(payload={"choice": "first"}))
+                validate_incoming_for_test(_envelope(payload={"choice": "first"})),
+                audit_context=_audit_context("orch-07.changed-race.first"),
             ),
             _service(
                 changed_runtime,
                 ids=IncrementingIds(100),
                 work_factory=changed_work_factory,
-            ).receive(validate_incoming_for_test(_envelope(payload={"choice": "second"}))),
+            ).receive(
+                validate_incoming_for_test(_envelope(payload={"choice": "second"})),
+                audit_context=_audit_context("orch-07.changed-race.second"),
+            ),
             return_exceptions=True,
         )
         created = [item for item in outcomes if not isinstance(item, BaseException)]
@@ -592,14 +684,18 @@ async def test_orch_07_unsealed_tampered_or_stale_marker_fails_before_authority_
         current_catalog_hash=CATALOG_B,
     )
     envelope = _envelope(event_id="event.pre-uow")
+    audit_context = _audit_context("orch-07.pre-uow")
 
     with pytest.raises(IncomingWorkValidationError) as raw:
-        await service.receive(cast(ValidatedIncomingWork, envelope))
+        await service.receive(
+            cast(ValidatedIncomingWork, envelope),
+            audit_context=audit_context,
+        )
     assert raw.value.code == "incoming_work_not_validated"
 
     stale = validate_incoming_for_test(envelope)
     with pytest.raises(IncomingWorkValidationError) as drift:
-        await service.receive(stale)
+        await service.receive(stale, audit_context=audit_context)
     assert drift.value.code == "catalog_drift"
 
     tampered = validate_incoming_for_test(envelope, catalog_hash=CATALOG_B)
@@ -609,7 +705,7 @@ async def test_orch_07_unsealed_tampered_or_stale_marker_fails_before_authority_
         replace(tampered.snapshot, workflow_id="workflow.forged"),
     )
     with pytest.raises(IncomingWorkValidationError) as invalid:
-        await service.receive(tampered)
+        await service.receive(tampered, audit_context=audit_context)
     assert invalid.value.code == "incoming_work_not_validated"
 
     catalog_tampered = validate_incoming_for_test(envelope)
@@ -619,7 +715,7 @@ async def test_orch_07_unsealed_tampered_or_stale_marker_fails_before_authority_
         replace(catalog_tampered.snapshot, catalog_hash=CATALOG_B),
     )
     with pytest.raises(IncomingWorkValidationError) as invalid_catalog:
-        await service.receive(catalog_tampered)
+        await service.receive(catalog_tampered, audit_context=audit_context)
     assert invalid_catalog.value.code == "incoming_work_not_validated"
     assert unit_of_work_factory.calls == 0
     assert ids.generated == []

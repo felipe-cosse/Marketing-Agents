@@ -35,9 +35,16 @@ from marketing_agents.domain.entities._validation import (
 )
 from marketing_agents.domain.enums import Effect
 from marketing_agents.domain.graph import DependencyGraph
+from marketing_agents.domain.plan_hash import (
+    EFFECT_PLAN_HASH_DOMAIN as _DOMAIN_EFFECT_PLAN_HASH,
+)
+from marketing_agents.domain.plan_hash import (
+    EffectPlanStepHashMaterial,
+    effect_plan_hash,
+)
 from marketing_agents.domain.run_lifecycle import PlanDispositionContext
 
-EFFECT_PLAN_HASH_DOMAIN = b"marketing-agents:effect-plan:v1\x00"
+EFFECT_PLAN_HASH_DOMAIN = _DOMAIN_EFFECT_PLAN_HASH
 _DESTINATION_HASH_DOMAIN = b"marketing-agents:external-action-destination:v1\x00"
 EXTERNAL_WRITE_SCOPE = "scope.external-write"
 _NON_CONNECTOR_FAMILIES = frozenset({"model", "artifact"})
@@ -193,6 +200,8 @@ class EffectStepSpec:
             (self.capability_id, "capability ID"),
         ):
             require_id(value, name)
+        if len(self.kind) > 120:
+            raise ValueError("planned step kind must be at most 120 characters")
         if self.routing_slot_key is not None:
             require_id(self.routing_slot_key, "routing slot key")
         if self.binding_id is not None:
@@ -266,6 +275,10 @@ class EffectPlannedStep:
             (self.approval_policy_id, "approval policy ID"),
         ):
             require_id(value, name)
+        if len(self.kind) > 120 or len(self.connector_family) > 120:
+            raise ValueError(
+                "planned step kind and connector family must be at most 120 characters"
+            )
         for value in (*self.approval_required_roles, *self.approval_required_scopes):
             require_id(value, "approval authority")
         if not isinstance(self.effect, Effect):
@@ -1099,43 +1112,39 @@ def _effect_plan_hash(
     routing_hash: str,
     steps: tuple[EffectPlannedStep, ...],
 ) -> str:
-    projection = {
-        "version": 1,
-        "workflow_id": workflow_id,
-        "workflow_version": workflow_version,
-        "workflow_definition_hash": workflow_definition_hash,
-        "catalog_content_hash": catalog_content_hash,
-        "graph_hash": graph_hash,
-        "routing_hash": routing_hash,
-        "steps": [
-            {
-                "step_key": step.step_key,
-                "kind": step.kind,
-                "selected_instance_id": step.selected_instance_id,
-                "routing_slot_key": step.routing_slot_key,
-                "template_id": step.template_id,
-                "configuration_revision": step.configuration_revision,
-                "capability_id": step.capability_id,
-                "effect": step.effect.value,
-                "connector_family": step.connector_family,
-                "binding_id": step.binding_id,
-                "binding_configuration_revision": step.binding_configuration_revision,
-                "request_schema_id": step.request_schema_id,
-                "request_redaction_fields": list(step.request_redaction_fields),
-                "idempotency_support": step.idempotency_support,
-                "connector_timeout_seconds": step.connector_timeout_seconds,
-                "approval_policy": {
-                    "id": step.approval_policy_id,
-                    "required_roles": list(step.approval_required_roles),
-                    "required_scopes": list(step.approval_required_scopes),
-                    "expires_after_seconds": step.approval_expires_after_seconds,
-                    "allow_self_approval": step.approval_allow_self_approval,
-                },
-            }
+    return effect_plan_hash(
+        workflow_id=workflow_id,
+        workflow_version=workflow_version,
+        workflow_definition_hash=workflow_definition_hash,
+        catalog_content_hash=catalog_content_hash,
+        graph_hash=graph_hash,
+        routing_hash=routing_hash,
+        steps=tuple(
+            EffectPlanStepHashMaterial(
+                step_key=step.step_key,
+                kind=step.kind,
+                selected_instance_id=step.selected_instance_id,
+                routing_slot_key=step.routing_slot_key,
+                template_id=step.template_id,
+                configuration_revision=step.configuration_revision,
+                capability_id=step.capability_id,
+                effect=step.effect,
+                connector_family=step.connector_family,
+                binding_id=step.binding_id,
+                binding_configuration_revision=step.binding_configuration_revision,
+                request_schema_id=step.request_schema_id,
+                request_redaction_fields=step.request_redaction_fields,
+                idempotency_support=step.idempotency_support,
+                connector_timeout_seconds=step.connector_timeout_seconds,
+                approval_policy_id=step.approval_policy_id,
+                approval_required_roles=step.approval_required_roles,
+                approval_required_scopes=step.approval_required_scopes,
+                approval_expires_after_seconds=step.approval_expires_after_seconds,
+                approval_allow_self_approval=step.approval_allow_self_approval,
+            )
             for step in steps
-        ],
-    }
-    return hashlib.sha256(EFFECT_PLAN_HASH_DOMAIN + canonical_json_bytes(projection)).hexdigest()
+        ),
+    )
 
 
 def _action_type(capability_id: str) -> str:

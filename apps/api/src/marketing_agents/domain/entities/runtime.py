@@ -20,6 +20,122 @@ from ._validation import (
 
 
 @dataclass(frozen=True, slots=True)
+class RunPlanSnapshot:
+    run_id: str
+    plan_hash: str
+    workflow_id: str
+    workflow_version: int
+    workflow_definition_hash: str
+    catalog_content_hash: str
+    graph_hash: str
+    routing_hash: str
+    approval_required: bool
+    step_count: int
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        require_id(self.run_id, "plan run ID")
+        require_id(self.workflow_id, "plan workflow ID")
+        for value, name in (
+            (self.plan_hash, "plan hash"),
+            (self.workflow_definition_hash, "workflow definition hash"),
+            (self.graph_hash, "plan graph hash"),
+            (self.routing_hash, "plan routing hash"),
+        ):
+            require_digest(value, name)
+        if not self.catalog_content_hash.startswith("catalog-sha256-v1:"):
+            raise ValueError("plan catalog hash version is invalid")
+        require_digest(
+            self.catalog_content_hash.removeprefix("catalog-sha256-v1:"),
+            "plan catalog hash",
+        )
+        for numeric_value, name in (
+            (self.workflow_version, "plan workflow version"),
+            (self.step_count, "plan step count"),
+        ):
+            if (
+                not isinstance(numeric_value, int)
+                or isinstance(numeric_value, bool)
+                or numeric_value < 1
+            ):
+                raise ValueError(f"{name} must be positive")
+        if not isinstance(self.approval_required, bool):
+            raise ValueError("plan approval disposition must be boolean")
+        require_utc(self.created_at, "plan creation time")
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlanSelectedInstance:
+    run_id: str
+    plan_hash: str
+    instance_id: str
+    template_id: str
+    configuration_revision: int
+    display_order: int
+    source_ordinal: int | None
+    selection_order: int
+    target: bool
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.run_id, "selected instance run ID"),
+            (self.instance_id, "selected instance ID"),
+            (self.template_id, "selected template ID"),
+        ):
+            require_id(value, name)
+        require_digest(self.plan_hash, "selected instance plan hash")
+        for numeric_value, name in (
+            (self.configuration_revision, "selected instance configuration revision"),
+            (self.display_order, "selected instance display order"),
+            (self.selection_order, "selected instance selection order"),
+        ):
+            if (
+                not isinstance(numeric_value, int)
+                or isinstance(numeric_value, bool)
+                or numeric_value < 1
+            ):
+                raise ValueError(f"{name} must be positive")
+        if self.source_ordinal is not None and (
+            not isinstance(self.source_ordinal, int)
+            or isinstance(self.source_ordinal, bool)
+            or self.source_ordinal < 1
+        ):
+            raise ValueError("selected instance source ordinal must be positive")
+        if not isinstance(self.target, bool):
+            raise ValueError("selected instance target flag must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlanRoutingAssignment:
+    run_id: str
+    plan_hash: str
+    slot_key: str
+    instance_id: str
+    template_id: str
+    required_capability_ids: tuple[str, ...]
+    assignment_order: int
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.run_id, "routing assignment run ID"),
+            (self.slot_key, "routing assignment slot key"),
+            (self.instance_id, "routing assignment instance ID"),
+            (self.template_id, "routing assignment template ID"),
+        ):
+            require_id(value, name)
+        require_digest(self.plan_hash, "routing assignment plan hash")
+        if type(self.required_capability_ids) is not tuple:
+            raise ValueError("routing capabilities must be an immutable tuple")
+        require_unique(self.required_capability_ids, "routing required capabilities")
+        if (
+            not isinstance(self.assignment_order, int)
+            or isinstance(self.assignment_order, bool)
+            or self.assignment_order < 1
+        ):
+            raise ValueError("routing assignment order must be positive")
+
+
+@dataclass(frozen=True, slots=True)
 class Run:
     id: str
     work_item_id: str
@@ -90,14 +206,161 @@ class RunStep:
     capability_id: str
     effect: Effect
     state: StepState
+    plan_hash: str = field(kw_only=True)
+    graph_hash: str = field(kw_only=True)
+    ordinal: int = field(kw_only=True)
+    source_order: int = field(kw_only=True)
+    template_id: str = field(kw_only=True)
+    configuration_revision: int = field(kw_only=True)
+    connector_family: str = field(kw_only=True)
+    routing_slot_key: str | None = field(kw_only=True)
+    binding_id: str | None = field(kw_only=True)
+    binding_configuration_revision: int | None = field(kw_only=True)
+    request_schema_id: str | None = field(kw_only=True)
+    request_redaction_fields: tuple[str, ...] = field(kw_only=True)
+    idempotency_support: str = field(kw_only=True)
+    timeout_seconds: int | None = field(kw_only=True)
+    approval_policy_id: str = field(kw_only=True)
+    approval_required_roles: tuple[str, ...] = field(kw_only=True)
+    approval_required_scopes: tuple[str, ...] = field(kw_only=True)
+    approval_expires_after_seconds: int | None = field(kw_only=True)
+    approval_allow_self_approval: bool | None = field(kw_only=True)
+    terminal_result: bool = field(kw_only=True)
+    created_at: datetime = field(kw_only=True)
+    updated_at: datetime = field(kw_only=True)
+    version: int = field(default=1, kw_only=True)
+    terminal_reason_code: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         for field_name in ("id", "run_id", "key", "selected_instance_id", "capability_id"):
             require_id(getattr(self, field_name), field_name)
+        if type(self.dependency_keys) is not tuple:
+            raise ValueError("step dependencies must be an immutable tuple")
+        if type(self.effect) is not Effect:
+            raise ValueError("step effect must use the exact Effect enum")
+        if type(self.state) is not StepState:
+            raise ValueError("step state must use the exact StepState enum")
         require_id(self.kind, "step kind")
+        if len(self.kind) > 120 or len(self.connector_family) > 120:
+            raise ValueError("step kind and connector family must not exceed 120 characters")
         require_unique(self.dependency_keys, "step dependencies")
         if self.key in self.dependency_keys:
             raise ValueError("step cannot depend on itself")
+        require_digest(self.plan_hash, "step plan hash")
+        require_digest(self.graph_hash, "step graph hash")
+        require_id(self.template_id, "step template ID")
+        require_id(self.connector_family, "step connector family")
+        if self.routing_slot_key is not None:
+            require_id(self.routing_slot_key, "step routing slot key")
+        if self.binding_id is not None:
+            require_id(self.binding_id, "step binding ID")
+        if self.request_schema_id is not None:
+            require_id(self.request_schema_id, "step request schema ID")
+        if not isinstance(self.ordinal, int) or isinstance(self.ordinal, bool) or self.ordinal < 1:
+            raise ValueError("step ordinal must be positive")
+        if (
+            not isinstance(self.source_order, int)
+            or isinstance(self.source_order, bool)
+            or self.source_order < 1
+        ):
+            raise ValueError("step source order must be a positive integer")
+        if (
+            not isinstance(self.configuration_revision, int)
+            or isinstance(self.configuration_revision, bool)
+            or self.configuration_revision < 1
+        ):
+            raise ValueError("step configuration revision must be positive")
+        if self.binding_configuration_revision is not None and (
+            not isinstance(self.binding_configuration_revision, int)
+            or isinstance(self.binding_configuration_revision, bool)
+            or self.binding_configuration_revision < 1
+        ):
+            raise ValueError("step binding configuration revision must be positive")
+        for values, name in (
+            (self.request_redaction_fields, "step request redaction fields"),
+            (self.approval_required_roles, "step approval roles"),
+            (self.approval_required_scopes, "step approval scopes"),
+        ):
+            if type(values) is not tuple:
+                raise ValueError(f"{name} must be an immutable tuple")
+            require_unique(values, name)
+        if self.idempotency_support not in {
+            "not_applicable",
+            "required",
+            "supported",
+            "unavailable",
+        }:
+            raise ValueError("step idempotency support is invalid")
+        require_id(self.approval_policy_id, "step approval policy ID")
+        if self.timeout_seconds is not None and (
+            not isinstance(self.timeout_seconds, int)
+            or isinstance(self.timeout_seconds, bool)
+            or not 1 <= self.timeout_seconds <= 120
+        ):
+            raise ValueError("step timeout must be from 1 through 120 seconds")
+        if self.connector_family in {"model", "artifact"}:
+            if (
+                self.binding_id is not None
+                or self.binding_configuration_revision is not None
+                or self.timeout_seconds is not None
+            ):
+                raise ValueError("non-connector steps cannot retain a binding or timeout")
+        elif (
+            self.binding_id is None
+            or self.binding_configuration_revision is None
+            or self.binding_configuration_revision != self.configuration_revision
+            or self.timeout_seconds is None
+        ):
+            raise ValueError("external connector steps require a complete binding snapshot")
+        if self.approval_expires_after_seconds is not None and (
+            not isinstance(self.approval_expires_after_seconds, int)
+            or isinstance(self.approval_expires_after_seconds, bool)
+            or self.approval_expires_after_seconds < 1
+        ):
+            raise ValueError("step approval expiry must be positive")
+        if self.approval_allow_self_approval is not None and not isinstance(
+            self.approval_allow_self_approval, bool
+        ):
+            raise ValueError("step self-approval flag must be boolean")
+        if self.effect is Effect.READ:
+            if (
+                self.idempotency_support != "not_applicable"
+                or self.state in {StepState.AWAITING_APPROVAL, StepState.REJECTED}
+                or self.approval_required_roles
+                or self.approval_required_scopes
+                or self.approval_expires_after_seconds is not None
+                or self.approval_allow_self_approval is not None
+            ):
+                raise ValueError("read step cannot retain write approval authority")
+        elif (
+            self.connector_family in {"model", "artifact"}
+            or self.idempotency_support != "required"
+            or not self.approval_required_roles
+            or not self.approval_required_scopes
+            or self.approval_expires_after_seconds is None
+            or self.approval_allow_self_approval is None
+            or self.request_schema_id is None
+        ):
+            raise ValueError("write step requires a complete external approval snapshot")
+        if not isinstance(self.terminal_result, bool):
+            raise ValueError("step terminal-result flag must be boolean")
+        require_utc(self.created_at, "step creation time")
+        require_utc(self.updated_at, "step update time")
+        if self.updated_at < self.created_at:
+            raise ValueError("step update time cannot precede creation")
+        if not isinstance(self.version, int) or isinstance(self.version, bool) or self.version < 1:
+            raise ValueError("step version must be positive")
+        terminal = self.state in {
+            StepState.SUCCEEDED,
+            StepState.FAILED,
+            StepState.REJECTED,
+            StepState.CANCELLED,
+            StepState.SKIPPED,
+        }
+        if terminal != (self.terminal_reason_code is not None):
+            raise ValueError("only terminal steps require a terminal reason code")
+        if self.terminal_reason_code is not None:
+            require_id(self.terminal_reason_code, "step terminal reason code")
 
 
 @dataclass(frozen=True, slots=True)

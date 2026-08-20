@@ -1,4 +1,4 @@
-"""Approval, schedule occurrence, and audit entities."""
+"""Approval and schedule-occurrence entities."""
 
 from __future__ import annotations
 
@@ -15,13 +15,7 @@ from marketing_agents.domain.enums import (
     OccurrenceState,
 )
 
-from ._validation import (
-    frozen_mapping,
-    require_digest,
-    require_id,
-    require_text,
-    require_utc,
-)
+from ._validation import frozen_mapping, require_digest, require_id, require_text, require_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,26 +105,3 @@ class ScheduleOccurrence:
         if self.lease_owner is not None:
             require_id(self.lease_owner, "lease owner")
             require_utc(self.lease_expires_at, "lease expiry")  # type: ignore[arg-type]
-
-
-@dataclass(frozen=True, slots=True)
-class AuditEvent:
-    id: str
-    sequence: int
-    event_type: str
-    aggregate_type: str
-    aggregate_id: str
-    actor_id: str
-    correlation_id: str
-    safe_metadata: Mapping[str, Any]
-    occurred_at: datetime
-
-    def __post_init__(self) -> None:
-        for field_name in ("id", "aggregate_id", "actor_id", "correlation_id"):
-            require_id(getattr(self, field_name), field_name)
-        require_text(self.event_type, "audit event type", maximum=120)
-        require_text(self.aggregate_type, "audit aggregate type", maximum=120)
-        if self.sequence < 1:
-            raise ValueError("audit sequence must be positive")
-        require_utc(self.occurred_at, "audit event time")
-        object.__setattr__(self, "safe_metadata", frozen_mapping(self.safe_metadata))

@@ -6,16 +6,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.entities import (
-    AuditEvent,
     ConnectorActionReceipt,
     ExternalAction,
     ExternalActionResultSnapshot,
     Run,
+    RunPlanRoutingAssignment,
+    RunPlanSelectedInstance,
+    RunPlanSnapshot,
+    RunStep,
     WorkItem,
 )
-from marketing_agents.domain.enums import RunState
+from marketing_agents.domain.enums import RunState, StepState
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
+from marketing_agents.domain.step_lifecycle import StepStateTransition, StepTransitionResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +61,14 @@ class RunRepository(Protocol):
         run: Run,
         initial_transition: RunStateTransition,
     ) -> RunInsertResult: ...
+
+    async def fence(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        expected_state: RunState,
+    ) -> bool: ...
 
     async def apply_transition(
         self,
@@ -194,7 +207,64 @@ class ConnectorReceiptRepository(Protocol):
     ) -> ConnectorReceiptInsertResult: ...
 
 
-class AuditRepository(Protocol):
-    async def append(self, event: AuditEvent) -> None: ...
+@dataclass(frozen=True, slots=True)
+class RunStepPlanInsertResult:
+    plan: RunPlanSnapshot
+    steps: tuple[RunStep, ...]
+    inserted: bool
 
-    async def next_sequence(self, aggregate_type: str, aggregate_id: str) -> int: ...
+
+class RunStepRepository(Protocol):
+    async def get(self, step_id: str) -> RunStep | None: ...
+
+    async def get_plan(self, run_id: str) -> RunPlanSnapshot | None: ...
+
+    async def add_plan(
+        self,
+        plan: RunPlanSnapshot,
+        selected_instances: tuple[RunPlanSelectedInstance, ...],
+        assignments: tuple[RunPlanRoutingAssignment, ...],
+        steps: tuple[RunStep, ...],
+        initial_transitions: tuple[StepStateTransition, ...],
+    ) -> RunStepPlanInsertResult: ...
+
+    async def list_for_run(self, run_id: str) -> tuple[RunStep, ...]: ...
+
+    async def validate_plan_for_execution(self, run_id: str) -> tuple[RunStep, ...]: ...
+
+    async def apply_transition(
+        self,
+        *,
+        expected_run_version: int,
+        expected_run_state: RunState,
+        expected_version: int,
+        expected_state: StepState,
+        result: StepTransitionResult,
+    ) -> bool: ...
+
+    async def list_transitions(self, step_id: str) -> tuple[StepStateTransition, ...]: ...
+
+
+class AuditRepository(Protocol):
+    async def append(self, event: AuditEventDraft) -> AuditEvent: ...
+
+    async def append_many(self, events: tuple[AuditEventDraft, ...]) -> tuple[AuditEvent, ...]: ...
+
+    async def get(self, event_id: str) -> AuditEvent | None: ...
+
+    async def get_attempt_event(self, run_id: str, attempt_id: str) -> AuditEvent | None: ...
+
+    async def get_mutation_event(
+        self,
+        aggregate_type: str,
+        aggregate_id: str,
+        mutation_version: int,
+    ) -> AuditEvent | None: ...
+
+    async def list_run(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> tuple[AuditEvent, ...]: ...

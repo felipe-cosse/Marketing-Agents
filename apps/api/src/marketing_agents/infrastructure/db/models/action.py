@@ -30,6 +30,8 @@ class ExternalActionRecord(Base):
     __tablename__ = "external_actions"
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_external_actions_idempotency_key"),
+        UniqueConstraint("id", "run_id", name="uq_external_actions_id_run"),
+        UniqueConstraint("id", "run_id", "step_id", name="uq_actions_id_run_step"),
         UniqueConstraint(
             "run_id",
             "plan_hash",
@@ -227,6 +229,11 @@ class ConnectorActionReceiptRecord(Base):
         UniqueConstraint(
             "external_action_id",
             name="uq_connector_action_receipts_external_action_id",
+        ),
+        UniqueConstraint(
+            "external_action_id",
+            "receipt_id",
+            name="uq_connector_receipts_action_receipt",
         ),
         CheckConstraint("length(action_hash) = 64", name="ck_connector_receipt_hash_length"),
     )

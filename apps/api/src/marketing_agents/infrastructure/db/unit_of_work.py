@@ -14,6 +14,7 @@ from marketing_agents.application.ports.repositories import (
     ConnectorReceiptRepository,
     ExternalActionRepository,
     RunRepository,
+    RunStepRepository,
     WorkRepository,
 )
 
@@ -27,6 +28,7 @@ class RepositoryBundle:
     works: WorkRepository
     runs: RunRepository
     audits: AuditRepository
+    run_steps: RunStepRepository | None = None
     external_actions: ExternalActionRepository | None = None
     connector_receipts: ConnectorReceiptRepository | None = None
 
@@ -36,6 +38,7 @@ class SQLAlchemyRepositoryFactories:
     works: Callable[[AsyncSession], WorkRepository]
     runs: Callable[[AsyncSession], RunRepository]
     audits: Callable[[AsyncSession], AuditRepository]
+    run_steps: Callable[[AsyncSession], RunStepRepository] | None = None
     external_actions: Callable[[AsyncSession], ExternalActionRepository] | None = None
     connector_receipts: Callable[[AsyncSession], ConnectorReceiptRepository] | None = None
 
@@ -44,6 +47,7 @@ class SQLAlchemyRepositoryFactories:
             works=self.works(session),
             runs=self.runs(session),
             audits=self.audits(session),
+            run_steps=None if self.run_steps is None else self.run_steps(session),
             external_actions=(
                 None if self.external_actions is None else self.external_actions(session)
             ),
@@ -88,6 +92,13 @@ class SQLAlchemyUnitOfWork:
     @property
     def audits(self) -> AuditRepository:
         return self._require_repositories().audits
+
+    @property
+    def run_steps(self) -> RunStepRepository:
+        repository = self._require_repositories().run_steps
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("run step repository is not configured")
+        return repository
 
     @property
     def external_actions(self) -> ExternalActionRepository:

@@ -10,6 +10,7 @@ from marketing_agents.application.ports.repositories import (
     ConnectorReceiptRepository,
     ExternalActionRepository,
     RunRepository,
+    RunStepRepository,
     WorkRepository,
 )
 
@@ -23,6 +24,9 @@ class UnitOfWork(Protocol):
 
     @property
     def audits(self) -> AuditRepository: ...
+
+    @property
+    def run_steps(self) -> RunStepRepository: ...
 
     @property
     def external_actions(self) -> ExternalActionRepository: ...

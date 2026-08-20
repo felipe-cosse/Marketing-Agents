@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.action_hash import (
     CanonicalExternalAction,
     SemanticExternalAction,
@@ -16,6 +17,7 @@ from marketing_agents.domain.approval import (
     ApprovalPolicySnapshot,
     ProposedExternalAction,
 )
+from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import (
     AgentInstance,
@@ -49,6 +51,7 @@ from marketing_agents.domain.enums import (
     TriggerKind,
     WorkMode,
 )
+from marketing_agents.domain.run_lifecycle import initial_received_transition
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 DIGEST = "a" * 64
@@ -129,6 +132,28 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         capability.id,
         Effect.WRITE,
         StepState.PENDING,
+        plan_hash=DIGEST,
+        graph_hash="b" * 64,
+        ordinal=1,
+        source_order=10,
+        template_id=template.id,
+        configuration_revision=1,
+        connector_family=capability.connector_family,
+        routing_slot_key=None,
+        binding_id="mock.newsletter.default",
+        binding_configuration_revision=1,
+        request_schema_id=capability.request_schema_id,
+        request_redaction_fields=("email",),
+        idempotency_support=capability.idempotency_support,
+        timeout_seconds=30,
+        approval_policy_id=policy.id,
+        approval_required_roles=("role.operator",),
+        approval_required_scopes=("scope.external-write",),
+        approval_expires_after_seconds=1_800,
+        approval_allow_self_approval=False,
+        terminal_result=True,
+        created_at=NOW,
+        updated_at=NOW,
     )
     artifact = Artifact(
         "artifact.1",
@@ -231,15 +256,14 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
     )
     occurrence = ScheduleOccurrence("occurrence.1", schedule.id, NOW, OccurrenceState.DUE)
     audit = AuditEvent(
-        "audit.1",
-        1,
-        "run.received",
-        "run",
-        run.id,
-        "service.intake",
-        "correlation.1",
-        {"state": run.state.value},
-        NOW,
+        AuditEventFactory(
+            AuditContext.system("service.intake", correlation_id="correlation.dom-01")
+        ).run_transition(
+            run,
+            initial_received_transition(run),
+        ),
+        global_sequence=1,
+        run_sequence=1,
     )
 
     entities = (
@@ -301,6 +325,28 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
             "cap.model.generate",
             Effect.READ,
             StepState.PENDING,
+            plan_hash=DIGEST,
+            graph_hash="b" * 64,
+            ordinal=1,
+            source_order=10,
+            template_id="template.model.1",
+            configuration_revision=1,
+            connector_family="model",
+            routing_slot_key=None,
+            binding_id=None,
+            binding_configuration_revision=None,
+            request_schema_id="schema.model.request",
+            request_redaction_fields=(),
+            idempotency_support="not_applicable",
+            timeout_seconds=None,
+            approval_policy_id="policy.none.v1",
+            approval_required_roles=(),
+            approval_required_scopes=(),
+            approval_expires_after_seconds=None,
+            approval_allow_self_approval=None,
+            terminal_result=True,
+            created_at=NOW,
+            updated_at=NOW,
         ),
         lambda: Artifact(
             "artifact.1",

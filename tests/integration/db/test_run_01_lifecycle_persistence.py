@@ -11,36 +11,43 @@ from typing import cast
 import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
 from marketing_agents.application.ports.repositories import (
-    AuditRepository,
     RunInsertResult,
     RunRepository,
 )
 from marketing_agents.application.services import (
     AdmissionDisposition,
+    AuditedPlanPersistenceService,
     ReceiveRunRequest,
     ReceiveRunResult,
     RunLifecycleService,
     RunLifecycleServiceError,
+    RunStepLifecycleService,
     WorkAdmissionService,
 )
 from marketing_agents.domain.admission import AdmissionEnvelope
+from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run
 from marketing_agents.domain.enums import RunState, WorkMode
 from marketing_agents.domain.run_lifecycle import (
     CancellationContext,
     CompletionContext,
     NoRunTransitionContext,
-    PlanDispositionContext,
     RunLifecycleCommand,
     RunStateTransition,
     RunTransitionContext,
     RunTransitionResult,
 )
+from marketing_agents.domain.step_lifecycle import (
+    NoStepTransitionContext,
+    StepLifecycleCommand,
+)
 from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
+    SQLAlchemyAuditRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
+    SQLAlchemyRunStepRepository,
     SQLAlchemyUnitOfWorkFactory,
     create_database_runtime,
 )
@@ -56,6 +63,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.support.incoming_work import validate_incoming_for_test
+from tests.support.orch_09_planning import build_read_only_plan
 
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 CATALOG_HASH = "c" * 64
@@ -115,6 +123,19 @@ class BarrierRunRepository:
     ) -> RunInsertResult:
         return await self._delegate.add_received_or_get(run, initial_transition)
 
+    async def fence(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        expected_state: RunState,
+    ) -> bool:
+        return await self._delegate.fence(
+            run_id=run_id,
+            expected_version=expected_version,
+            expected_state=expected_state,
+        )
+
     async def apply_transition(
         self,
         *,
@@ -152,6 +173,19 @@ class ReceiptBarrierRunRepository:
         await self._barrier.wait()
         return await self._delegate.add_received_or_get(run, initial_transition)
 
+    async def fence(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        expected_state: RunState,
+    ) -> bool:
+        return await self._delegate.fence(
+            run_id=run_id,
+            expected_version=expected_version,
+            expected_state=expected_state,
+        )
+
     async def apply_transition(
         self,
         *,
@@ -169,16 +203,19 @@ class ReceiptBarrierRunRepository:
         return await self._delegate.list_transitions(run_id)
 
 
-def _unused_audit_repository(_session: AsyncSession) -> AuditRepository:
-    return cast(AuditRepository, object())
-
-
 def _sqlite_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{path}"
 
 
 def _key() -> DigestKey:
     return DigestKey(bytes(range(32)))
+
+
+def _audit_context(correlation_id: str) -> AuditContext:
+    return AuditContext.system(
+        "test.run-01.lifecycle",
+        correlation_id=correlation_id,
+    )
 
 
 def _envelope() -> AdmissionEnvelope:
@@ -206,7 +243,8 @@ def _unit_of_work_factory(
         SQLAlchemyRepositoryFactories(
             works=SQLAlchemyWorkRepository,
             runs=run_factory,
-            audits=_unused_audit_repository,
+            audits=SQLAlchemyAuditRepository,
+            run_steps=SQLAlchemyRunStepRepository,
         ),
     )
 
@@ -243,7 +281,10 @@ async def _admit_and_receive(
     run_service: RunLifecycleService,
 ) -> Run:
     admitted = await work_service.admit(validate_incoming_for_test(_envelope()))
-    received = await run_service.receive(ReceiveRunRequest(admitted.work_item, CATALOG_HASH))
+    received = await run_service.receive(
+        ReceiveRunRequest(admitted.work_item, CATALOG_HASH),
+        audit_context=_audit_context("run-01.initial-receipt"),
+    )
     assert admitted.disposition is AdmissionDisposition.CREATED
     assert received.created is True
     assert received.initial_transition is not None
@@ -270,7 +311,15 @@ async def _advance(
     context: RunTransitionContext,
 ) -> Run:
     clock.tick()
-    return (await service.advance(run.id, run.version, command, context)).run
+    return (
+        await service.advance(
+            run.id,
+            run.version,
+            command,
+            context,
+            audit_context=_audit_context(f"run-01.advance.{run.id}.{run.version}.{command.value}"),
+        )
+    ).run
 
 
 @pytest.mark.asyncio
@@ -301,20 +350,34 @@ async def test_run_01_lifecycle_survives_restart_with_ordered_terminal_history(
     try:
         replayed_work = await restarted_work.admit(validate_incoming_for_test(_envelope()))
         replayed_run = await restarted_lifecycle.receive(
-            ReceiveRunRequest(replayed_work.work_item, CATALOG_HASH)
+            ReceiveRunRequest(replayed_work.work_item, CATALOG_HASH),
+            audit_context=_audit_context("run-01.restarted-receipt"),
         )
         assert replayed_work.disposition is AdmissionDisposition.REPLAYED
         assert replayed_run.created is False
         assert replayed_run.initial_transition is None
         assert replayed_run.run == run
 
-        run = await _advance(
-            restarted_lifecycle,
-            restarted_clock,
-            run,
-            RunLifecycleCommand.RECORD_PLAN,
-            PlanDispositionContext(False),
+        dependencies = OrchestrationDependencies(
+            clock=restarted_clock,
+            ids=IncrementingIds(200),
+            unit_of_work_factory=_unit_of_work_factory(restarted_runtime),
         )
+        plan, graph, routing = build_read_only_plan(
+            run_id=run.id,
+            workflow_id=replayed_work.work_item.workflow_id,
+            target_instance_id=replayed_work.work_item.instance_id,
+            configuration_revision=replayed_work.work_item.configuration_revision,
+            catalog_hash=run.catalog_hash,
+        )
+        persisted = await AuditedPlanPersistenceService(dependencies).persist(
+            plan,
+            graph,
+            routing,
+            expected_run_version=run.version,
+            audit_context=_audit_context("run-01.persist-plan"),
+        )
+        run = persisted.run
         run = await _advance(
             restarted_lifecycle,
             restarted_clock,
@@ -322,12 +385,31 @@ async def test_run_01_lifecycle_survives_restart_with_ordered_terminal_history(
             RunLifecycleCommand.ACTIVATE_PLAN,
             NoRunTransitionContext(),
         )
+        step_service = RunStepLifecycleService(dependencies)
+        step = persisted.steps[0]
+        for command in (
+            StepLifecycleCommand.MARK_READY,
+            StepLifecycleCommand.START,
+            StepLifecycleCommand.SUCCEED,
+        ):
+            restarted_clock.tick()
+            step = (
+                await step_service.advance(
+                    step.id,
+                    step.version,
+                    command,
+                    NoStepTransitionContext(),
+                    audit_context=_audit_context(
+                        f"run-01.step.{step.id}.{step.version}.{command.value}"
+                    ),
+                )
+            ).step
         run = await _advance(
             restarted_lifecycle,
             restarted_clock,
             run,
             RunLifecycleCommand.COMPLETE,
-            CompletionContext(2, 2, 0, 0),
+            CompletionContext(1, 1, 0, 0),
         )
 
         history = await restarted_lifecycle.history(run.id)
@@ -361,6 +443,7 @@ async def test_run_01_work_and_initial_run_share_caller_transaction(tmp_path: Pa
             received = await lifecycle.receive_in_uow(
                 unit_of_work,
                 ReceiveRunRequest(admitted.work_item, CATALOG_HASH),
+                audit_context=_audit_context("run-01.caller-owned-receipt"),
             )
             assert received.created is True
 
@@ -439,8 +522,14 @@ async def test_run_01_two_sessions_receive_one_primary_run_and_initial_transitio
     request = ReceiveRunRequest(admitted.work_item, CATALOG_HASH)
     try:
         outcomes = await asyncio.gather(
-            first_lifecycle.receive(request),
-            second_lifecycle.receive(request),
+            first_lifecycle.receive(
+                request,
+                audit_context=_audit_context("run-01.receipt-race.first"),
+            ),
+            second_lifecycle.receive(
+                request,
+                audit_context=_audit_context("run-01.receipt-race.second"),
+            ),
         )
 
         assert all(isinstance(item, ReceiveRunResult) for item in outcomes)
@@ -476,12 +565,14 @@ async def test_run_01_two_sessions_allow_exactly_one_expected_version_transition
                 run.version,
                 RunLifecycleCommand.MARK_VALIDATED,
                 NoRunTransitionContext(),
+                audit_context=_audit_context("run-01.cas-race.validate"),
             ),
             lifecycle.advance(
                 run.id,
                 run.version,
                 RunLifecycleCommand.CANCEL,
                 CancellationContext("concurrent_operator_cancel"),
+                audit_context=_audit_context("run-01.cas-race.cancel"),
             ),
             return_exceptions=True,
         )
@@ -532,6 +623,7 @@ async def test_run_01_transition_insert_fault_rolls_back_primary_run_update(
                 run.version,
                 RunLifecycleCommand.MARK_VALIDATED,
                 NoRunTransitionContext(),
+                audit_context=_audit_context("run-01.transition-fault"),
             )
 
         history = await lifecycle.history(run.id)

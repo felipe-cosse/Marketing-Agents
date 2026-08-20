@@ -1,0 +1,167 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-09",
+  "matrix_statement_sha256": "f275ca6e2fdb2c5458ba456baf767027f1703b7b42de17cd258db65b5ad6b3a8",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/idempotent_work_receipt.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_step_lifecycle.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/__init__.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/plan_hash.py",
+      "apps/api/src/marketing_agents/domain/run_lifecycle.py",
+      "apps/api/src/marketing_agents/domain/step_lifecycle.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/security/__init__.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "tests/integration/db/test_orch_07_idempotent_receipts.py",
+      "tests/integration/db/test_orch_09_audited_step_state.py",
+      "tests/integration/db/test_run_01_lifecycle_persistence.py",
+      "tests/security/test_orch_09_audit_redaction.py",
+      "tests/support/orch_09_planning.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_orch_09_audit_contracts.py",
+      "docs/verification/requirements/ORCH-09.json",
+      "docs/verification/requirements/ORCH-09.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+          "apps/api/src/marketing_agents/application/services/run_step_lifecycle.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_orch_09_audited_step_state.py",
+          "tests/unit/domain/test_orch_09_audit_contracts.py",
+          "tests/security/test_orch_09_audit_redaction.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "atomic-plan-step-snapshot",
+      "type": "contract",
+      "statement": "One validated Run accepts a complete bounded read-only plan snapshot containing selected instances, routing assignments, ordered steps, dependencies, and exact initial step histories; the shared RUN-02 hash binds every persisted RunStep execution field plus the stored graph and routing digests, rows commit or roll back together, and replay never heals missing history.",
+      "test_refs": [
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_restart_stable_complete_plan_step_timeline",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_plan_and_audit_fault_roll_back_every_row",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_same_run_plan_race_has_one_complete_canonical_winner",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_identical_structural_plan_hash_is_scoped_per_run",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_plan_replay_rejects_missing_initial_step_history"
+      ]
+    },
+    {
+      "id": "same-uow-run-step-mutations",
+      "type": "negative_control",
+      "statement": "Accepted Run and read-step mutations append their typed event in the exact mutation unit of work; audit failure rolls back state and history, Run completion derives persisted step results, and readiness revalidates the full persisted dependency graph so forged counts or a missing edge cannot authorize progress.",
+      "test_refs": [
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_single_audit_append_fault_rolls_back_run_and_step_mutations",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_completion_uses_persisted_steps_and_audits_rejection",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_missing_dependency_row_cannot_turn_child_into_root",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_structural_step_tamper_blocks_activation_without_healing",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_structural_tamper_after_ready_blocks_start_without_healing",
+        "tests/unit/domain/test_orch_09_audit_contracts.py::test_orch_09_step_lifecycle_has_exhaustive_effect_aware_edges",
+        "tests/unit/domain/test_orch_09_audit_contracts.py::test_orch_09_transition_contract_rejects_forged_edges_and_mutation"
+      ]
+    },
+    {
+      "id": "typed-redacted-append-only-events",
+      "type": "negative_control",
+      "statement": "Audit contexts use integrity-checked pseudonymous subject and correlation identifiers, event-specific bounded metadata is redacted and revalidated during hydration, impossible lifecycle shapes fail closed, and the repository exposes append and read operations without event update or delete methods.",
+      "test_refs": [
+        "tests/security/test_orch_09_audit_redaction.py::test_orch_09_audit_context_pseudonymizes_canaries_and_detects_mutation",
+        "tests/security/test_orch_09_audit_redaction.py::test_orch_09_persisted_metadata_is_revalidated_not_trusted_by_fingerprint",
+        "tests/security/test_orch_09_audit_redaction.py::test_orch_09_audit_repository_has_no_event_update_or_delete_surface",
+        "tests/unit/domain/test_orch_09_audit_contracts.py::test_orch_09_raw_audit_hydration_rejects_impossible_initial_mutation"
+      ]
+    },
+    {
+      "id": "stable-per-run-sequence-and-rejections",
+      "type": "contract",
+      "statement": "A transactionally allocated per-Run counter gives committed events a contiguous run_sequence, including concurrent independent step transitions; rejected Run attempts use distinct stable attempt identities without claiming mutation versions, replay consumes no sequence, and missing timeline rows prevent reads and extension rather than being backfilled.",
+      "test_refs": [
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_parallel_steps_allocate_contiguous_same_run_audit_sequences",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_caller_owned_rejection_is_typed_and_committable",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_rejected_attempt_identity_replays_without_consuming_sequence",
+        "tests/integration/db/test_orch_09_audited_step_state.py::test_orch_09_timeline_gap_rejects_reads_and_cannot_be_extended"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-09-audited-step-state",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "atomic-plan-step-snapshot",
+        "same-uow-run-step-mutations",
+        "typed-redacted-append-only-events",
+        "stable-per-run-sequence-and-rejections"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_step_lifecycle.py",
+      "apps/api/src/marketing_agents/domain/plan_hash.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/step.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py"
+    ],
+    "gate_id": "orch-09-audited-step-state"
+  },
+  "limitations": [
+    "Stable ordering is scoped to one Run through run_sequence. global_sequence is an internal row identity, not a lossless cross-transaction commit cursor; API-07 must add a transactionally ordered global cursor or explicit fixed-snapshot protocol before exposing a global feed.",
+    "AuditedPlanPersistenceService fails closed for write-bearing plans until RUN-08 and ORCH-08 can persist the complete authorization-set and approval-request epoch atomically with the Run plan and steps.",
+    "RUN-06 retains complete external-action, delivery-attempt, connector-receipt, output, artifact, and safe-error timeline integration; current action and receipt audit shapes are foundational contracts rather than an end-to-end ORCH-09 claim.",
+    "Execution reconstructs the persisted graph and recomputes the exact RUN-02 structural plan hash, but the trusted database remains a residual boundary for the ORCH-04 routing hash because its trigger and slot-policy input projection is not persisted here.",
+    "AuditContext factories seal and pseudonymize typed provenance but do not authenticate a caller; API and worker composition must derive contexts from authenticated server-owned principals rather than request-body or actor-header values.",
+    "SAFE-07 retains retention-time pseudonymization and deletion policy, DEL-04 retains migration ownership, ORCH-06 retains worker budgets and cancellation, and API-07 retains the operator timeline API and filters."
+  ]
+}

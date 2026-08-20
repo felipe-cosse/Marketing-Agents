@@ -25,6 +25,10 @@ class RunRecord(Base):
     __table_args__ = (
         CheckConstraint("version >= 1", name="ck_runs_version_positive"),
         CheckConstraint(
+            "next_timeline_sequence >= 0",
+            name="ck_runs_timeline_sequence_nonnegative",
+        ),
+        CheckConstraint(
             "configuration_revision >= 1",
             name="ck_runs_configuration_revision_positive",
         ),
@@ -60,6 +64,12 @@ class RunRecord(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_timeline_sequence: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
 
 
 class RunStateTransitionRecord(Base):

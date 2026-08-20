@@ -125,6 +125,35 @@ class SQLAlchemyRunRepository:
             return RunInsertResult(existing, inserted=False)
         return RunInsertResult(run, inserted=True)
 
+    async def fence(
+        self,
+        *,
+        run_id: str,
+        expected_version: int,
+        expected_state: RunState,
+    ) -> bool:
+        statement = (
+            update(RunRecord)
+            .where(
+                RunRecord.id == run_id,
+                RunRecord.version == expected_version,
+                RunRecord.state == expected_state.value,
+            )
+            .values(version=RunRecord.version)
+            .returning(RunRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            return (await self._session.execute(statement)).scalar_one_or_none() is not None
+        except OperationalError as exc:
+            sqlite_error_code = getattr(exc.orig, "sqlite_errorcode", None)
+            if self._session.get_bind().dialect.name == "sqlite" and sqlite_error_code in {
+                sqlite3.SQLITE_BUSY,
+                getattr(sqlite3, "SQLITE_BUSY_SNAPSHOT", 517),
+            }:
+                return False
+            raise
+
     async def apply_transition(
         self,
         *,
