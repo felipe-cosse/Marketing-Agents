@@ -1,5 +1,11 @@
 """Framework-independent application services."""
 
+from .approval_decisions import (
+    ApprovalDecisionCommand,
+    ApprovalDecisionService,
+    ApprovalDecisionServiceError,
+    AuthorizedApprovalDecision,
+)
 from .approval_records import (
     ApprovalRecordService,
     ApprovalRecordServiceError,
@@ -61,9 +67,13 @@ from .work_admission import (
 
 __all__ = [
     "AdmissionDisposition",
+    "ApprovalDecisionCommand",
+    "ApprovalDecisionService",
+    "ApprovalDecisionServiceError",
     "ApprovalRecordService",
     "ApprovalRecordServiceError",
     "AuditedPlanPersistenceService",
+    "AuthorizedApprovalDecision",
     "CampaignBriefPolicy",
     "CampaignBriefRevision",
     "ConfiguredIncomingTrigger",

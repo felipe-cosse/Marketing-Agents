@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime
 
 from marketing_agents.domain.action_hash import CanonicalExternalAction
@@ -30,7 +31,10 @@ def validate_current_action(
     *,
     expected_client_hash: str | None = None,
 ) -> None:
-    if expected_client_hash is not None and expected_client_hash != request.action_hash:
+    if expected_client_hash is not None and not hmac.compare_digest(
+        expected_client_hash,
+        request.action_hash,
+    ):
         raise ApprovalIntegrityError(
             "expected_hash_mismatch", "client expected hash is not the current approval hash"
         )

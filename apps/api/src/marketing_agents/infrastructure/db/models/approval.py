@@ -193,6 +193,14 @@ class ApprovalDecisionRecord(Base):
             "step_key",
             name="uq_approval_decision_binding",
         ),
+        UniqueConstraint(
+            "id",
+            "request_id",
+            "action_id",
+            "run_id",
+            "step_id",
+            name="uq_approval_decision_audit_binding",
+        ),
         ForeignKeyConstraint(
             [
                 "request_id",

@@ -7,7 +7,12 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from marketing_agents.application.policies.approval_authorization import (
+    APPROVAL_DECIDE_SCOPE,
+    APPROVER_ROLE,
+)
 from marketing_agents.domain.approval import (
+    ApprovalDecision,
     ApprovalRenewal,
     StoredActionApprovalRequest,
     assert_request_binds_action,
@@ -22,7 +27,12 @@ from marketing_agents.domain.audit import (
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import ExternalAction, Run, RunPlanSnapshot, RunStep
-from marketing_agents.domain.enums import ApprovalStatus, ExternalActionState, RunState
+from marketing_agents.domain.enums import (
+    ApprovalDecisionKind,
+    ApprovalStatus,
+    ExternalActionState,
+    RunState,
+)
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
 from marketing_agents.domain.step_lifecycle import (
@@ -386,6 +396,167 @@ class AuditEventFactory:
             previous_state=None,
             new_state=ApprovalStatus.PENDING.value,
             reason_code="approval_requested",
+        )
+
+    def action_decided(
+        self,
+        previous: ExternalAction,
+        decided: ExternalAction,
+        approval: StoredActionApprovalRequest,
+    ) -> AuditEventDraft:
+        decision = approval.decision
+        if type(decision) is not ApprovalDecision:
+            raise ValueError("action decision audit requires the append-only decision")
+        target_state = (
+            ExternalActionState.APPROVED
+            if decision.decision is ApprovalDecisionKind.APPROVE
+            else ExternalActionState.REJECTED
+        )
+        event_type = (
+            "action.approved" if target_state is ExternalActionState.APPROVED else "action.rejected"
+        )
+        expected_reason = (
+            "approval_granted"
+            if target_state is ExternalActionState.APPROVED
+            else "approval_rejected"
+        )
+        if (
+            type(previous) is not ExternalAction
+            or type(decided) is not ExternalAction
+            or previous.state is not ExternalActionState.AWAITING_APPROVAL
+            or decided.state is not target_state
+            or decided.version != previous.version + 1
+            or decided.version < 3
+            or decided.version % 2 != 1
+            or decided.updated_at != decision.decided_at
+            or decided.id != previous.id
+            or decided.envelope != previous.envelope
+            or decided.proposal != previous.proposal
+            or decided.action_hash != previous.action_hash
+            or decided.delivery_contract != previous.delivery_contract
+            or decided.approval_policy != previous.approval_policy
+            or decided.idempotency_key != previous.idempotency_key
+            or decided.created_at != previous.created_at
+            or decided.delivery_attempt_count != previous.delivery_attempt_count
+            or decided.delivery_attempt_limit != previous.delivery_attempt_limit
+            or decided.delivery_attempt_count != 0
+            or decided.reservation is not None
+            or decided.lease is not None
+            or decided.call_started_at is not None
+            or decided.result is not None
+            or decided.superseded_by_action_id is not None
+            or decided.superseded_at is not None
+            or decided.terminal_reason_code
+            != (None if target_state is ExternalActionState.APPROVED else "approval_rejected")
+            or approval.request.action_id != decided.id
+            or approval.request.action_hash != decided.action_hash
+            or approval.status.value != target_state.value
+            or approval.version != 2
+            or approval.updated_at != decision.decided_at
+            or decision.authority_roles
+            != approval.request.policy.required_roles | frozenset({APPROVER_ROLE})
+            or decision.authority_scopes
+            != approval.request.policy.required_scopes | frozenset({APPROVAL_DECIDE_SCOPE})
+            or not self._context.binds_authenticated_user(
+                actor_id=decision.actor_id,
+                authentication_method=decision.authentication_method,
+                correlation_id=decision.correlation_id,
+            )
+        ):
+            raise ValueError("action decision audit requires its exact authorized transition")
+        return self._build(
+            run_id=decided.run_id,
+            event_type=event_type,
+            aggregate_type="external_action",
+            aggregate_id=decided.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=decision.decided_at,
+            metadata={"idempotency_support": decided.delivery_contract.idempotency_support},
+            step_id=decided.step_id,
+            action_id=decided.id,
+            approval_request_id=approval.request.id,
+            approval_decision_id=decision.id,
+            mutation_version=decided.version,
+            previous_state=ExternalActionState.AWAITING_APPROVAL.value,
+            new_state=target_state.value,
+            reason_code=expected_reason,
+        )
+
+    def approval_decided(
+        self,
+        previous: StoredActionApprovalRequest,
+        decided: StoredActionApprovalRequest,
+        action: ExternalAction,
+    ) -> AuditEventDraft:
+        decision = decided.decision
+        if type(decision) is not ApprovalDecision:
+            raise ValueError("approval decision audit requires the append-only decision")
+        expected_status = (
+            ApprovalStatus.APPROVED
+            if decision.decision is ApprovalDecisionKind.APPROVE
+            else ApprovalStatus.REJECTED
+        )
+        event_type = (
+            "approval.approved"
+            if expected_status is ApprovalStatus.APPROVED
+            else "approval.rejected"
+        )
+        if (
+            type(previous) is not StoredActionApprovalRequest
+            or type(decided) is not StoredActionApprovalRequest
+            or type(action) is not ExternalAction
+            or previous.status is not ApprovalStatus.PENDING
+            or previous.version != 1
+            or decided.request != previous.request
+            or decided.status is not expected_status
+            or decided.version != 2
+            or decided.updated_at != decision.decided_at
+            or action.id != previous.request.action_id
+            or action.action_hash != previous.request.action_hash
+            or action.state.value != expected_status.value
+            or action.updated_at != decision.decided_at
+            or action.approval_policy != previous.request.policy
+            or action.proposal.redacted_projection != previous.request.redacted_projection
+            or decision.authority_roles
+            != previous.request.policy.required_roles | frozenset({APPROVER_ROLE})
+            or decision.authority_scopes
+            != previous.request.policy.required_scopes | frozenset({APPROVAL_DECIDE_SCOPE})
+            or not self._context.binds_authenticated_user(
+                actor_id=decision.actor_id,
+                authentication_method=decision.authentication_method,
+                correlation_id=decision.correlation_id,
+            )
+        ):
+            raise ValueError("approval decision audit requires its exact authorized transition")
+        try:
+            assert_request_binds_action(previous.request, action.envelope)
+        except ValueError as exc:
+            raise ValueError("approval decision audit lost its exact action binding") from exc
+        request = previous.request
+        return self._build(
+            run_id=request.run_id,
+            event_type=event_type,
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=decision.decided_at,
+            metadata={
+                "action_state": action.state.value,
+                "action_version": action.version,
+                "decision": decision.decision.value,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "status": decided.status.value,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            approval_decision_id=decision.id,
+            mutation_version=decided.version,
+            previous_state=ApprovalStatus.PENDING.value,
+            new_state=expected_status.value,
+            reason_code=decision.reason_code,
         )
 
     def approval_expired(

@@ -1,0 +1,182 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-10",
+  "matrix_statement_sha256": "e2efeed4ceb95871098b90057f9350b2314a13b080617f6daaaa3a499a338037",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/errors.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/schemas/__init__.py",
+      "apps/api/src/marketing_agents/api/schemas/approvals.py",
+      "apps/api/src/marketing_agents/application/policies/__init__.py",
+      "apps/api/src/marketing_agents/application/policies/approval_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/identity.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/approval_integrity.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/identity.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/identity.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "tests/support/identity.py",
+      "tests/unit/application/test_run_10_authorized_approval_actor.py",
+      "tests/integration/api/test_run_10_identity_dependency.py",
+      "tests/integration/api/test_run_10_approval_routes.py",
+      "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+      "docs/verification/requirements/RUN-10.json",
+      "docs/verification/requirements/RUN-10.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+          "apps/api/src/marketing_agents/application/policies/approval_authorization.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/identity.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/application/test_run_10_authorized_approval_actor.py",
+          "tests/integration/api/test_run_10_identity_dependency.py",
+          "tests/integration/db/test_run_10_authorized_approval_decisions.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/approvals.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_run_10_approval_routes.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "server-derived-immutable-principal",
+      "type": "negative_control",
+      "statement": "Approval identity is an integrity-checked immutable principal issued behind the infrastructure adapter boundary; the settings-bound local provider snapshots one fixed human actor and fixed grants only in validated local non-production loopback configuration, rejects bearer credentials, and keeps bearer evidence out of representations and safe snapshots.",
+      "test_refs": [
+        "tests/unit/application/test_run_10_authorized_approval_actor.py::test_run_10_principal_is_adapter_issued_immutable_and_secret_evidence_is_hidden",
+        "tests/unit/application/test_run_10_authorized_approval_actor.py::test_run_10_principal_issuer_stays_behind_the_infrastructure_boundary",
+        "tests/unit/application/test_run_10_authorized_approval_actor.py::test_run_10_local_provider_snapshots_settings_and_refuses_bearer",
+        "tests/integration/api/test_run_10_identity_dependency.py::test_run_10_default_local_identity_is_fixed_and_bearer_is_not_a_fallback"
+      ]
+    },
+    {
+      "id": "narrow-transport-and-all-of-authorization",
+      "type": "negative_control",
+      "statement": "Real approve/reject routes derive the exact principal and decision path server-side, accept an extra-forbid generation/payload-hash/reason DTO, generate correlation, sanitize bounded validation and service errors, and require a HUMAN, global approver role, approvals:decide scope, every persisted-policy grant, and the self-approval rule without admin shortcuts.",
+      "test_refs": [
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_real_route_uses_local_actor_and_returns_only_resource_state",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_route_role_matrix_denies_before_executor",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_route_missing_identity_is_unauthorized_before_executor",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_forged_body_authority_and_decision_never_reach_executor",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_spoofed_header_and_oversized_reason_fail_without_secret_echo",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_route_rejects_executor_result_that_disagrees_with_fixed_path",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_route_maps_service_errors_without_sensitive_detail",
+        "tests/integration/api/test_run_10_approval_routes.py::test_run_10_real_service_rechecks_stored_policy_after_route_guard",
+        "tests/integration/api/test_run_10_identity_dependency.py::test_run_10_spoofed_identity_and_forwarded_headers_fail_before_provider",
+        "tests/integration/api/test_run_10_identity_dependency.py::test_run_10_non_identity_proxy_headers_remain_api_09_scope",
+        "tests/unit/application/test_run_10_authorized_approval_actor.py::test_run_10_authority_requires_human_and_all_baseline_and_policy_grants"
+      ]
+    },
+    {
+      "id": "atomic-one-winner-authorized-decision",
+      "type": "contract",
+      "statement": "The decision service accepts an already authenticated exact principal, authorizes baseline grants before lookup, reauthorizes the stored policy, validates the unique current request leaf and exact action hash, derives actor, minimum matched grants, action version, ID, reason code, and UTC time, then gives concurrent approve/reject attempts one winner without granting reservation or connector authority.",
+      "test_refs": [
+        "tests/unit/application/test_run_10_authorized_approval_actor.py::test_run_10_baseline_denial_happens_before_clock_id_or_repository_access",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_preconditions_fail_without_decision_or_audit_mutation",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_concurrent_approve_reject_has_one_decision_and_one_audit_pair",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_renewed_leaf_decides_at_action_version_five_and_old_leaf_fails"
+      ]
+    },
+    {
+      "id": "same-uow-linked-decision-witnesses",
+      "type": "contract",
+      "statement": "Each winning decision atomically persists its request and action CAS plus typed action and approval audit witnesses linked directly to the same decision and request; authenticated audit provenance is derived from that principal, audit failure rolls back all facts, hydration and proposal drift fail closed, and replay does not heal missing audit history.",
+      "test_refs": [
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_decision_derives_minimum_authority_and_two_linked_audits",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_audit_fault_rolls_back_decision_request_and_action",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_hydration_corruption_is_sanitized_before_decision",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_replay_never_heals_a_missing_decision_audit",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py::test_run_10_linked_decision_audit_schema_compiles_for_both_dialects"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-10-authorized-approval-actor",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_run_10_authorized_approval_actor.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/integration/api/test_run_10_approval_routes.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+        "tests/unit/domain/test_run_08_approval_records.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "server-derived-immutable-principal",
+        "narrow-transport-and-all-of-authorization",
+        "atomic-one-winner-authorized-decision",
+        "same-uow-linked-decision-witnesses"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/errors.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/schemas/approvals.py",
+      "apps/api/src/marketing_agents/application/policies/approval_authorization.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/domain/identity.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/identity.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py"
+    ],
+    "gate_id": "run-10-authorized-approval-actor"
+  },
+  "limitations": [
+    "The existing EffectPlanRequest.requested_by and stored approval requester are historical free-string snapshots, not authenticated RUN-10 provenance. Self-approval enforcement compares the authenticated decision actor against that snapshot, but authenticated requester issuance must be added at the planning or intake boundary before claiming end-to-end two-person provenance.",
+    "RUN-10 exposes only approve/reject mutations. API-06 still owns approval creation, list/detail/full safe projections, shared correlation middleware, the complete application/problem+json contract, and production dependency composition. The narrow response returns only IDs and status; optional free-text reason is bounded and hidden during validation but intentionally not persisted or audited.",
+    "These mutation routes authenticate and authorize but do not yet enforce browser CSRF, Origin, or Fetch Metadata controls. API-06/API-09 must add the planned same-origin mutation protections before treating the local browser control plane as complete; RUN-10 does not claim CSRF resistance.",
+    "LocalIdentityProvider rechecks validated local, non-production, declarative loopback Settings and TrustedHostMiddleware rejects untrusted Host values, but no canonical launcher currently consumes Settings.api_host as the actual listener bind. Runtime bind composition and trusted proxy enforcement remain delivery and API-09 scope.",
+    "A winning decision stops at ApprovalStatus and ExternalActionState APPROVED or REJECTED. It does not release a parent Run or step, reserve or consume approval use, produce a write proof, call a connector, or authorize any delivery; complete current-set barrier release remains ORCH-08 scope.",
+    "LOCAL_FIXED is the only concrete identity provider implemented in RUN-10. BEARER, VERIFIED_WEBHOOK, and INTERNAL_SCHEDULER are typed principal methods for later providers, not claims that production bearer, webhook, or scheduler authentication is present.",
+    "Runtime decision, rollback, corruption, and race tests use file-backed SQLite. Every mapped table and the new direct decision-audit composite foreign key compile for PostgreSQL, but PostgreSQL concurrency execution remains an integration-environment requirement."
+  ]
+}
