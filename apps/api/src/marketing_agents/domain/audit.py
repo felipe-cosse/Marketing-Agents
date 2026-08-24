@@ -1500,6 +1500,9 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             cancel_expected_decision_link: bool | None = (
                 draft.previous_state == "approved" if approval_status == "superseded" else None
             )
+            # Provider retries add claim, call-start, and release mutations, so
+            # released work does not retain one stable version parity. The
+            # factory already proves the exact previous-to-cancelled increment.
             valid_version = draft.mutation_version is not None and (
                 (
                     draft.previous_state == "approved"
@@ -1515,13 +1518,11 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
                     approval_status == "released"
                     and draft.previous_state == "dispatch_reserved"
                     and draft.mutation_version >= 5
-                    and draft.mutation_version % 2 == 1
                 )
                 or (
                     approval_status == "released"
                     and draft.previous_state == "dispatching"
                     and draft.mutation_version >= 6
-                    and draft.mutation_version % 2 == 0
                 )
             )
             if (

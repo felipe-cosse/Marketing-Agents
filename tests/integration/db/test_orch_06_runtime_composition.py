@@ -25,6 +25,7 @@ from marketing_agents.application.services import (
 from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.execution_control import AttemptReservationCommand
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand
 from marketing_agents.domain.step_lifecycle import (
     NoStepTransitionContext,
@@ -555,7 +556,20 @@ async def _start_step_for_cancellation(
     async with dependencies.unit_of_work() as unit_of_work:
         run = await unit_of_work.runs.get(run_id)
         step = await unit_of_work.run_steps.get(step_id)
-        assert run is not None and step is not None
+        control = await unit_of_work.execution_control.get(run_id)
+        assert run is not None and step is not None and control is not None
+        reserved = await unit_of_work.execution_control.reserve_attempt(
+            AttemptReservationCommand(
+                attempt_id=dependencies.new_id("execution-attempt"),
+                run_id=run_id,
+                step_id=step_id,
+                operation_key=step.runtime_policy.operation_key,
+                expected_control_version=control.version,
+                expected_step_version=step.version,
+                reserved_at=started_at,
+            )
+        )
+        assert reserved.attempt.outcome is None
         result = transition_step(
             step,
             StepLifecycleCommand.START,

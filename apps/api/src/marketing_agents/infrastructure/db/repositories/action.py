@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,9 @@ from marketing_agents.infrastructure.db.models.approval import (
     AuthorizationSetHeadRecord,
     AuthorizationSetMemberRecord,
     AuthorizationSetRecord,
+)
+from marketing_agents.infrastructure.db.models.execution_control import (
+    RunExecutionControlRecord,
 )
 from marketing_agents.infrastructure.db.models.run import RunRecord
 from marketing_agents.infrastructure.db.models.step import (
@@ -1192,6 +1195,22 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionRecord.version == expected_version,
                 ExternalActionRecord.state == ExternalActionState.DISPATCHING.value,
                 ExternalActionRecord.dispatch_attempt_number == attempt_number,
+                # Recovery and cancellation must contend in this same write:
+                # a stale snapshot cannot re-arm work beneath a cancelled Run.
+                exists(
+                    select(RunRecord.id).where(
+                        RunRecord.id == ExternalActionRecord.run_id,
+                        RunRecord.state == RunState.EXECUTING.value,
+                    )
+                ),
+                exists(
+                    select(RunExecutionControlRecord.run_id).where(
+                        RunExecutionControlRecord.run_id == ExternalActionRecord.run_id,
+                        RunExecutionControlRecord.policy_hash == ExternalActionRecord.plan_hash,
+                        RunExecutionControlRecord.started_at.is_not(None),
+                        RunExecutionControlRecord.cancel_requested_at.is_(None),
+                    )
+                ),
                 *recovery_predicates,
             )
             .values(

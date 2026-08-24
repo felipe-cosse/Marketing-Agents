@@ -1,0 +1,13 @@
+# RUN-03 — Best-effort cancellation without effect reversal
+
+RUN-03 provides one application-level cancellation coordinator for every persisted nonterminal Run phase. The coordinator derives current state, version, plan effect, and authoritative service rather than requiring callers to choose among lifecycle, controlled READ, and approval-boundary mechanisms. Terminal retries produce one stable, audited conflict.
+
+Cancellation installs the durable execution-control fence before it closes work. Queued steps cancel immediately. An `EXECUTING` READ step is preserved only when its exact latest attempt still has bounded open-call authority; a completed transient attempt waiting in retry backoff is failed with `run_cancelled` and cannot reserve another call after restart. Released WRITE work is cancelled before call-start, including a provider-retry generation whose step is already `EXECUTING`. Stale recovery has correlated Run and control predicates, so it cannot re-arm an action after cancellation wins.
+
+Call-started work is deliberately best effort. A WRITE call may return after the parent Run is cancelled, but its authoritative durable receipt, known failure, or outcome-unknown conclusion closes the ExternalAction and exact WRITE step in one transaction. The action outcome audit precedes the step terminal audit, and neither path rewrites the cancelled Run. Equivalent controlled READ behavior remains part of the adjacent no-network regression gate.
+
+Completed effects are never described as rolled back. An action already `succeeded` or `outcome_unknown` remains byte-for-byte unchanged and receives no cancellation event. Run transition history records the exact succeeded and unknown counts observed when cancellation commits, while ordered action and Run events show whether an outcome was recorded before or after cancellation. Audit-append failure rolls back action and step completion together; receipt-first restart recovery performs no second provider call.
+
+The machine authority is [`RUN-03.json`](RUN-03.json). Its gate runs the focused RUN-03 journeys plus lifecycle, execution-control, controlled READ, approval-boundary, action-dispatch, and audit regressions without network access. The connection witness restores the implementation paths to the base revision and requires that same gate to fail.
+
+This evidence does not claim provider atomicity, recall, exactly-once external effects, general compensation, authenticated HTTP cancellation, a complete operator UI, Alembic rollout, PostgreSQL runtime parity, or a live distributed worker/provider environment. Cancellation-time effect counts remain snapshots; immutable action history is the final effect record.
