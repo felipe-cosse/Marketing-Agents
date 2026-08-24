@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
 from sqlalchemy import and_, func, or_, select, update
@@ -33,6 +33,7 @@ from marketing_agents.domain.entities import (
 )
 from marketing_agents.domain.enums import ExternalActionState, RunState, StepState
 from marketing_agents.domain.step_lifecycle import StepLifecycleCommand, StepTransitionResult
+from marketing_agents.domain.validation import require_digest, require_id, require_utc
 from marketing_agents.infrastructure.db.models.action import (
     ConnectorActionReceiptRecord,
     ExternalActionDispatchAttemptRecord,
@@ -170,6 +171,7 @@ def _to_record(action: ExternalAction) -> ExternalActionRecord:
         dispatch_claimed_at=None if lease is None else lease.claimed_at,
         dispatch_lease_expires_at=None if lease is None else lease.expires_at,
         connector_call_started_at=action.call_started_at,
+        connector_call_deadline_at=action.call_deadline_at,
         connector_receipt_id=None if result is None else result.receipt_id,
         connector_result_status=None if result is None else result.status,
         connector_safe_metadata=(
@@ -265,6 +267,7 @@ def _to_domain(record: ExternalActionRecord) -> ExternalAction:
         reservation=reservation,
         lease=lease,
         call_started_at=record.connector_call_started_at,
+        call_deadline_at=record.connector_call_deadline_at,
         result=result,
         terminal_reason_code=record.terminal_reason_code,
         superseded_by_action_id=record.superseded_by_action_id,
@@ -298,16 +301,55 @@ class SQLAlchemyExternalActionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _validated_action(self, record: ExternalActionRecord) -> ExternalAction:
+        action = _to_domain(record)
+        if action.state is not ExternalActionState.DISPATCHING:
+            return action
+
+        lease = action.lease
+        if lease is None:  # pragma: no cover - guarded by ExternalAction hydration
+            raise ExternalActionPersistenceConflict(
+                "dispatch_attempt_corrupt",
+                "dispatching action does not retain an exact current attempt",
+            )
+        statement = (
+            select(ExternalActionDispatchAttemptRecord)
+            .where(
+                ExternalActionDispatchAttemptRecord.external_action_id == action.id,
+                ExternalActionDispatchAttemptRecord.attempt_number == lease.attempt_number,
+            )
+            .execution_options(populate_existing=True)
+        )
+        attempt = (await self._session.execute(statement)).scalar_one_or_none()
+        if (
+            attempt is None
+            or attempt.idempotency_support != action.delivery_contract.idempotency_support
+            or attempt.lease_owner != lease.owner
+            or attempt.claimed_at != lease.claimed_at
+            or attempt.lease_expires_at != lease.expires_at
+            or attempt.call_started_at != action.call_started_at
+            or attempt.call_deadline_at != action.call_deadline_at
+            or attempt.completed_at is not None
+            or attempt.conclusion is not None
+            or attempt.reason_code is not None
+            or attempt.connector_receipt_id is not None
+        ):
+            raise ExternalActionPersistenceConflict(
+                "dispatch_attempt_corrupt",
+                "dispatching action does not retain an exact current attempt",
+            )
+        return action
+
     async def get(self, action_id: str) -> ExternalAction | None:
         record = await self._session.get(ExternalActionRecord, action_id)
-        return None if record is None else _to_domain(record)
+        return None if record is None else await self._validated_action(record)
 
     async def get_by_idempotency_key(self, idempotency_key: str) -> ExternalAction | None:
         statement = select(ExternalActionRecord).where(
             ExternalActionRecord.idempotency_key == idempotency_key
         )
         record = (await self._session.execute(statement)).scalar_one_or_none()
-        return None if record is None else _to_domain(record)
+        return None if record is None else await self._validated_action(record)
 
     async def list_plan_set(
         self, run_id: str, plan_hash: str, proposal_revision: int
@@ -321,8 +363,27 @@ class SQLAlchemyExternalActionRepository:
             )
             .order_by(ExternalActionRecord.step_key)
         )
-        rows = (await self._session.execute(statement)).scalars()
-        return tuple(_to_domain(row) for row in rows)
+        rows = tuple((await self._session.execute(statement)).scalars())
+        return tuple([await self._validated_action(row) for row in rows])
+
+    async def list_run_plan(
+        self,
+        run_id: str,
+        plan_hash: str,
+    ) -> tuple[ExternalAction, ...]:
+        statement = (
+            select(ExternalActionRecord)
+            .where(
+                ExternalActionRecord.run_id == run_id,
+                ExternalActionRecord.plan_hash == plan_hash,
+            )
+            .order_by(
+                ExternalActionRecord.proposal_revision,
+                ExternalActionRecord.step_key,
+            )
+        )
+        rows = tuple((await self._session.execute(statement)).scalars())
+        return tuple([await self._validated_action(row) for row in rows])
 
     async def add_proposed_set_or_get(
         self, actions: tuple[ExternalAction, ...]
@@ -708,13 +769,21 @@ class SQLAlchemyExternalActionRepository:
         lease_owner: str,
         attempt_number: int,
         started_at: datetime,
+        call_deadline_at: datetime,
         step_transition: StepTransitionResult | None,
     ) -> ActionCallStartResult | None:
+        require_utc(started_at, "connector call start time")
+        require_utc(call_deadline_at, "connector call deadline")
         current = await self.get(action_id)
         initial_start = authority.call_mode is ReleaseCallMode.FIRST_CALL
         retry_start = authority.call_mode is ReleaseCallMode.PROVIDER_RETRY
         if (
             current is None
+            or not (
+                started_at
+                < call_deadline_at
+                <= started_at + timedelta(seconds=current.delivery_contract.timeout_seconds)
+            )
             or type(authority) is not ReleaseAuthority
             or authority.action_id != action_id
             or (not initial_start and not retry_start)
@@ -761,6 +830,7 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionDispatchAttemptRecord.lease_expires_at
                 == ExternalActionRecord.dispatch_lease_expires_at,
                 ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                ExternalActionDispatchAttemptRecord.call_deadline_at.is_(None),
                 ExternalActionDispatchAttemptRecord.completed_at.is_(None),
                 ExternalActionDispatchAttemptRecord.conclusion.is_(None),
             )
@@ -778,11 +848,13 @@ class SQLAlchemyExternalActionRepository:
                         ExternalActionRecord.dispatch_attempt_number == attempt_number,
                         ExternalActionRecord.dispatch_lease_expires_at > started_at,
                         ExternalActionRecord.connector_call_started_at.is_(None),
+                        ExternalActionRecord.connector_call_deadline_at.is_(None),
                         self._release_fence(authority),
                         current_attempt_fence,
                     )
                     .values(
                         connector_call_started_at=started_at,
+                        connector_call_deadline_at=call_deadline_at,
                         updated_at=started_at,
                         version=expected_version + 1,
                     )
@@ -815,10 +887,14 @@ class SQLAlchemyExternalActionRepository:
                         ExternalActionDispatchAttemptRecord.claimed_at == lease.claimed_at,
                         ExternalActionDispatchAttemptRecord.lease_expires_at == lease.expires_at,
                         ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                        ExternalActionDispatchAttemptRecord.call_deadline_at.is_(None),
                         ExternalActionDispatchAttemptRecord.completed_at.is_(None),
                         ExternalActionDispatchAttemptRecord.conclusion.is_(None),
                     )
-                    .values(call_started_at=started_at)
+                    .values(
+                        call_started_at=started_at,
+                        call_deadline_at=call_deadline_at,
+                    )
                     .returning(ExternalActionDispatchAttemptRecord.external_action_id)
                     .execution_options(synchronize_session=False)
                 )
@@ -834,6 +910,108 @@ class SQLAlchemyExternalActionRepository:
             action=marked,
             step_transition=step_transition,
         )
+
+    async def cancel_unstarted_after_release(
+        self,
+        *,
+        action_id: str,
+        run_id: str,
+        plan_hash: str,
+        expected_version: int,
+        occurred_at: datetime,
+        reason_code: str = "operator_cancelled",
+    ) -> ExternalAction | None:
+        """Cancel released work only while no connector call has started."""
+
+        require_id(action_id, "runtime-cancel action ID")
+        require_id(run_id, "runtime-cancel Run ID")
+        require_digest(plan_hash, "runtime-cancel plan hash")
+        require_id(reason_code, "runtime-cancel reason code")
+        if reason_code not in {"operator_cancelled", "runtime_control_denied"}:
+            raise ValueError("runtime-cancel reason code is not allowlisted")
+        require_utc(occurred_at, "runtime-cancel time")
+        if type(expected_version) is not int or expected_version < 1:
+            raise ValueError("runtime-cancel expected version must be positive")
+        current = await self.get(action_id)
+        if (
+            current is None
+            or current.run_id != run_id
+            or current.envelope.plan_hash != plan_hash
+            or current.version != expected_version
+            or current.reservation is None
+            or current.updated_at > occurred_at
+            or current.state
+            not in {
+                ExternalActionState.DISPATCH_RESERVED,
+                ExternalActionState.DISPATCHING,
+            }
+            or current.call_started_at is not None
+        ):
+            return None
+        prior_attempt_number = (
+            current.delivery_attempt_count
+            if current.state is ExternalActionState.DISPATCHING
+            else None
+        )
+        statement = (
+            update(ExternalActionRecord)
+            .where(
+                ExternalActionRecord.id == action_id,
+                ExternalActionRecord.run_id == run_id,
+                ExternalActionRecord.plan_hash == plan_hash,
+                ExternalActionRecord.version == expected_version,
+                ExternalActionRecord.state == current.state.value,
+                ExternalActionRecord.reservation_id == current.reservation.reservation_id,
+                ExternalActionRecord.connector_call_started_at.is_(None),
+            )
+            .values(
+                state=ExternalActionState.CANCELLED.value,
+                dispatch_lease_owner=None,
+                dispatch_attempt_number=None,
+                dispatch_claimed_at=None,
+                dispatch_lease_expires_at=None,
+                connector_call_started_at=None,
+                connector_call_deadline_at=None,
+                terminal_reason_code=reason_code,
+                updated_at=occurred_at,
+                version=expected_version + 1,
+            )
+            .returning(ExternalActionRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            async with self._session.begin_nested():
+                cancelled = await self._updated(statement)
+                if cancelled is None:
+                    raise _ActionCASLost
+                if prior_attempt_number is not None:
+                    attempt_update = await self._session.execute(
+                        update(ExternalActionDispatchAttemptRecord)
+                        .where(
+                            ExternalActionDispatchAttemptRecord.external_action_id == action_id,
+                            ExternalActionDispatchAttemptRecord.attempt_number
+                            == prior_attempt_number,
+                            ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                            ExternalActionDispatchAttemptRecord.completed_at.is_(None),
+                            ExternalActionDispatchAttemptRecord.conclusion.is_(None),
+                        )
+                        .values(
+                            completed_at=occurred_at,
+                            conclusion="cancelled",
+                            reason_code=reason_code,
+                        )
+                        .returning(ExternalActionDispatchAttemptRecord.external_action_id)
+                        .execution_options(synchronize_session=False)
+                    )
+                    if attempt_update.scalar_one_or_none() is None:
+                        raise _ActionCASLost
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return None
+            raise
+        except _ActionCASLost:
+            return None
+        return cancelled
 
     async def complete_succeeded(
         self,
@@ -948,6 +1126,7 @@ class SQLAlchemyExternalActionRepository:
                 dispatch_claimed_at=None,
                 dispatch_lease_expires_at=None,
                 connector_call_started_at=None,
+                connector_call_deadline_at=None,
                 connector_receipt_id=None if result is None else result.receipt_id,
                 connector_result_status=None if result is None else result.status,
                 connector_safe_metadata=(
@@ -994,12 +1173,14 @@ class SQLAlchemyExternalActionRepository:
         if conclusion == "pre_call_expired":
             recovery_predicates = [
                 ExternalActionRecord.connector_call_started_at.is_(None),
+                ExternalActionRecord.dispatch_lease_expires_at <= occurred_at,
                 ExternalActionRecord.delivery_attempt_count
                 < ExternalActionRecord.delivery_attempt_limit,
             ]
         else:
             recovery_predicates = [
                 ExternalActionRecord.connector_call_started_at.is_not(None),
+                ExternalActionRecord.connector_call_deadline_at <= occurred_at,
                 ExternalActionRecord.idempotency_support.in_(("required", "supported")),
                 ExternalActionRecord.delivery_attempt_count
                 < ExternalActionRecord.delivery_attempt_limit,
@@ -1011,7 +1192,6 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionRecord.version == expected_version,
                 ExternalActionRecord.state == ExternalActionState.DISPATCHING.value,
                 ExternalActionRecord.dispatch_attempt_number == attempt_number,
-                ExternalActionRecord.dispatch_lease_expires_at <= occurred_at,
                 *recovery_predicates,
             )
             .values(
@@ -1021,6 +1201,7 @@ class SQLAlchemyExternalActionRepository:
                 dispatch_claimed_at=None,
                 dispatch_lease_expires_at=None,
                 connector_call_started_at=None,
+                connector_call_deadline_at=None,
                 updated_at=occurred_at,
                 version=expected_version + 1,
             )
@@ -1071,6 +1252,7 @@ class SQLAlchemyExternalActionRepository:
                 dispatch_claimed_at=None,
                 dispatch_lease_expires_at=None,
                 connector_call_started_at=None,
+                connector_call_deadline_at=None,
                 terminal_reason_code=reason_code,
                 updated_at=occurred_at,
                 version=expected_version + 1,
@@ -1101,7 +1283,16 @@ class SQLAlchemyExternalActionRepository:
             select(ExternalActionRecord)
             .where(
                 ExternalActionRecord.state == ExternalActionState.DISPATCHING.value,
-                ExternalActionRecord.dispatch_lease_expires_at <= now,
+                or_(
+                    and_(
+                        ExternalActionRecord.connector_call_started_at.is_(None),
+                        ExternalActionRecord.dispatch_lease_expires_at <= now,
+                    ),
+                    and_(
+                        ExternalActionRecord.connector_call_started_at.is_not(None),
+                        ExternalActionRecord.connector_call_deadline_at <= now,
+                    ),
+                ),
             )
             .order_by(
                 ExternalActionRecord.dispatch_lease_expires_at,
@@ -1109,8 +1300,8 @@ class SQLAlchemyExternalActionRepository:
             )
             .limit(limit)
         )
-        rows = (await self._session.execute(statement)).scalars()
-        return tuple(_to_domain(row) for row in rows)
+        rows = tuple((await self._session.execute(statement)).scalars())
+        return tuple([await self._validated_action(row) for row in rows])
 
 
 def _receipt_to_domain(record: ConnectorActionReceiptRecord) -> ConnectorActionReceipt:

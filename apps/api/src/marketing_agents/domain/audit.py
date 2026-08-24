@@ -27,6 +27,83 @@ _EVENT_FINGERPRINT_DOMAIN = b"marketing-agents:audit-event-draft:v1\x00"
 _CONTEXT_FINGERPRINT_DOMAIN = b"marketing-agents:audit-context:v1\x00"
 _ACTOR_PSEUDONYM_DOMAIN = b"marketing-agents:audit-actor:v1\x00"
 _CORRELATION_PSEUDONYM_DOMAIN = b"marketing-agents:audit-correlation:v1\x00"
+_RUNTIME_CONTROL_DENIAL_ID_DOMAIN = b"marketing-agents:audit-runtime-control-denial-id:v1\x00"
+_RUNTIME_CONTROL_DENIAL_ID_PREFIX = "runtime-control-denial-v1:"
+RUNTIME_CONTROL_DENIAL_CODES = frozenset(
+    {
+        "adapter_contract_drift",
+        "adapter_contract_invalid",
+        "adapter_contract_unavailable",
+        "attempt_completion_conflict",
+        "attempt_completion_time_invalid",
+        "attempt_id_conflict",
+        "attempt_in_progress",
+        "attempt_missing",
+        "attempt_not_retryable",
+        "attempt_reservation_conflict",
+        "attempt_time_invalid",
+        "attempts_exhausted",
+        "cancellation_conflict",
+        "cancellation_time_invalid",
+        "cancelled",
+        "deadline_exceeded",
+        "delivery_action_fence_invalid",
+        "delivery_contract_drift",
+        "delivery_contract_invalid",
+        "delivery_contract_unavailable",
+        "delivery_reservation_conflict",
+        "delivery_step_fence_invalid",
+        "delivery_time_invalid",
+        "execution_control_integrity_corrupt",
+        "execution_control_missing",
+        "execution_not_started",
+        "execution_plan_missing",
+        "execution_policy_binding_invalid",
+        "execution_policy_conflict",
+        "execution_policy_source_corrupt",
+        "execution_policy_time_invalid",
+        "execution_run_missing",
+        "execution_start_conflict",
+        "execution_start_time_invalid",
+        "input_field_too_large",
+        "input_payload_too_large",
+        "model_budget_exhausted",
+        "model_output_tokens_exceeded",
+        "model_output_tokens_invalid",
+        "operation_policy_missing",
+        "output_payload_too_large",
+        "permanent_failure",
+        "rate_limit_conflict",
+        "rate_limit_exhausted",
+        "retry_deadline_exceeded",
+        "retry_not_ready",
+        "run_cancelled",
+        "run_not_executing",
+        "stale_execution_control",
+        "step_fence_invalid",
+        "tool_budget_exhausted",
+    }
+)
+TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
+    {
+        "adapter_contract_drift",
+        "adapter_contract_invalid",
+        "adapter_contract_unavailable",
+        "attempts_exhausted",
+        "deadline_exceeded",
+        "delivery_contract_drift",
+        "delivery_contract_invalid",
+        "delivery_contract_unavailable",
+        "input_field_too_large",
+        "input_payload_too_large",
+        "model_budget_exhausted",
+        "model_output_tokens_exceeded",
+        "model_output_tokens_invalid",
+        "output_payload_too_large",
+        "retry_deadline_exceeded",
+        "tool_budget_exhausted",
+    }
+)
 _EVENT_AGGREGATES = {
     "run.received": "run",
     "run.transitioned": "run",
@@ -55,10 +132,12 @@ _EVENT_AGGREGATES = {
     "approval.superseded": "approval_request",
     "approval.expired": "approval_request",
     "approval.renewed": "approval_request",
+    "runtime.control_denied": "runtime_control_denial",
 }
 _EVENT_OUTCOMES = {
     **{event_type: "accepted" for event_type in _EVENT_AGGREGATES},
     "run.transition_rejected": "rejected",
+    "runtime.control_denied": "rejected",
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
@@ -208,6 +287,10 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
             "status",
         }
     ),
+    "runtime.control_denied": frozenset({"denial_code", "operation_key"}),
+}
+_EVENT_OPTIONAL_METADATA: Mapping[str, frozenset[str]] = {
+    "runtime.control_denied": frozenset({"retry_after_seconds"}),
 }
 _RUN_COMMANDS = frozenset(
     {
@@ -266,6 +349,9 @@ _SAFE_AUDIT_REASONS = frozenset(
         "read_only_plan_released",
         "reserved_write_started",
         "run_cancelled",
+        "run_cancelled_after_call_start",
+        "runtime_control_denied",
+        "runtime_control_denied_after_call_start",
         "sibling_approval_rejected",
         "stale_delivery_outcome_unknown",
         "stale_run_version",
@@ -287,6 +373,51 @@ def normalize_audit_reason_code(value: str | None) -> str | None:
     if value is None or value in _SAFE_AUDIT_REASONS:
         return value
     return "unclassified_failure"
+
+
+def _runtime_control_denial_aggregate_id(
+    *,
+    actor_id: str,
+    actor_source: str,
+    correlation_id: str,
+    run_id: str,
+    step_id: str,
+    action_id: str | None,
+    operation_key: str,
+    denial_code: str,
+) -> str:
+    """Derive one replay-stable identity without retaining raw actor context."""
+
+    for value, name in (
+        (actor_id, "runtime-control denial actor ID"),
+        (actor_source, "runtime-control denial actor source"),
+        (correlation_id, "runtime-control denial correlation ID"),
+        (run_id, "runtime-control denial Run ID"),
+        (step_id, "runtime-control denial step ID"),
+        (operation_key, "runtime-control denial operation key"),
+        (denial_code, "runtime-control denial code"),
+    ):
+        require_id(value, name)
+    if action_id is not None:
+        require_id(action_id, "runtime-control denial action ID")
+    if denial_code not in RUNTIME_CONTROL_DENIAL_CODES:
+        raise ValueError("runtime-control denial code is not allowlisted")
+    identity = {
+        "action_id": action_id,
+        "actor_id": actor_id,
+        "actor_source": actor_source,
+        "correlation_id": correlation_id,
+        "denial_code": denial_code,
+        "operation_key": operation_key,
+        "run_id": run_id,
+        "step_id": step_id,
+    }
+    return (
+        _RUNTIME_CONTROL_DENIAL_ID_PREFIX
+        + hashlib.sha256(
+            _RUNTIME_CONTROL_DENIAL_ID_DOMAIN + canonical_json_bytes(identity)
+        ).hexdigest()
+    )
 
 
 _SENSITIVE_SKELETON = re.compile(
@@ -803,6 +934,23 @@ class AuditEventDraft:
             or self.transition_sequence is not None
         ):
             raise ValueError("approval audit event has invalid subject links")
+        elif self.aggregate_type == "runtime_control_denial" and (
+            self.event_type != "runtime.control_denied"
+            or self.step_id is None
+            or self.action_attempt_number is not None
+            or self.receipt_id is not None
+            or self.approval_request_id is not None
+            or self.approval_decision_id is not None
+            or self.artifact_id is not None
+            or self.attempt_id is not None
+            or self.transition_sequence is not None
+            or self.previous_state is not None
+            or self.new_state is not None
+            or self.reason_code is not None
+            or self.mutation_version is not None
+            or self.outcome is not AuditOutcome.REJECTED
+        ):
+            raise ValueError("runtime-control denial has an invalid nonmutation shape")
         if type(self.actor_source) is not AuditActorSource:
             raise ValueError("audit actor source is invalid")
         _require_pseudonym(self.actor_id, "audit-actor-v1", "audit actor ID")
@@ -816,7 +964,12 @@ class AuditEventDraft:
         if type(self.safe_metadata) is not SealedAuditMetadata:
             raise ValueError("audit metadata must use the validator-issued contract")
         self.safe_metadata.verify_integrity()
-        if set(self.safe_metadata.values) != _EVENT_REQUIRED_METADATA[self.event_type]:
+        actual_metadata = set(self.safe_metadata.values)
+        required_metadata = _EVENT_REQUIRED_METADATA[self.event_type]
+        optional_metadata = _EVENT_OPTIONAL_METADATA.get(self.event_type, frozenset())
+        if not required_metadata <= actual_metadata or not actual_metadata <= (
+            required_metadata | optional_metadata
+        ):
             raise ValueError("audit event is missing its exact typed safe metadata")
         require_utc(self.occurred_at, "audit event time")
         if self.safe_metadata.expires_at <= self.occurred_at:
@@ -967,6 +1120,19 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
+    if draft.event_type == "runtime.control_denied":
+        expected_aggregate_id = _runtime_control_denial_aggregate_id(
+            actor_id=draft.actor_id,
+            actor_source=draft.actor_source.value,
+            correlation_id=draft.correlation_id,
+            run_id=draft.run_id,
+            step_id=draft.step_id or "",
+            action_id=draft.action_id,
+            operation_key=metadata["operation_key"],
+            denial_code=metadata["denial_code"],
+        )
+        if draft.aggregate_id != expected_aggregate_id:
+            raise ValueError("runtime-control denial aggregate identity does not match")
     if draft.aggregate_type in {"run", "step"} and (
         draft.new_state is None or draft.reason_code is None
     ):
@@ -1113,7 +1279,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "start": frozenset({("ready", "executing")}),
             "start_reserved_write": frozenset({("ready", "executing")}),
             "succeed": frozenset({("executing", "succeeded")}),
-            "fail": frozenset({("executing", "failed")}),
+            "fail": frozenset({("ready", "failed"), ("executing", "failed")}),
             "reject": frozenset({("awaiting_approval", "rejected")}),
             "cancel": frozenset(
                 {
@@ -1248,10 +1414,12 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
         allowed_previous = (
             {"proposed", "approved"}
             if draft.event_type == "action.awaiting_approval"
-            else {"awaiting_approval", "approved"}
+            else {"awaiting_approval", "approved", "dispatch_reserved", "dispatching"}
             if draft.event_type == "action.cancelled"
             else {previous}
         )
+        if draft.event_type == "action.cancelled" and draft.previous_state == "dispatching":
+            requires_attempt = True
         if (
             draft.previous_state not in allowed_previous
             or draft.new_state != current
@@ -1307,7 +1475,11 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.approved": {"approval_granted"},
             "action.rejected": {"approval_rejected"},
             "action.dispatch_reserved": {"approval_consumed"},
-            "action.cancelled": {"operator_cancelled", "sibling_approval_rejected"},
+            "action.cancelled": {
+                "operator_cancelled",
+                "runtime_control_denied",
+                "sibling_approval_rejected",
+            },
         }.get(draft.event_type)
         if (
             expected_approval_reason is not None
@@ -1339,13 +1511,32 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
                     and draft.mutation_version >= 3
                     and draft.mutation_version % 2 == 1
                 )
+                or (
+                    approval_status == "released"
+                    and draft.previous_state == "dispatch_reserved"
+                    and draft.mutation_version >= 5
+                    and draft.mutation_version % 2 == 1
+                )
+                or (
+                    approval_status == "released"
+                    and draft.previous_state == "dispatching"
+                    and draft.mutation_version >= 6
+                    and draft.mutation_version % 2 == 0
+                )
             )
             if (
                 not valid_version
-                or approval_status not in {"superseded", "expired"}
+                or approval_status not in {"superseded", "expired", "released"}
                 or (
                     cancel_expected_decision_link is not None
                     and (draft.approval_decision_id is not None) != cancel_expected_decision_link
+                )
+                or (
+                    approval_status == "released"
+                    and (
+                        draft.approval_decision_id is None
+                        or draft.reason_code not in {"operator_cancelled", "runtime_control_denied"}
+                    )
                 )
                 or (
                     approval_status == "expired"

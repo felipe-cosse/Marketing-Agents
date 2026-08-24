@@ -122,8 +122,16 @@ class ExternalActionRecord(Base):
             "dispatch_attempt_number = delivery_attempt_count) OR "
             "(state <> 'dispatching' AND dispatch_lease_owner IS NULL AND "
             "dispatch_attempt_number IS NULL AND dispatch_claimed_at IS NULL AND "
-            "dispatch_lease_expires_at IS NULL AND connector_call_started_at IS NULL)",
+            "dispatch_lease_expires_at IS NULL AND connector_call_started_at IS NULL AND "
+            "connector_call_deadline_at IS NULL)",
             name="ck_actions_dispatch_lease_state",
+        ),
+        CheckConstraint(
+            "(connector_call_started_at IS NULL AND connector_call_deadline_at IS NULL) OR "
+            "(connector_call_started_at IS NOT NULL AND "
+            "connector_call_deadline_at IS NOT NULL AND "
+            "connector_call_started_at < connector_call_deadline_at)",
+            name="ck_actions_call_authority_complete",
         ),
         CheckConstraint(
             "(state = 'succeeded' AND connector_receipt_id IS NOT NULL AND "
@@ -200,6 +208,9 @@ class ExternalActionRecord(Base):
     dispatch_claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     dispatch_lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     connector_call_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    connector_call_deadline_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), nullable=True
+    )
     connector_receipt_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     connector_result_status: Mapped[str | None] = mapped_column(String(120), nullable=True)
     connector_safe_metadata: Mapped[dict[str, Any] | None] = mapped_column(
@@ -221,13 +232,20 @@ class ExternalActionDispatchAttemptRecord(Base):
         ),
         CheckConstraint(
             "conclusion IS NULL OR conclusion IN "
-            "('succeeded','failed','outcome_unknown','pre_call_expired','provider_retry')",
+            "('succeeded','failed','outcome_unknown','pre_call_expired','provider_retry',"
+            "'cancelled')",
             name="ck_action_attempt_conclusion",
         ),
         CheckConstraint(
             "(completed_at IS NULL AND conclusion IS NULL) OR "
             "(completed_at IS NOT NULL AND conclusion IS NOT NULL)",
             name="ck_action_attempt_completion",
+        ),
+        CheckConstraint(
+            "(call_started_at IS NULL AND call_deadline_at IS NULL) OR "
+            "(call_started_at IS NOT NULL AND call_deadline_at IS NOT NULL AND "
+            "call_started_at < call_deadline_at)",
+            name="ck_action_attempt_call_authority_complete",
         ),
     )
 
@@ -240,6 +258,7 @@ class ExternalActionDispatchAttemptRecord(Base):
     claimed_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     lease_expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     call_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    call_deadline_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     conclusion: Mapped[str | None] = mapped_column(String(32), nullable=True)
     reason_code: Mapped[str | None] = mapped_column(String(240), nullable=True)

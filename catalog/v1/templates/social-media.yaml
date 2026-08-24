@@ -14,7 +14,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -34,7 +34,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 1}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 1, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -54,7 +54,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -74,7 +74,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -94,7 +94,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -114,7 +114,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0}
+    budget_policy: {max_steps: 5, max_model_calls: 1, max_tool_calls: 0, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#new-content--6]
@@ -134,7 +134,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#research--2]
@@ -154,7 +154,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#research--2]
@@ -174,7 +174,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
@@ -194,7 +194,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 1, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
@@ -214,7 +214,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]
@@ -234,7 +234,7 @@ templates:
     approval_policy_id: policy.no-approval.read-only.v1
     retry_policy: {max_attempts: 2, backoff: bounded_exponential}
     timeout_policy: {step_seconds: 30, run_seconds: 120}
-    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2}
+    budget_policy: {max_steps: 6, max_model_calls: 1, max_tool_calls: 2, max_input_bytes: 65536, max_input_field_bytes: 16384, max_output_bytes: 262144, max_model_output_tokens: 4096}
     rate_limit_policy: {max_calls: 20, window_seconds: 60}
     source_confidence: high
     source_references: [IMPLEMENTATION_PROMPT.md#tracking--analysis--4]

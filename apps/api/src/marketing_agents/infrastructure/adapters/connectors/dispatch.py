@@ -1,4 +1,4 @@
-"""Registry-backed typed gateway for exact authorized mock writes."""
+"""Registry-backed typed adapters for exact connector reads and writes."""
 
 from __future__ import annotations
 
@@ -6,13 +6,15 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Literal, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from marketing_agents.application.policies.write_authorization import (
     AuthorizedExternalWrite,
 )
 from marketing_agents.application.ports.connectors import (
     AuthorizedConnectorCommand,
+    ConnectorCallContext,
+    ConnectorObservation,
     ConnectorPortError,
     ConnectorWriteResult,
 )
@@ -20,12 +22,25 @@ from marketing_agents.application.ports.external_writes import (
     ConnectorDeliveryContract,
     ConnectorDeliveryFailure,
 )
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterContract,
+    ReadAdapterPermanentError,
+    ReadAdapterRequest,
+    ReadAdapterResult,
+    ReadAdapterTransientError,
+)
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import ExternalAction
 from marketing_agents.domain.enums import Effect
+from marketing_agents.domain.execution_control import OperationExecutionPolicy
+from marketing_agents.domain.runtime_policy import AttemptKind
 
 from .mock.families import MockConnectorBundle
-from .registry import ConnectorBundleConfigurationError, ConnectorOperationRegistry
+from .registry import (
+    ConnectorBundleConfigurationError,
+    ConnectorOperationRegistration,
+    ConnectorOperationRegistry,
+)
 
 _SAFE_CONNECTOR_CODES = frozenset(
     {
@@ -38,6 +53,269 @@ _SAFE_CONNECTOR_CODES = frozenset(
         "schema_mismatch",
     }
 )
+
+_SAFE_READ_CONNECTOR_CODES = frozenset(
+    {
+        "binding_mismatch",
+        "capability_mismatch",
+        "invalid_request",
+        "operation_disabled",
+        "schema_mismatch",
+    }
+)
+
+
+class RegistryConnectorReadAdapter:
+    """Resolve one sealed external READ through the immutable connector registry."""
+
+    def __init__(
+        self,
+        registry: ConnectorOperationRegistry,
+        bundle: MockConnectorBundle,
+        *,
+        binding_configuration_revisions: Mapping[str, int],
+    ) -> None:
+        if bundle.registry is not registry:
+            raise ConnectorBundleConfigurationError(
+                "READ adapter registry must be the bundle's exact registry"
+            )
+        revisions = dict(binding_configuration_revisions)
+        for binding_id, revision in revisions.items():
+            if (
+                not binding_id
+                or binding_id != binding_id.strip()
+                or type(revision) is not int
+                or revision < 1
+            ):
+                raise ConnectorBundleConfigurationError(
+                    "READ adapter binding revisions must be normalized positive values"
+                )
+        self._registry = registry
+        self._bundle = bundle
+        self._binding_revisions = MappingProxyType(revisions)
+
+    def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
+        """Project current registry and binding facts for pre-reservation comparison."""
+
+        if type(operation) is not OperationExecutionPolicy:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "connector READ contract requires an exact operation policy",
+            )
+        if operation.connector_family == "model" or operation.binding_id is None:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registry connector adapter accepts only external READ operations",
+            )
+        try:
+            registration = self._registry.resolve(operation.capability_id)
+            revision = self._binding_revisions[operation.binding_id]
+        except (ConnectorBundleConfigurationError, KeyError):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_unavailable",
+                "connector READ contract is unavailable",
+            ) from None
+        metadata = registration.metadata
+        if metadata.effect is not Effect.READ:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "write connector operations cannot execute as controlled READs",
+            )
+        try:
+            return ReadAdapterContract(
+                policy_hash=operation.policy_hash,
+                step_id=operation.step_id,
+                operation_key=operation.operation_key,
+                attempt_kind=AttemptKind.TOOL,
+                selected_instance_id=operation.selected_instance_id,
+                configuration_revision=revision,
+                capability_id=metadata.capability_id,
+                connector_family=metadata.connector_family,
+                binding_id=operation.binding_id,
+                binding_configuration_revision=revision,
+                request_schema_id=metadata.request_schema_id,
+                result_schema_id=metadata.result_schema_id,
+                request_redaction_fields=metadata.request_redaction_fields,
+                result_redaction_fields=metadata.result_redaction_fields,
+                data_classification=metadata.data_classification,
+                connector_timeout_seconds=metadata.default_timeout_seconds,
+                effective_timeout_seconds=min(
+                    operation.step_timeout_seconds,
+                    metadata.default_timeout_seconds,
+                ),
+                max_input_bytes=operation.max_input_bytes,
+                max_input_field_bytes=operation.max_input_field_bytes,
+                max_output_bytes=operation.max_output_bytes,
+                max_model_output_tokens=operation.max_model_output_tokens,
+            )
+        except ValueError:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_drift",
+                "current connector READ contract is incompatible with the sealed operation",
+            ) from None
+
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        """Strictly rebuild, invoke, and revalidate one registered connector READ."""
+
+        if type(request) is not ReadAdapterRequest:
+            raise ReadAdapterPermanentError(
+                "connector_request_rejected",
+                "connector READ requires an exact adapter request",
+            )
+        registration = self._registration_for_request(request)
+        metadata = registration.metadata
+        try:
+            context = ConnectorCallContext(
+                binding_id=cast(str, request.binding_id),
+                run_id=request.run_id,
+                step_id=request.step_id,
+                correlation_id=request.correlation_id,
+                deadline=request.call_deadline_at,
+                provenance_ids=request.provenance_ids,
+                requested_timeout_seconds=request.requested_timeout_seconds,
+            )
+            typed_request = registration.request_type.model_validate_json(
+                canonical_json_bytes(
+                    {
+                        "capability_id": request.capability_id,
+                        "context": context.model_dump(mode="json"),
+                        "parameters": request.input_payload,
+                    }
+                ),
+                strict=True,
+            )
+            connector = getattr(self._bundle, metadata.connector_family)
+            method = getattr(connector, registration.method_name)
+        except (AttributeError, ConnectorBundleConfigurationError):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_unavailable",
+                "registered connector READ implementation is unavailable",
+            ) from None
+        except (TypeError, ValueError, ValidationError):
+            raise ReadAdapterPermanentError(
+                "connector_request_rejected",
+                "connector READ request does not match its registered schema",
+            ) from None
+
+        try:
+            observation = await method(typed_request)
+        except ConnectorPortError as exc:
+            code = (
+                exc.code if exc.code in _SAFE_READ_CONNECTOR_CODES else "connector_request_rejected"
+            )
+            raise ReadAdapterPermanentError(
+                code,
+                "connector rejected the exact controlled READ request",
+            ) from None
+        except Exception:
+            raise ReadAdapterTransientError(
+                "connector_read_unavailable",
+                "connector READ failed without returning an observation",
+            ) from None
+
+        try:
+            validated = self._validate_observation(request, registration.result_type, observation)
+            return ReadAdapterResult.from_request(
+                request,
+                observation_id=validated.observation_id,
+                provenance_ids=validated.provenance_ids,
+                output_payload=validated.payload.model_dump(mode="json"),
+            )
+        except ReadAdapterPermanentError:
+            raise
+        except (TypeError, ValueError, ValidationError):
+            raise ReadAdapterPermanentError(
+                "connector_result_rejected",
+                "connector READ result does not match its registered contract",
+            ) from None
+
+    def _registration_for_request(
+        self,
+        request: ReadAdapterRequest,
+    ) -> ConnectorOperationRegistration:
+        contract = request.contract
+        if contract.connector_family == "model" or contract.binding_id is None:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registry connector adapter accepts only external READ requests",
+            )
+        try:
+            registration = self._registry.resolve(contract.capability_id)
+            revision = self._binding_revisions[contract.binding_id]
+        except (ConnectorBundleConfigurationError, KeyError):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_unavailable",
+                "connector READ contract is unavailable",
+            ) from None
+        metadata = registration.metadata
+        current = (
+            metadata.effect,
+            metadata.capability_id,
+            metadata.connector_family,
+            revision,
+            metadata.request_schema_id,
+            metadata.result_schema_id,
+            metadata.request_redaction_fields,
+            metadata.result_redaction_fields,
+            metadata.data_classification,
+            metadata.default_timeout_seconds,
+        )
+        expected = (
+            Effect.READ,
+            contract.capability_id,
+            contract.connector_family,
+            contract.binding_configuration_revision,
+            contract.request_schema_id,
+            contract.result_schema_id,
+            contract.request_redaction_fields,
+            contract.result_redaction_fields,
+            contract.data_classification,
+            contract.connector_timeout_seconds,
+        )
+        if current != expected:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_drift",
+                "current connector READ contract differs from the reserved request",
+            )
+        return registration
+
+    @staticmethod
+    def _validate_observation(
+        request: ReadAdapterRequest,
+        result_type: type[BaseModel] | type[ConnectorWriteResult],
+        observation: object,
+    ) -> ConnectorObservation[BaseModel]:
+        if not isinstance(result_type, type) or not issubclass(result_type, BaseModel):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registered READ result type is not a Pydantic model",
+            )
+        if not isinstance(observation, ConnectorObservation):
+            raise ReadAdapterPermanentError(
+                "connector_result_rejected",
+                "connector did not return a typed observation",
+            )
+        observation_type = TypeAdapter(ConnectorObservation[result_type])  # type: ignore[valid-type]
+        validated = cast(
+            ConnectorObservation[BaseModel],
+            observation_type.validate_json(
+                canonical_json_bytes(observation.model_dump(mode="json")),
+                strict=True,
+            ),
+        )
+        if (
+            validated.trust_class != "untrusted_tool_result"
+            or validated.capability_id != request.capability_id
+            or validated.binding_id != request.binding_id
+            or validated.classification is not request.data_classification
+            or not set(request.provenance_ids).issubset(validated.provenance_ids)
+            or len(validated.provenance_ids) != len(set(validated.provenance_ids))
+        ):
+            raise ReadAdapterPermanentError(
+                "connector_result_mismatch",
+                "connector observation identity differs from the exact READ request",
+            )
+        return validated
 
 
 class RegistryConnectorWriteGateway:

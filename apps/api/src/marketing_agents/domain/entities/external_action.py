@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from marketing_agents.domain.action_hash import CanonicalExternalAction
@@ -179,6 +179,7 @@ class ExternalAction:
     reservation: ActionReservationSnapshot | None = field(default=None, repr=False)
     lease: DispatchLease | None = field(default=None, repr=False)
     call_started_at: datetime | None = None
+    call_deadline_at: datetime | None = None
     result: ExternalActionResultSnapshot | None = field(default=None, repr=False)
     terminal_reason_code: str | None = None
     superseded_by_action_id: str | None = None
@@ -246,8 +247,17 @@ class ExternalAction:
             or self.reservation.idempotency_key != self.idempotency_key
         ):
             raise ValueError("dispatch reservation does not bind the exact external action")
-        if self.call_started_at is not None:
+        if (self.call_started_at is None) != (self.call_deadline_at is None):
+            raise ValueError("connector call start and deadline must be retained together")
+        if self.call_started_at is not None and self.call_deadline_at is not None:
             require_utc(self.call_started_at, "connector call start time")
+            require_utc(self.call_deadline_at, "connector call deadline")
+            if not (
+                self.call_started_at
+                < self.call_deadline_at
+                <= self.call_started_at + timedelta(seconds=self.delivery_contract.timeout_seconds)
+            ):
+                raise ValueError("connector call deadline exceeds its exact delivery authority")
         if self.state is ExternalActionState.DISPATCHING:
             if self.reservation is None or self.lease is None:
                 raise ValueError("dispatching action requires reservation and lease")
@@ -255,8 +265,12 @@ class ExternalAction:
                 raise ValueError("dispatch lease attempt is not current")
             if self.call_started_at is not None and self.call_started_at < self.lease.claimed_at:
                 raise ValueError("connector call cannot start before dispatch claim")
-        elif self.lease is not None or self.call_started_at is not None:
-            raise ValueError("only a dispatching action may retain a current lease or call marker")
+        elif (
+            self.lease is not None
+            or self.call_started_at is not None
+            or self.call_deadline_at is not None
+        ):
+            raise ValueError("only a dispatching action may retain current call authority")
         post_approval_states = {
             ExternalActionState.DISPATCH_RESERVED,
             ExternalActionState.DISPATCHING,

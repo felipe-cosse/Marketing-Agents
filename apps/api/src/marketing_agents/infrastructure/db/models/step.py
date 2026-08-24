@@ -78,15 +78,30 @@ class RunStepRecord(Base):
             name="ck_run_steps_timeout_bounded",
         ),
         CheckConstraint(
+            "data_classification IN ('public','internal','personal','sensitive','secret')",
+            name="ck_run_steps_data_classification",
+        ),
+        CheckConstraint(
+            "length(runtime_policy_hash) = 64",
+            name="ck_run_steps_runtime_policy_hash",
+        ),
+        CheckConstraint(
             "approval_expires_after_seconds IS NULL OR approval_expires_after_seconds >= 1",
             name="ck_run_steps_approval_expiry_positive",
         ),
         CheckConstraint(
-            "(connector_family IN ('model','artifact') AND binding_id IS NULL AND "
-            "binding_configuration_revision IS NULL AND timeout_seconds IS NULL) OR "
+            "(connector_family = 'model' AND binding_id IS NULL AND "
+            "binding_configuration_revision IS NULL AND timeout_seconds IS NULL AND "
+            "request_schema_id IS NOT NULL AND result_schema_id IS NOT NULL AND "
+            "data_classification = 'internal') OR "
+            "(connector_family = 'artifact' AND binding_id IS NULL AND "
+            "binding_configuration_revision IS NULL AND timeout_seconds IS NULL AND "
+            "request_schema_id IS NULL AND result_schema_id IS NULL AND "
+            "data_classification = 'internal') OR "
             "(connector_family NOT IN ('model','artifact') AND binding_id IS NOT NULL AND "
             "binding_configuration_revision = configuration_revision AND "
-            "timeout_seconds IS NOT NULL)",
+            "timeout_seconds IS NOT NULL AND request_schema_id IS NOT NULL AND "
+            "result_schema_id IS NOT NULL)",
             name="ck_run_steps_binding_complete",
         ),
         CheckConstraint(
@@ -96,7 +111,8 @@ class RunStepRecord(Base):
             "(effect = 'write' AND connector_family NOT IN ('model','artifact') AND "
             "idempotency_support = 'required' AND "
             "approval_expires_after_seconds IS NOT NULL AND "
-            "approval_allow_self_approval IS NOT NULL AND request_schema_id IS NOT NULL)",
+            "approval_allow_self_approval IS NOT NULL AND request_schema_id IS NOT NULL AND "
+            "result_schema_id IS NOT NULL)",
             name="ck_run_steps_effect_policy_snapshot",
         ),
         CheckConstraint(
@@ -127,9 +143,14 @@ class RunStepRecord(Base):
     binding_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     binding_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    result_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     request_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    result_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    data_classification: Mapped[str] = mapped_column(String(16), nullable=False)
     idempotency_support: Mapped[str] = mapped_column(String(32), nullable=False)
     timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    runtime_policy_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    runtime_policy_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     approval_policy_id: Mapped[str] = mapped_column(String(240), nullable=False)
     approval_required_roles: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     approval_required_scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
@@ -219,6 +240,10 @@ class RunPlanRecord(Base):
         UniqueConstraint("run_id", "plan_hash", name="uq_run_plans_run_hash"),
         CheckConstraint("workflow_version >= 1", name="ck_run_plans_workflow_version"),
         CheckConstraint("step_count >= 1", name="ck_run_plans_step_count_positive"),
+        CheckConstraint(
+            "length(runtime_policy_hash) = 64",
+            name="ck_run_plans_runtime_policy_hash",
+        ),
     )
 
     run_id: Mapped[str] = mapped_column(
@@ -233,6 +258,8 @@ class RunPlanRecord(Base):
     routing_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    runtime_policy_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    runtime_policy_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
 
 

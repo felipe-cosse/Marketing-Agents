@@ -17,6 +17,9 @@ def test_dom_03_all_72_schemas_compile_and_are_recursively_bounded() -> None:
     compiled = compile_catalog(CATALOG)
     assert len(compiled.input_schema_by_template) == 36
     assert len(compiled.output_schema_by_template) == 36
+    for template in compiled.templates:
+        assert template.input_schema_id == compiled.input_schema_by_template[template.id]["$id"]
+        assert template.output_schema_id == compiled.output_schema_by_template[template.id]["$id"]
     assert (
         template_io_schema_issues(
             compiled.templates,
@@ -47,6 +50,8 @@ def test_dom_03_positive_and_negative_payloads_obey_every_schema_pair() -> None:
                 "external_action": "none",
             }
         assert input_validator.is_valid(valid_input)
+        assert input_validator.is_valid({**valid_input, "request_id": "r" * 80})
+        assert not input_validator.is_valid({**valid_input, "request_id": "r" * 81})
         assert output_validator.is_valid(valid_output)
         assert not input_validator.is_valid({**valid_input, "unexpected": True})
         assert not output_validator.is_valid({"artifact_id": "artifact_1"})

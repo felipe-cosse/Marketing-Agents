@@ -9,6 +9,7 @@ from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
     AuditRepository,
     ConnectorReceiptRepository,
+    ExecutionControlRepository,
     ExternalActionRepository,
     RunRepository,
     RunStepRepository,
@@ -37,6 +38,9 @@ class UnitOfWork(Protocol):
 
     @property
     def connector_receipts(self) -> ConnectorReceiptRepository: ...
+
+    @property
+    def execution_control(self) -> ExecutionControlRepository: ...
 
     async def __aenter__(self) -> UnitOfWork: ...
 

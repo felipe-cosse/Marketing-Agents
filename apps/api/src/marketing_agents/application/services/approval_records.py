@@ -410,6 +410,7 @@ async def _require_decision_audits(
         reservation=None,
         lease=None,
         call_started_at=None,
+        call_deadline_at=None,
         result=None,
         terminal_reason_code=(
             None if expected_action_state is ExternalActionState.APPROVED else "approval_rejected"

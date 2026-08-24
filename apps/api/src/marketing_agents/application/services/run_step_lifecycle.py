@@ -86,6 +86,23 @@ class RunStepLifecycleService:
                 step_id=step_id,
                 current_version=current.version,
             )
+        if command in {
+            StepLifecycleCommand.START,
+            StepLifecycleCommand.SUCCEED,
+            StepLifecycleCommand.FAIL,
+            StepLifecycleCommand.CANCEL,
+        }:
+            operation = await unit_of_work.execution_control.get_operation(
+                current.id,
+                current.runtime_policy.operation_key,
+            )
+            if operation is not None:
+                raise RunStepLifecycleServiceError(
+                    "execution_control_service_required",
+                    "controlled READ mutations require durable attempt composition",
+                    step_id=step_id,
+                    current_version=current.version,
+                )
         if current.effect is Effect.WRITE and command in {
             StepLifecycleCommand.WAIT_FOR_APPROVAL,
             StepLifecycleCommand.RELEASE_APPROVAL,

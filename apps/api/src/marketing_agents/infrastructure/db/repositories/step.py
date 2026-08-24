@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import RunStepPlanInsertResult
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import (
     RunPlanRoutingAssignment,
     RunPlanSelectedInstance,
@@ -19,6 +20,21 @@ from marketing_agents.domain.entities import (
 from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
 from marketing_agents.domain.plan_hash import EffectPlanStepHashMaterial, effect_plan_hash
+from marketing_agents.domain.runtime_policy import (
+    AttemptKind,
+    BudgetPolicySnapshot,
+    RateLimitPolicySnapshot,
+    RateLimitScope,
+    RetryBackoff,
+    RetryPolicySnapshot,
+    RunRuntimePolicy,
+    StepRuntimeDemand,
+    StepRuntimePolicy,
+    TimeoutPolicySnapshot,
+    run_policy_projection,
+    step_policy_projection,
+    validate_runtime_plan_budget,
+)
 from marketing_agents.domain.step_lifecycle import (
     StepLifecycleCommand,
     StepStateTransition,
@@ -62,8 +78,44 @@ def _plan_to_record(plan: RunPlanSnapshot) -> RunPlanRecord:
         routing_hash=plan.routing_hash,
         approval_required=plan.approval_required,
         step_count=plan.step_count,
+        runtime_policy_snapshot=run_policy_projection(plan.runtime_policy),
+        runtime_policy_hash=plan.runtime_policy.semantic_hash,
         created_at=plan.created_at,
     )
+
+
+def _runtime_json_object(value: object, *, expected_keys: frozenset[str]) -> dict[str, object]:
+    if (
+        type(value) is not dict
+        or set(value) != expected_keys
+        or any(type(key) is not str for key in value)
+    ):
+        raise StepPersistenceConflict(
+            "runtime_policy_snapshot_corrupt",
+            "persisted runtime policy is not the exact versioned JSON projection",
+        )
+    return value
+
+
+def _run_policy_from_record(record: RunPlanRecord) -> RunRuntimePolicy:
+    value = _runtime_json_object(
+        record.runtime_policy_snapshot,
+        expected_keys=frozenset(
+            {"max_steps", "max_model_calls", "max_tool_calls", "run_timeout_seconds"}
+        ),
+    )
+    policy = RunRuntimePolicy(
+        max_steps=value["max_steps"],  # type: ignore[arg-type]
+        max_model_calls=value["max_model_calls"],  # type: ignore[arg-type]
+        max_tool_calls=value["max_tool_calls"],  # type: ignore[arg-type]
+        run_timeout_seconds=value["run_timeout_seconds"],  # type: ignore[arg-type]
+    )
+    if policy.semantic_hash != record.runtime_policy_hash:
+        raise StepPersistenceConflict(
+            "runtime_policy_snapshot_corrupt",
+            "persisted Run runtime policy hash does not match its projection",
+        )
+    return policy
 
 
 def _plan_to_domain(record: RunPlanRecord) -> RunPlanSnapshot:
@@ -78,6 +130,7 @@ def _plan_to_domain(record: RunPlanRecord) -> RunPlanSnapshot:
         routing_hash=record.routing_hash,
         approval_required=record.approval_required,
         step_count=record.step_count,
+        runtime_policy=_run_policy_from_record(record),
         created_at=record.created_at,
     )
 
@@ -96,7 +149,10 @@ def _step_hash_material(step: RunStep) -> EffectPlanStepHashMaterial:
         binding_id=step.binding_id,
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
+        result_schema_id=step.result_schema_id,
         request_redaction_fields=step.request_redaction_fields,
+        result_redaction_fields=step.result_redaction_fields,
+        data_classification=step.data_classification,
         idempotency_support=step.idempotency_support,
         connector_timeout_seconds=step.timeout_seconds,
         approval_policy_id=step.approval_policy_id,
@@ -104,6 +160,7 @@ def _step_hash_material(step: RunStep) -> EffectPlanStepHashMaterial:
         approval_required_scopes=step.approval_required_scopes,
         approval_expires_after_seconds=step.approval_expires_after_seconds,
         approval_allow_self_approval=step.approval_allow_self_approval,
+        runtime_policy=step.runtime_policy,
     )
 
 
@@ -128,9 +185,14 @@ def _step_to_record(step: RunStep) -> RunStepRecord:
         binding_id=step.binding_id,
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
+        result_schema_id=step.result_schema_id,
         request_redaction_fields=list(step.request_redaction_fields),
+        result_redaction_fields=list(step.result_redaction_fields),
+        data_classification=step.data_classification.value,
         idempotency_support=step.idempotency_support,
         timeout_seconds=step.timeout_seconds,
+        runtime_policy_snapshot=step_policy_projection(step.runtime_policy),
+        runtime_policy_hash=step.runtime_policy.semantic_hash,
         approval_policy_id=step.approval_policy_id,
         approval_required_roles=list(step.approval_required_roles),
         approval_required_scopes=list(step.approval_required_scopes),
@@ -151,6 +213,66 @@ def _json_id_tuple(value: object, field_name: str) -> tuple[str, ...]:
             f"persisted {field_name} is not an exact JSON identifier array",
         )
     return tuple(value)
+
+
+def _step_policy_from_record(record: RunStepRecord) -> StepRuntimePolicy:
+    value = _runtime_json_object(
+        record.runtime_policy_snapshot,
+        expected_keys=frozenset(
+            {
+                "operation_key",
+                "attempt_kind",
+                "max_attempts",
+                "backoff",
+                "step_timeout_seconds",
+                "template_run_timeout_seconds",
+                "max_steps",
+                "max_model_calls",
+                "max_tool_calls",
+                "max_input_bytes",
+                "max_input_field_bytes",
+                "max_output_bytes",
+                "max_model_output_tokens",
+                "rate_limit_scope",
+                "rate_limit_key",
+                "rate_limit_max_calls",
+                "rate_limit_window_seconds",
+            }
+        ),
+    )
+    policy = StepRuntimePolicy(
+        operation_key=value["operation_key"],  # type: ignore[arg-type]
+        attempt_kind=AttemptKind(value["attempt_kind"]),  # type: ignore[arg-type]
+        retry=RetryPolicySnapshot(
+            max_attempts=value["max_attempts"],  # type: ignore[arg-type]
+            backoff=RetryBackoff(value["backoff"]),  # type: ignore[arg-type]
+        ),
+        timeout=TimeoutPolicySnapshot(
+            step_seconds=value["step_timeout_seconds"],  # type: ignore[arg-type]
+            run_seconds=value["template_run_timeout_seconds"],  # type: ignore[arg-type]
+        ),
+        budget=BudgetPolicySnapshot(
+            max_steps=value["max_steps"],  # type: ignore[arg-type]
+            max_model_calls=value["max_model_calls"],  # type: ignore[arg-type]
+            max_tool_calls=value["max_tool_calls"],  # type: ignore[arg-type]
+            max_input_bytes=value["max_input_bytes"],  # type: ignore[arg-type]
+            max_input_field_bytes=value["max_input_field_bytes"],  # type: ignore[arg-type]
+            max_output_bytes=value["max_output_bytes"],  # type: ignore[arg-type]
+            max_model_output_tokens=value["max_model_output_tokens"],  # type: ignore[arg-type]
+        ),
+        rate_limit=RateLimitPolicySnapshot(
+            scope=RateLimitScope(value["rate_limit_scope"]),  # type: ignore[arg-type]
+            key=value["rate_limit_key"],  # type: ignore[arg-type]
+            max_calls=value["rate_limit_max_calls"],  # type: ignore[arg-type]
+            window_seconds=value["rate_limit_window_seconds"],  # type: ignore[arg-type]
+        ),
+    )
+    if policy.semantic_hash != record.runtime_policy_hash:
+        raise StepPersistenceConflict(
+            "runtime_policy_snapshot_corrupt",
+            "persisted step runtime policy hash does not match its projection",
+        )
+    return policy
 
 
 def _step_to_domain_unchecked(record: RunStepRecord, dependencies: tuple[str, ...]) -> RunStep:
@@ -175,12 +297,19 @@ def _step_to_domain_unchecked(record: RunStepRecord, dependencies: tuple[str, ..
         binding_id=record.binding_id,
         binding_configuration_revision=record.binding_configuration_revision,
         request_schema_id=record.request_schema_id,
+        result_schema_id=record.result_schema_id,
         request_redaction_fields=_json_id_tuple(
             record.request_redaction_fields,
             "request redaction fields",
         ),
+        result_redaction_fields=_json_id_tuple(
+            record.result_redaction_fields,
+            "result redaction fields",
+        ),
+        data_classification=DataClassification(record.data_classification),
         idempotency_support=record.idempotency_support,
         timeout_seconds=record.timeout_seconds,
+        runtime_policy=_step_policy_from_record(record),
         approval_policy_id=record.approval_policy_id,
         approval_required_roles=_json_id_tuple(
             record.approval_required_roles,
@@ -395,6 +524,22 @@ class SQLAlchemyRunStepRepository:
             raise ValueError("persisted plan members must share run and plan identity")
         if any(step.graph_hash != plan.graph_hash for step in steps):
             raise ValueError("persisted steps must share the exact plan graph hash")
+        if any(
+            plan.runtime_policy.run_timeout_seconds > step.runtime_policy.timeout.run_seconds
+            for step in steps
+        ):
+            raise ValueError("persisted Run timeout exceeds a selected template timeout")
+        validate_runtime_plan_budget(
+            plan.runtime_policy,
+            tuple(
+                StepRuntimeDemand(
+                    template_id=step.template_id,
+                    connector_family=step.connector_family,
+                    policy=step.runtime_policy,
+                )
+                for step in steps
+            ),
+        )
         if (
             effect_plan_hash(
                 workflow_id=plan.workflow_id,
@@ -403,6 +548,7 @@ class SQLAlchemyRunStepRepository:
                 catalog_content_hash=plan.catalog_content_hash,
                 graph_hash=plan.graph_hash,
                 routing_hash=plan.routing_hash,
+                run_policy=plan.runtime_policy,
                 steps=tuple(_step_hash_material(step) for step in steps),
             )
             != plan.plan_hash
@@ -498,6 +644,7 @@ class SQLAlchemyRunStepRepository:
             plan.routing_hash,
             plan.approval_required,
             plan.step_count,
+            plan.runtime_policy,
         )
 
     @staticmethod
@@ -521,9 +668,13 @@ class SQLAlchemyRunStepRepository:
             step.binding_id,
             step.binding_configuration_revision,
             step.request_schema_id,
+            step.result_schema_id,
             step.request_redaction_fields,
+            step.result_redaction_fields,
+            step.data_classification,
             step.idempotency_support,
             step.timeout_seconds,
+            step.runtime_policy,
             step.approval_policy_id,
             step.approval_required_roles,
             step.approval_required_scopes,

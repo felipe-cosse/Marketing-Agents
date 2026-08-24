@@ -11,6 +11,10 @@ from typing import cast
 
 import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterRequest,
+    ReadAdapterResult,
+)
 from marketing_agents.application.ports.repositories import (
     RunInsertResult,
     RunRepository,
@@ -20,10 +24,12 @@ from marketing_agents.application.ports.repositories import (
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services import (
     AuditedPlanPersistenceService,
+    ControlledReadCommand,
+    ControlledReadExecutor,
+    ExecutionActivationService,
     IdempotentWorkRunReceiptService,
     IncomingWorkValidationError,
     RunLifecycleService,
-    RunStepLifecycleService,
     WorkAdmissionService,
     WorkIdempotencyError,
     WorkRunReceiptDisposition,
@@ -35,7 +41,7 @@ from marketing_agents.application.services.incoming_work_validation import (
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run, WorkItem
-from marketing_agents.domain.enums import RunState, WorkMode
+from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.run_lifecycle import (
     CompletionContext,
     NoRunTransitionContext,
@@ -43,10 +49,6 @@ from marketing_agents.domain.run_lifecycle import (
     RunStateTransition,
     RunTransitionContext,
     RunTransitionResult,
-)
-from marketing_agents.domain.step_lifecycle import (
-    NoStepTransitionContext,
-    StepLifecycleCommand,
 )
 from marketing_agents.infrastructure.db import (
     Base,
@@ -69,8 +71,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.execution_control import execution_control_repository
 from tests.support.incoming_work import TEST_CATALOG_HASH, validate_incoming_for_test
 from tests.support.orch_09_planning import build_read_only_plan
+from tests.support.read_adapter import ExactReadContractAdapter, observation_for
 
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 CATALOG_B = "catalog-sha256-v1:" + ("b" * 64)
@@ -95,6 +99,11 @@ class IncrementingIds:
         value = f"{namespace}.orch-07.{self._next:04d}"
         self.generated.append(value)
         return value
+
+
+class SuccessfulReadAdapter(ExactReadContractAdapter):
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        return observation_for(request, {"attempt_id": request.attempt_id, "completed": True})
 
 
 class ProbeUnitOfWorkFactory:
@@ -273,6 +282,7 @@ def _uow_factory(
             runs=run_factory,
             audits=SQLAlchemyAuditRepository,
             run_steps=SQLAlchemyRunStepRepository,
+            execution_control=execution_control_repository,
         ),
     )
 
@@ -388,31 +398,20 @@ async def test_orch_07_atomic_receipt_replays_original_after_terminal_and_catalo
             expected_run_version=run.version,
             audit_context=_audit_context("orch-07.persist-plan"),
         )
-        run = persisted.run
-        run = await _advance(
-            lifecycle,
-            run,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
+        activated = await ExecutionActivationService(dependencies).activate(
+            persisted.run.id,
+            audit_context=_audit_context("orch-07.activate-controlled-plan"),
         )
-        step_service = RunStepLifecycleService(dependencies)
-        step = persisted.steps[0]
-        for command in (
-            StepLifecycleCommand.MARK_READY,
-            StepLifecycleCommand.START,
-            StepLifecycleCommand.SUCCEED,
-        ):
-            step = (
-                await step_service.advance(
-                    step.id,
-                    step.version,
-                    command,
-                    NoStepTransitionContext(),
-                    audit_context=_audit_context(
-                        f"orch-07.step.{step.id}.{step.version}.{command.value}"
-                    ),
-                )
-            ).step
+        run = activated.run
+        step = activated.steps[0]
+        executed = await ControlledReadExecutor(
+            dependencies,
+            SuccessfulReadAdapter(),
+        ).execute(
+            ControlledReadCommand(step.id, {"campaign": "restart-safe"}),
+            audit_context=_audit_context("orch-07.execute-controlled-read"),
+        )
+        assert executed.step.state is StepState.SUCCEEDED
         terminal = await _advance(
             lifecycle,
             run,

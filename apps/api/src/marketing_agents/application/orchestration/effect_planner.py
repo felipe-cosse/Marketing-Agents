@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from marketing_agents.application.orchestration.router import RoutingResult
 from marketing_agents.application.ports.clock import Clock
+from marketing_agents.application.ports.connectors import ConnectorWriteResult
 from marketing_agents.application.ports.id_generator import IdGenerator
 from marketing_agents.domain.action_hash import (
     CanonicalExternalAction,
@@ -30,10 +31,12 @@ from marketing_agents.domain.approval import (
     safe_approval_destination,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities._validation import (
     frozen_json_mapping,
     require_digest,
     require_id,
+    require_json_pointers,
 )
 from marketing_agents.domain.enums import Effect
 from marketing_agents.domain.graph import DependencyGraph
@@ -45,6 +48,22 @@ from marketing_agents.domain.plan_hash import (
     effect_plan_hash,
 )
 from marketing_agents.domain.run_lifecycle import PlanDispositionContext
+from marketing_agents.domain.runtime_policy import (
+    BudgetPolicySnapshot,
+    RateLimitPolicySnapshot,
+    RateLimitScope,
+    RetryBackoff,
+    RetryPolicySnapshot,
+    RunRuntimePolicy,
+    RuntimePlanningBudgetError,
+    StepRuntimeDemand,
+    StepRuntimePolicy,
+    TimeoutPolicySnapshot,
+    attempt_kind_for_connector,
+    runtime_operation_key,
+    runtime_rate_limit_key,
+    validate_runtime_plan_budget,
+)
 
 EFFECT_PLAN_HASH_DOMAIN = _DOMAIN_EFFECT_PLAN_HASH
 _DESTINATION_HASH_DOMAIN = b"marketing-agents:external-action-destination:v1\x00"
@@ -87,6 +106,71 @@ class PlanningTemplateSource(Protocol):
 
     @property
     def approval_policy_id(self) -> str: ...
+
+    @property
+    def input_schema_id(self) -> str: ...
+
+    @property
+    def output_schema_id(self) -> str: ...
+
+    @property
+    def retry_policy(self) -> PlanningRetryPolicySource: ...
+
+    @property
+    def timeout_policy(self) -> PlanningTimeoutPolicySource: ...
+
+    @property
+    def budget_policy(self) -> PlanningBudgetPolicySource: ...
+
+    @property
+    def rate_limit_policy(self) -> PlanningRateLimitPolicySource: ...
+
+
+class PlanningRetryPolicySource(Protocol):
+    @property
+    def max_attempts(self) -> int: ...
+
+    @property
+    def backoff(self) -> str: ...
+
+
+class PlanningTimeoutPolicySource(Protocol):
+    @property
+    def step_seconds(self) -> int: ...
+
+    @property
+    def run_seconds(self) -> int: ...
+
+
+class PlanningBudgetPolicySource(Protocol):
+    @property
+    def max_steps(self) -> int: ...
+
+    @property
+    def max_model_calls(self) -> int: ...
+
+    @property
+    def max_tool_calls(self) -> int: ...
+
+    @property
+    def max_input_bytes(self) -> int: ...
+
+    @property
+    def max_input_field_bytes(self) -> int: ...
+
+    @property
+    def max_output_bytes(self) -> int: ...
+
+    @property
+    def max_model_output_tokens(self) -> int: ...
+
+
+class PlanningRateLimitPolicySource(Protocol):
+    @property
+    def max_calls(self) -> int: ...
+
+    @property
+    def window_seconds(self) -> int: ...
 
 
 class PlanningApprovalPolicySource(Protocol):
@@ -137,6 +221,12 @@ class PlanningOperationMetadataSource(Protocol):
     def request_schema_id(self) -> str: ...
 
     @property
+    def result_schema_id(self) -> str: ...
+
+    @property
+    def data_classification(self) -> DataClassification: ...
+
+    @property
     def idempotency_support(self) -> str: ...
 
     @property
@@ -144,6 +234,9 @@ class PlanningOperationMetadataSource(Protocol):
 
     @property
     def request_redaction_fields(self) -> Sequence[str]: ...
+
+    @property
+    def result_redaction_fields(self) -> Sequence[str]: ...
 
     @property
     def enabled(self) -> bool: ...
@@ -158,6 +251,9 @@ class PlanningOperationSource(Protocol):
 
     @property
     def request_type(self) -> type[BaseModel]: ...
+
+    @property
+    def result_type(self) -> type[BaseModel] | type[ConnectorWriteResult]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +345,10 @@ class EffectPlannedStep:
     binding_id: str | None
     binding_configuration_revision: int | None
     request_schema_id: str | None
+    result_schema_id: str | None
     request_redaction_fields: tuple[str, ...]
+    result_redaction_fields: tuple[str, ...]
+    data_classification: DataClassification
     idempotency_support: str
     connector_timeout_seconds: int | None
     approval_policy_id: str
@@ -257,10 +356,12 @@ class EffectPlannedStep:
     approval_required_scopes: tuple[str, ...]
     approval_expires_after_seconds: int | None
     approval_allow_self_approval: bool | None
+    runtime_policy: StepRuntimePolicy
 
     def __post_init__(self) -> None:
         for values, name in (
             (self.request_redaction_fields, "request redaction fields"),
+            (self.result_redaction_fields, "result redaction fields"),
             (self.approval_required_roles, "approval roles"),
             (self.approval_required_scopes, "approval scopes"),
         ):
@@ -285,6 +386,32 @@ class EffectPlannedStep:
             require_id(value, "approval authority")
         if not isinstance(self.effect, Effect):
             raise ValueError("planned step effect must use Effect")
+        if type(self.data_classification) is not DataClassification:
+            raise ValueError(
+                "planned step data classification must use the exact DataClassification enum"
+            )
+        for schema_id, name in (
+            (self.request_schema_id, "request schema ID"),
+            (self.result_schema_id, "result schema ID"),
+        ):
+            if schema_id is not None:
+                require_id(schema_id, f"planned step {name}")
+        if type(self.runtime_policy) is not StepRuntimePolicy:
+            raise ValueError("planned step runtime policy must use the exact immutable snapshot")
+        if self.runtime_policy.attempt_kind is not attempt_kind_for_connector(
+            self.connector_family
+        ):
+            raise ValueError("planned step attempt kind differs from its connector family")
+        if (
+            self.runtime_policy.rate_limit.scope is not RateLimitScope.TEMPLATE
+            or self.runtime_policy.rate_limit.key
+            != runtime_rate_limit_key(
+                template_id=self.template_id,
+                max_calls=self.runtime_policy.rate_limit.max_calls,
+                window_seconds=self.runtime_policy.rate_limit.window_seconds,
+            )
+        ):
+            raise ValueError("planned step rate-limit identity differs from its template")
         for revision, revision_name in (
             (self.configuration_revision, "configuration revision"),
             (self.binding_configuration_revision, "binding configuration revision"),
@@ -313,6 +440,7 @@ class EffectPlan:
     catalog_content_hash: str
     graph_hash: str
     routing_hash: str
+    run_policy: RunRuntimePolicy
     release: EffectPlanRelease
     steps: tuple[EffectPlannedStep, ...]
     proposed_actions: tuple[ProposedExternalAction, ...]
@@ -347,6 +475,8 @@ class EffectPlan:
             raise ValueError("workflow version must be positive")
         if _CATALOG_HASH.fullmatch(self.catalog_content_hash) is None:
             raise ValueError("effect plan catalog hash is invalid")
+        if type(self.run_policy) is not RunRuntimePolicy:
+            raise ValueError("effect plan run policy must use the exact immutable contract")
         if self.plan_hash != _effect_plan_hash(
             workflow_id=self.workflow_id,
             workflow_version=self.workflow_version,
@@ -354,23 +484,60 @@ class EffectPlan:
             catalog_content_hash=self.catalog_content_hash,
             graph_hash=self.graph_hash,
             routing_hash=self.routing_hash,
+            run_policy=self.run_policy,
             steps=self.steps,
         ):
             raise ValueError("effect plan hash does not bind its structural snapshot")
+        for step in self.steps:
+            if step.runtime_policy.operation_key != runtime_operation_key(
+                workflow_id=self.workflow_id,
+                workflow_version=self.workflow_version,
+                step_key=step.step_key,
+            ):
+                raise ValueError("planned step runtime operation identity is not structural")
+            if self.run_policy.run_timeout_seconds > step.runtime_policy.timeout.run_seconds:
+                raise ValueError("effective run timeout exceeds a selected template timeout")
+        validate_runtime_plan_budget(
+            self.run_policy,
+            tuple(
+                StepRuntimeDemand(
+                    template_id=step.template_id,
+                    connector_family=step.connector_family,
+                    policy=step.runtime_policy,
+                )
+                for step in self.steps
+            ),
+        )
         for step in self.steps:
             if step.connector_family in _NON_CONNECTOR_FAMILIES:
                 if (
                     step.binding_id is not None
                     or step.binding_configuration_revision is not None
                     or step.connector_timeout_seconds is not None
+                    or step.request_redaction_fields
+                    or step.result_redaction_fields
                 ):
-                    raise ValueError("non-connector plan steps cannot retain bindings")
+                    raise ValueError(
+                        "non-connector plan steps cannot retain connector contract metadata"
+                    )
+                if step.connector_family == "model" and (
+                    step.request_schema_id is None or step.result_schema_id is None
+                ):
+                    raise ValueError("model plan steps require their template schema pair")
+                if step.connector_family == "artifact" and (
+                    step.request_schema_id is not None or step.result_schema_id is not None
+                ):
+                    raise ValueError("artifact no-call steps cannot retain call schema IDs")
             elif (
                 step.binding_id is None
                 or step.binding_configuration_revision != step.configuration_revision
                 or step.connector_timeout_seconds is None
+                or step.request_schema_id is None
+                or step.result_schema_id is None
             ):
-                raise ValueError("external plan steps require the routed effective binding")
+                raise ValueError(
+                    "external plan steps require the complete routed connector contract"
+                )
         writes = tuple(step for step in self.steps if step.effect is Effect.WRITE)
         expected_release = (
             EffectPlanRelease.APPROVAL_REQUIRED if writes else EffectPlanRelease.DIRECT
@@ -446,6 +613,12 @@ class _TemplateSnapshot:
     allowed_capability_ids: frozenset[str]
     operation_classification: str
     approval_policy_id: str
+    input_schema_id: str
+    output_schema_id: str
+    retry_policy: RetryPolicySnapshot
+    timeout_policy: TimeoutPolicySnapshot
+    budget_policy: BudgetPolicySnapshot
+    rate_limit_policy: RateLimitPolicySnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,12 +636,16 @@ class _OperationSnapshot:
     connector_family: str
     effect: Effect
     request_schema_id: str
+    result_schema_id: str
     request_redaction_fields: tuple[str, ...]
+    result_redaction_fields: tuple[str, ...]
+    data_classification: DataClassification
     idempotency_support: str
     default_timeout_seconds: int
     enabled: bool
     disabled_reason: str | None
     request_type: type[BaseModel]
+    result_type: type[BaseModel] | type[ConnectorWriteResult]
 
 
 @dataclass(frozen=True, slots=True)
@@ -494,6 +671,7 @@ class EffectAwarePlanner:
         approval_policies: Sequence[PlanningApprovalPolicySource],
         operations: Sequence[PlanningOperationSource],
         bindings: Sequence[PlanningBindingSource],
+        run_policy: RunRuntimePolicy,
     ) -> None:
         if _CATALOG_HASH.fullmatch(catalog_content_hash) is None:
             raise EffectPlanningError(
@@ -502,6 +680,12 @@ class EffectAwarePlanner:
         self._catalog_content_hash = catalog_content_hash
         self._clock = clock
         self._ids = ids
+        if type(run_policy) is not RunRuntimePolicy:
+            raise EffectPlanningError(
+                "invalid_run_runtime_policy",
+                "planner requires an exact trusted immutable run policy",
+            )
+        self._run_policy = run_policy
         self._capabilities = self._snapshot_capabilities(capabilities)
         self._templates = self._snapshot_templates(templates)
         self._policies = self._snapshot_policies(approval_policies)
@@ -569,8 +753,25 @@ class EffectAwarePlanner:
                 binding_configuration_revision=(
                     binding.configuration_revision if binding else None
                 ),
-                request_schema_id=operation.request_schema_id if operation else None,
+                request_schema_id=(
+                    operation.request_schema_id
+                    if operation
+                    else template.input_schema_id
+                    if capability.connector_family == "model"
+                    else None
+                ),
+                result_schema_id=(
+                    operation.result_schema_id
+                    if operation
+                    else template.output_schema_id
+                    if capability.connector_family == "model"
+                    else None
+                ),
                 request_redaction_fields=(operation.request_redaction_fields if operation else ()),
+                result_redaction_fields=(operation.result_redaction_fields if operation else ()),
+                data_classification=(
+                    operation.data_classification if operation else DataClassification.INTERNAL
+                ),
                 idempotency_support=capability.idempotency_support,
                 connector_timeout_seconds=(
                     operation.default_timeout_seconds if operation else None
@@ -588,12 +789,56 @@ class EffectAwarePlanner:
                 approval_allow_self_approval=(
                     approval_policy.allow_self_approval if approval_policy else None
                 ),
+                runtime_policy=StepRuntimePolicy(
+                    operation_key=runtime_operation_key(
+                        workflow_id=request.routing.workflow_id,
+                        workflow_version=request.routing.workflow_version,
+                        step_key=spec.step_key,
+                    ),
+                    attempt_kind=attempt_kind_for_connector(capability.connector_family),
+                    retry=template.retry_policy,
+                    timeout=template.timeout_policy,
+                    budget=template.budget_policy,
+                    rate_limit=template.rate_limit_policy,
+                ),
             )
             self._validate_intent(spec, planned, template, operation)
             planned_steps.append(planned)
             resolved.append((spec, planned, template, operation, approval_policy))
 
-        plan_hash = self._plan_hash(request, tuple(planned_steps))
+        step_tuple = tuple(planned_steps)
+        try:
+            selected_run_timeouts = tuple(
+                self._templates[item.template_id].timeout_policy.run_seconds
+                for item in request.routing.selected_instances
+            )
+        except KeyError as exc:  # pragma: no cover - selected step lookup normally catches this
+            raise EffectPlanningError(
+                "unknown_plan_reference",
+                "routing selection references an unknown template runtime policy",
+            ) from exc
+        run_policy = replace(
+            self._run_policy,
+            run_timeout_seconds=min(
+                self._run_policy.run_timeout_seconds,
+                *selected_run_timeouts,
+            ),
+        )
+        try:
+            validate_runtime_plan_budget(
+                run_policy,
+                tuple(
+                    StepRuntimeDemand(
+                        template_id=step.template_id,
+                        connector_family=step.connector_family,
+                        policy=step.runtime_policy,
+                    )
+                    for step in step_tuple
+                ),
+            )
+        except RuntimePlanningBudgetError as exc:
+            raise EffectPlanningError(exc.code, str(exc)) from exc
+        plan_hash = self._plan_hash(request, step_tuple, run_policy)
         write_rows = [row for row in resolved if row[1].effect is Effect.WRITE]
         if not write_rows:
             return EffectPlan(
@@ -605,8 +850,9 @@ class EffectAwarePlanner:
                 catalog_content_hash=request.routing.catalog_content_hash,
                 graph_hash=request.graph.semantic_hash,
                 routing_hash=request.routing.semantic_hash,
+                run_policy=run_policy,
                 release=EffectPlanRelease.DIRECT,
-                steps=tuple(planned_steps),
+                steps=step_tuple,
                 proposed_actions=(),
                 approval_requests=(),
             )
@@ -677,8 +923,9 @@ class EffectAwarePlanner:
             catalog_content_hash=request.routing.catalog_content_hash,
             graph_hash=request.graph.semantic_hash,
             routing_hash=request.routing.semantic_hash,
+            run_policy=run_policy,
             release=EffectPlanRelease.APPROVAL_REQUIRED,
-            steps=tuple(planned_steps),
+            steps=step_tuple,
             proposed_actions=tuple(proposed_actions),
             approval_requests=tuple(approval_requests),
         )
@@ -850,7 +1097,12 @@ class EffectAwarePlanner:
             allow_self_approval=policy.allow_self_approval,
         )
 
-    def _plan_hash(self, request: EffectPlanRequest, steps: tuple[EffectPlannedStep, ...]) -> str:
+    def _plan_hash(
+        self,
+        request: EffectPlanRequest,
+        steps: tuple[EffectPlannedStep, ...],
+        run_policy: RunRuntimePolicy,
+    ) -> str:
         return _effect_plan_hash(
             workflow_id=request.routing.workflow_id,
             workflow_version=request.routing.workflow_version,
@@ -858,6 +1110,7 @@ class EffectAwarePlanner:
             catalog_content_hash=request.routing.catalog_content_hash,
             graph_hash=request.graph.semantic_hash,
             routing_hash=request.routing.semantic_hash,
+            run_policy=run_policy,
             steps=steps,
         )
 
@@ -882,6 +1135,19 @@ class EffectAwarePlanner:
                 raise EffectPlanningError(
                     "operation_metadata_drift",
                     "catalog and connector operation metadata differ",
+                )
+            if capability.effect is Effect.READ:
+                if not isinstance(operation.result_type, type) or not issubclass(
+                    operation.result_type, BaseModel
+                ):
+                    raise EffectPlanningError(
+                        "invalid_operation",
+                        "READ operation result type must be a Pydantic model",
+                    )
+            elif operation.result_type is not ConnectorWriteResult:
+                raise EffectPlanningError(
+                    "invalid_operation",
+                    "WRITE operation result type must use ConnectorWriteResult",
                 )
         for template in self._templates.values():
             if not template.allowed_capability_ids <= set(self._capabilities):
@@ -941,9 +1207,11 @@ class EffectAwarePlanner:
             try:
                 require_id(source.id, "template ID")
                 require_id(source.approval_policy_id, "approval policy ID")
+                require_id(source.input_schema_id, "template input schema ID")
+                require_id(source.output_schema_id, "template output schema ID")
                 for capability_id in source.allowed_tool_capability_ids:
                     require_id(capability_id, "template capability ID")
-            except ValueError as exc:
+            except (AttributeError, TypeError, ValueError) as exc:
                 raise EffectPlanningError("invalid_template", str(exc)) from exc
             if source.id in result:
                 raise EffectPlanningError("duplicate_template", "templates must be unique")
@@ -957,11 +1225,50 @@ class EffectAwarePlanner:
                 raise EffectPlanningError(
                     "invalid_template", "template operation classification is invalid"
                 )
+            try:
+                retry_policy = RetryPolicySnapshot(
+                    max_attempts=source.retry_policy.max_attempts,
+                    backoff=RetryBackoff(source.retry_policy.backoff),
+                )
+                timeout_policy = TimeoutPolicySnapshot(
+                    step_seconds=source.timeout_policy.step_seconds,
+                    run_seconds=source.timeout_policy.run_seconds,
+                )
+                budget_policy = BudgetPolicySnapshot(
+                    max_steps=source.budget_policy.max_steps,
+                    max_model_calls=source.budget_policy.max_model_calls,
+                    max_tool_calls=source.budget_policy.max_tool_calls,
+                    max_input_bytes=source.budget_policy.max_input_bytes,
+                    max_input_field_bytes=source.budget_policy.max_input_field_bytes,
+                    max_output_bytes=source.budget_policy.max_output_bytes,
+                    max_model_output_tokens=source.budget_policy.max_model_output_tokens,
+                )
+                rate_limit_policy = RateLimitPolicySnapshot(
+                    scope=RateLimitScope.TEMPLATE,
+                    key=runtime_rate_limit_key(
+                        template_id=source.id,
+                        max_calls=source.rate_limit_policy.max_calls,
+                        window_seconds=source.rate_limit_policy.window_seconds,
+                    ),
+                    max_calls=source.rate_limit_policy.max_calls,
+                    window_seconds=source.rate_limit_policy.window_seconds,
+                )
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise EffectPlanningError(
+                    "invalid_template_runtime_policy",
+                    "template runtime policy is missing, malformed, or outside global bounds",
+                ) from exc
             result[source.id] = _TemplateSnapshot(
                 id=source.id,
                 allowed_capability_ids=frozenset(source.allowed_tool_capability_ids),
                 operation_classification=source.operation_classification,
                 approval_policy_id=source.approval_policy_id,
+                input_schema_id=source.input_schema_id,
+                output_schema_id=source.output_schema_id,
+                retry_policy=retry_policy,
+                timeout_policy=timeout_policy,
+                budget_policy=budget_policy,
+                rate_limit_policy=rate_limit_policy,
             )
         return result
 
@@ -1010,6 +1317,7 @@ class EffectAwarePlanner:
                 require_id(metadata.capability_id, "operation capability ID")
                 require_id(metadata.connector_family, "operation connector family")
                 require_id(metadata.request_schema_id, "operation request schema ID")
+                require_id(metadata.result_schema_id, "operation result schema ID")
             except ValueError as exc:
                 raise EffectPlanningError("invalid_operation", str(exc)) from exc
             if metadata.capability_id in result:
@@ -1024,6 +1332,11 @@ class EffectAwarePlanner:
             }:
                 raise EffectPlanningError(
                     "invalid_operation", "operation idempotency support is invalid"
+                )
+            if type(metadata.data_classification) is not DataClassification:
+                raise EffectPlanningError(
+                    "invalid_operation",
+                    "operation data classification must use the exact enum",
                 )
             if (
                 not isinstance(metadata.default_timeout_seconds, int)
@@ -1041,6 +1354,16 @@ class EffectAwarePlanner:
                 raise EffectPlanningError(
                     "invalid_operation", "request redaction fields must be unique JSON pointers"
                 )
+            result_redaction_fields = tuple(metadata.result_redaction_fields)
+            try:
+                require_json_pointers(
+                    result_redaction_fields,
+                    "operation result redaction fields",
+                )
+            except ValueError as exc:
+                raise EffectPlanningError(
+                    "invalid_operation", "result redaction fields must be unique JSON pointers"
+                ) from exc
             if not isinstance(metadata.enabled, bool) or metadata.enabled == (
                 metadata.disabled_reason is not None
             ):
@@ -1058,12 +1381,16 @@ class EffectAwarePlanner:
                 connector_family=metadata.connector_family,
                 effect=metadata.effect,
                 request_schema_id=metadata.request_schema_id,
+                result_schema_id=metadata.result_schema_id,
                 request_redaction_fields=redaction_fields,
+                result_redaction_fields=result_redaction_fields,
+                data_classification=metadata.data_classification,
                 idempotency_support=metadata.idempotency_support,
                 default_timeout_seconds=metadata.default_timeout_seconds,
                 enabled=metadata.enabled,
                 disabled_reason=metadata.disabled_reason,
                 request_type=source.request_type,
+                result_type=source.result_type,
             )
         return result
 
@@ -1112,6 +1439,7 @@ def _effect_plan_hash(
     catalog_content_hash: str,
     graph_hash: str,
     routing_hash: str,
+    run_policy: RunRuntimePolicy,
     steps: tuple[EffectPlannedStep, ...],
 ) -> str:
     return effect_plan_hash(
@@ -1121,6 +1449,7 @@ def _effect_plan_hash(
         catalog_content_hash=catalog_content_hash,
         graph_hash=graph_hash,
         routing_hash=routing_hash,
+        run_policy=run_policy,
         steps=tuple(
             EffectPlanStepHashMaterial(
                 step_key=step.step_key,
@@ -1135,7 +1464,10 @@ def _effect_plan_hash(
                 binding_id=step.binding_id,
                 binding_configuration_revision=step.binding_configuration_revision,
                 request_schema_id=step.request_schema_id,
+                result_schema_id=step.result_schema_id,
                 request_redaction_fields=step.request_redaction_fields,
+                result_redaction_fields=step.result_redaction_fields,
+                data_classification=step.data_classification,
                 idempotency_support=step.idempotency_support,
                 connector_timeout_seconds=step.connector_timeout_seconds,
                 approval_policy_id=step.approval_policy_id,
@@ -1143,6 +1475,7 @@ def _effect_plan_hash(
                 approval_required_scopes=step.approval_required_scopes,
                 approval_expires_after_seconds=step.approval_expires_after_seconds,
                 approval_allow_self_approval=step.approval_allow_self_approval,
+                runtime_policy=step.runtime_policy,
             )
             for step in steps
         ),

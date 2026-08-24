@@ -13,13 +13,22 @@ from marketing_agents.application.orchestration import (
     OrchestrationDependencies,
     RoutingResult,
 )
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterRequest,
+    ReadAdapterResult,
+)
 from marketing_agents.application.ports.repositories import AuditRepository, RunRepository
 from marketing_agents.application.services import (
     AuditedPlanPersistenceService,
+    ControlledReadCommand,
+    ControlledReadExecutor,
+    ControlledReadExecutorError,
+    ExecutionActivationService,
     IdempotentWorkRunReceiptService,
     PersistedRunPlan,
     PlanPersistenceError,
     RunAdvanceDisposition,
+    RunCancellationService,
     RunLifecycleService,
     RunLifecycleServiceError,
     RunStepLifecycleService,
@@ -31,7 +40,6 @@ from marketing_agents.domain.entities import Run
 from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.graph import DependencyGraph
 from marketing_agents.domain.run_lifecycle import (
-    CancellationContext,
     CompletionContext,
     NoRunTransitionContext,
     RunLifecycleCommand,
@@ -50,6 +58,7 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyRunRepository,
     SQLAlchemyRunStepRepository,
     SQLAlchemyUnitOfWorkFactory,
+    StepPersistenceConflict,
     create_database_runtime,
 )
 from marketing_agents.infrastructure.db.models import (
@@ -65,8 +74,10 @@ from marketing_agents.security.digest_key import DigestKey
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.execution_control import execution_control_repository
 from tests.support.incoming_work import TEST_CATALOG_HASH, validate_incoming_for_test
 from tests.support.orch_09_planning import build_read_only_plan
+from tests.support.read_adapter import ExactReadContractAdapter, observation_for
 
 NOW = datetime(2026, 8, 20, 12, tzinfo=UTC)
 
@@ -88,6 +99,15 @@ class IncrementingIds:
     def new(self, namespace: str) -> str:
         self._next += 1
         return f"{namespace}.orch-09.{self._next:04d}"
+
+
+class SuccessfulReadAdapter(ExactReadContractAdapter):
+    def __init__(self) -> None:
+        self.calls: list[ReadAdapterRequest] = []
+
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        self.calls.append(request)
+        return observation_for(request, {"attempt_id": request.attempt_id, "completed": True})
 
 
 class AsyncBarrier:
@@ -168,6 +188,7 @@ def _uow_factory(
             runs=run_factory,
             audits=audit_factory,
             run_steps=SQLAlchemyRunStepRepository,
+            execution_control=execution_control_repository,
         ),
     )
 
@@ -258,31 +279,19 @@ async def test_orch_09_restart_stable_complete_plan_step_timeline(tmp_path: Path
     run, envelope = await _validated_run(dependencies, "event.orch-09.complete")
     persisted, plan, graph, routing = await _persist_plan(dependencies, run, envelope)
     lifecycle = RunLifecycleService(dependencies)
-    running = (
-        await lifecycle.advance(
-            persisted.run.id,
-            persisted.run.version,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
-            audit_context=_audit_context("complete.activate"),
-        )
-    ).run
-    step_service = RunStepLifecycleService(dependencies)
-    step = persisted.steps[0]
-    for command in (
-        StepLifecycleCommand.MARK_READY,
-        StepLifecycleCommand.START,
-        StepLifecycleCommand.SUCCEED,
-    ):
-        step = (
-            await step_service.advance(
-                step.id,
-                step.version,
-                command,
-                NoStepTransitionContext(),
-                audit_context=_audit_context(f"complete.step.{command.value}"),
-            )
-        ).step
+    activated = await ExecutionActivationService(dependencies).activate(
+        persisted.run.id,
+        audit_context=_audit_context("complete.activate"),
+    )
+    running = activated.run
+    executed = await ControlledReadExecutor(
+        dependencies,
+        SuccessfulReadAdapter(),
+    ).execute(
+        ControlledReadCommand(activated.steps[0].id, {"input": "complete"}),
+        audit_context=_audit_context("complete.step.execute"),
+    )
+    step = executed.step
     completed = await lifecycle.advance(
         running.id,
         running.version,
@@ -377,41 +386,49 @@ async def test_orch_09_single_audit_append_fault_rolls_back_run_and_step_mutatio
     normal = _dependencies(runtime)
     run, envelope = await _validated_run(normal, "event.orch-09.mutation-rollback")
     persisted, _, _, _ = await _persist_plan(normal, run, envelope)
-    executing = (
-        await RunLifecycleService(normal).advance(
-            persisted.run.id,
-            persisted.run.version,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
-            audit_context=_audit_context("mutation-rollback.activate"),
-        )
-    ).run
     before = await _timeline(normal, run.id)
 
     def faulting_audits(session: AsyncSession) -> AuditRepository:
         return FaultAfterAuditAppend(SQLAlchemyAuditRepository(session))  # type: ignore[return-value]
 
-    faulting = _dependencies(
+    faulting_activation = _dependencies(
         runtime,
-        clock=IncrementingClock(executing.updated_at + timedelta(seconds=1)),
+        clock=IncrementingClock(persisted.run.updated_at + timedelta(seconds=1)),
         audit_factory=faulting_audits,
     )
     step = persisted.steps[0]
     try:
         with pytest.raises(RuntimeError, match="injected fault"):
-            await RunStepLifecycleService(faulting).advance(
-                step.id,
-                step.version,
-                StepLifecycleCommand.MARK_READY,
-                NoStepTransitionContext(),
-                audit_context=_audit_context("mutation-rollback.step"),
+            await ExecutionActivationService(faulting_activation).activate(
+                persisted.run.id,
+                audit_context=_audit_context("mutation-rollback.activate-fault"),
             )
+
+        async with normal.unit_of_work() as unit_of_work:
+            rolled_back_run = await unit_of_work.runs.get(run.id)
+            rolled_back_step = await unit_of_work.run_steps.get(step.id)
+            rolled_back_history = await unit_of_work.run_steps.list_transitions(step.id)
+            rolled_back_timeline = await unit_of_work.audits.list_run(run.id)
+        assert rolled_back_run == persisted.run
+        assert rolled_back_step == step
+        assert len(rolled_back_history) == 1
+        assert rolled_back_timeline == before
+
+        activated = await ExecutionActivationService(normal).activate(
+            persisted.run.id,
+            audit_context=_audit_context("mutation-rollback.activate"),
+        )
+        executing = activated.run
+        ready_step = activated.steps[0]
+        before_cancel = await _timeline(normal, run.id)
+        faulting_cancel = _dependencies(
+            runtime,
+            clock=IncrementingClock(executing.updated_at + timedelta(seconds=1)),
+            audit_factory=faulting_audits,
+        )
         with pytest.raises(RuntimeError, match="injected fault"):
-            await RunLifecycleService(faulting).advance(
+            await RunCancellationService(faulting_cancel).request(
                 executing.id,
-                executing.version,
-                RunLifecycleCommand.CANCEL,
-                CancellationContext("operator_cancelled"),
                 audit_context=_audit_context("mutation-rollback.run"),
             )
 
@@ -422,10 +439,9 @@ async def test_orch_09_single_audit_append_fault_rolls_back_run_and_step_mutatio
             timeline = await unit_of_work.audits.list_run(run.id)
         assert stored_run is not None and stored_run.state is RunState.EXECUTING
         assert stored_run.version == executing.version
-        assert stored_step is not None and stored_step.state is StepState.PENDING
-        assert stored_step.version == step.version
-        assert len(step_history) == 1
-        assert timeline == before
+        assert stored_step == ready_step
+        assert len(step_history) == 2
+        assert timeline == before_cancel
     finally:
         await runtime.dispose()
 
@@ -438,15 +454,11 @@ async def test_orch_09_completion_uses_persisted_steps_and_audits_rejection(
     dependencies = _dependencies(runtime)
     run, envelope = await _validated_run(dependencies, "event.orch-09.incomplete")
     persisted, _, _, _ = await _persist_plan(dependencies, run, envelope)
-    running = (
-        await RunLifecycleService(dependencies).advance(
-            persisted.run.id,
-            persisted.run.version,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
-            audit_context=_audit_context("incomplete.activate"),
-        )
-    ).run
+    activated = await ExecutionActivationService(dependencies).activate(
+        persisted.run.id,
+        audit_context=_audit_context("incomplete.activate"),
+    )
+    running = activated.run
     try:
         with pytest.raises(RunTransitionError) as captured:
             await RunLifecycleService(dependencies).advance(
@@ -462,7 +474,7 @@ async def test_orch_09_completion_uses_persisted_steps_and_audits_rejection(
             assert current is not None and current.state is RunState.EXECUTING
             assert (
                 await unit_of_work.run_steps.get(persisted.steps[0].id)
-            ).state is StepState.PENDING  # type: ignore[union-attr]
+            ).state is StepState.READY  # type: ignore[union-attr]
             timeline = await unit_of_work.audits.list_run(run.id)
         assert timeline[-1].event_type == "run.transition_rejected"
         assert timeline[-1].outcome is AuditOutcome.REJECTED
@@ -484,11 +496,8 @@ async def test_orch_09_missing_dependency_row_cannot_turn_child_into_root(
         envelope,
         dependent_steps=True,
     )
-    running = await RunLifecycleService(dependencies).advance(
+    running = await ExecutionActivationService(dependencies).activate(
         persisted.run.id,
-        persisted.run.version,
-        RunLifecycleCommand.ACTIVATE_PLAN,
-        NoRunTransitionContext(),
         audit_context=_audit_context("dependency.activate"),
     )
     assert running.run.state is RunState.EXECUTING
@@ -544,15 +553,12 @@ async def test_orch_09_structural_step_tamper_blocks_activation_without_healing(
             update(RunStepRecord).where(RunStepRecord.id == step.id).values({column: forged_value})
         )
     try:
-        with pytest.raises(RunLifecycleServiceError) as captured:
-            await RunLifecycleService(dependencies).advance(
+        with pytest.raises(StepPersistenceConflict) as captured:
+            await ExecutionActivationService(dependencies).activate(
                 persisted.run.id,
-                persisted.run.version,
-                RunLifecycleCommand.ACTIVATE_PLAN,
-                NoRunTransitionContext(),
                 audit_context=_audit_context(f"tamper.{column}.activate"),
             )
-        assert captured.value.code == "plan_snapshot_invalid"
+        assert captured.value.code == "plan_snapshot_corrupt"
         async with dependencies.unit_of_work() as unit_of_work:
             stored_run = await unit_of_work.runs.get(run.id)
             stored_step = await unit_of_work.run_steps.get(step.id)
@@ -573,24 +579,12 @@ async def test_orch_09_structural_tamper_after_ready_blocks_start_without_healin
     dependencies = _dependencies(runtime)
     run, envelope = await _validated_run(dependencies, "event.orch-09.tamper.after-ready")
     persisted, _, _, _ = await _persist_plan(dependencies, run, envelope)
-    executing = (
-        await RunLifecycleService(dependencies).advance(
-            persisted.run.id,
-            persisted.run.version,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
-            audit_context=_audit_context("tamper.after-ready.activate"),
-        )
-    ).run
-    step = (
-        await RunStepLifecycleService(dependencies).advance(
-            persisted.steps[0].id,
-            persisted.steps[0].version,
-            StepLifecycleCommand.MARK_READY,
-            NoStepTransitionContext(),
-            audit_context=_audit_context("tamper.after-ready.ready"),
-        )
-    ).step
+    activated = await ExecutionActivationService(dependencies).activate(
+        persisted.run.id,
+        audit_context=_audit_context("tamper.after-ready.activate"),
+    )
+    executing = activated.run
+    step = activated.steps[0]
     before = await _timeline(dependencies, run.id)
     async with runtime.session_factory() as session, session.begin():
         await session.execute(
@@ -599,22 +593,28 @@ async def test_orch_09_structural_tamper_after_ready_blocks_start_without_healin
             .values(capability_id="cap.model.forged-after-ready")
         )
     try:
-        with pytest.raises(RunStepLifecycleServiceError) as captured:
-            await RunStepLifecycleService(dependencies).advance(
-                step.id,
-                step.version,
-                StepLifecycleCommand.START,
-                NoStepTransitionContext(),
-                audit_context=_audit_context("tamper.after-ready.start"),
+        adapter = SuccessfulReadAdapter()
+        with pytest.raises(ControlledReadExecutorError) as captured:
+            await ControlledReadExecutor(dependencies, adapter).execute(
+                ControlledReadCommand(step.id, {"input": "tampered"}),
+                audit_context=_audit_context("tamper.after-ready.execute"),
             )
-        assert captured.value.code == "step_plan_snapshot_invalid"
+        assert captured.value.code == "execution_policy_invalid"
+        assert adapter.calls == []
         async with dependencies.unit_of_work() as unit_of_work:
             stored_run = await unit_of_work.runs.get(run.id)
             stored_step = await unit_of_work.run_steps.get(step.id)
             timeline = await unit_of_work.audits.list_run(run.id)
+            attempts = await unit_of_work.execution_control.list_attempts(
+                step.id,
+                step.runtime_policy.operation_key,
+            )
+            control = await unit_of_work.execution_control.get(run.id)
         assert stored_run is not None and stored_run == executing
         assert stored_step is not None and stored_step.state is StepState.READY
         assert stored_step.version == step.version
+        assert attempts == ()
+        assert control is not None and control.model_calls == 0
         assert timeline == before
     finally:
         await runtime.dispose()
@@ -703,48 +703,20 @@ async def test_orch_09_parallel_steps_allocate_contiguous_same_run_audit_sequenc
         envelope,
         parallel_steps=True,
     )
-    executing = (
-        await RunLifecycleService(dependencies).advance(
-            persisted.run.id,
-            persisted.run.version,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
-            audit_context=_audit_context("parallel-steps.activate"),
-        )
-    ).run
-    before = await _timeline(dependencies, run.id)
-    assert tuple(item.run_sequence for item in before) == tuple(range(1, 7))
-
-    first_step, second_step = persisted.steps
-    first_result, second_result = await asyncio.gather(
-        RunStepLifecycleService(dependencies).advance(
-            first_step.id,
-            first_step.version,
-            StepLifecycleCommand.MARK_READY,
-            NoStepTransitionContext(),
-            audit_context=_audit_context("parallel-steps.first"),
-        ),
-        RunStepLifecycleService(dependencies).advance(
-            second_step.id,
-            second_step.version,
-            StepLifecycleCommand.MARK_READY,
-            NoStepTransitionContext(),
-            audit_context=_audit_context("parallel-steps.second"),
-        ),
+    activated = await ExecutionActivationService(dependencies).activate(
+        persisted.run.id,
+        audit_context=_audit_context("parallel-steps.activate"),
     )
     try:
-        assert first_result.step.state is StepState.READY
-        assert second_result.step.state is StepState.READY
+        executing = activated.run
+        assert all(step.state is StepState.READY for step in activated.steps)
         timeline = await _timeline(dependencies, run.id)
         assert tuple(item.run_sequence for item in timeline) == tuple(range(1, 9))
         assert tuple(item.event_type for item in timeline[-2:]) == (
             "step.transitioned",
             "step.transitioned",
         )
-        assert {item.step_id for item in timeline[-2:]} == {
-            first_step.id,
-            second_step.id,
-        }
+        assert {item.step_id for item in timeline[-2:]} == {step.id for step in activated.steps}
         async with dependencies.unit_of_work() as unit_of_work:
             stored_run = await unit_of_work.runs.get(run.id)
         assert stored_run is not None and stored_run == executing

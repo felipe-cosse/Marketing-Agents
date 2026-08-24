@@ -33,9 +33,6 @@ from marketing_agents.infrastructure.db.models import (
     RunStepStateTransitionRecord,
 )
 from marketing_agents.infrastructure.db.repositories import SQLAlchemyAuditRepository
-from marketing_agents.infrastructure.db.repositories.approval import (
-    ApprovalPersistenceConflict,
-)
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.schema import CreateTable
@@ -233,14 +230,16 @@ async def test_orch_08_released_decision_tamper_blocks_attempt_and_connector(
         )
         from marketing_agents.application.services.external_action_dispatcher import (
             ExternalActionDispatcher,
+            ExternalActionDispatchError,
         )
 
-        with pytest.raises(ApprovalPersistenceConflict):
+        with pytest.raises(ExternalActionDispatchError) as rejected:
             await ExternalActionDispatcher(
                 dependencies,
                 gateway,
                 WriteAuthorizationGuard(),
             ).dispatch_once(action.id, lease_owner="worker.orch-08.tamper")
+        assert rejected.value.code == "execution_plan_invalid"
         assert gateway.calls == 0
         async with runtime.session_factory() as session:
             stored_action = await session.get(ExternalActionRecord, action.id)
@@ -330,6 +329,7 @@ async def test_orch_08_retry_lineage_survives_intervening_pre_call_expiry(
                 lease_owner="worker.orch-08.lineage.1",
                 attempt_number=1,
                 started_at=clock.current,
+                call_deadline_at=clock.current + timedelta(seconds=30),
                 step_transition=transition,
             )
             assert started is not None and started.step_transition == transition
@@ -416,6 +416,7 @@ async def test_orch_08_retry_lineage_survives_intervening_pre_call_expiry(
                 lease_owner="worker.orch-08.lineage.3",
                 attempt_number=3,
                 started_at=clock.current,
+                call_deadline_at=clock.current + timedelta(seconds=30),
                 step_transition=None,
             )
             assert restarted is not None and restarted.step_transition is None

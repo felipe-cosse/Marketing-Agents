@@ -50,9 +50,40 @@ from marketing_agents.domain.enums import (
     WorkMode,
 )
 from marketing_agents.domain.run_lifecycle import initial_received_transition
+from marketing_agents.domain.runtime_policy import (
+    AttemptKind,
+    BudgetPolicySnapshot,
+    RateLimitPolicySnapshot,
+    RateLimitScope,
+    RetryBackoff,
+    RetryPolicySnapshot,
+    StepRuntimePolicy,
+    TimeoutPolicySnapshot,
+    runtime_rate_limit_key,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 DIGEST = "a" * 64
+
+
+def _runtime_policy(template_id: str, kind: AttemptKind) -> StepRuntimePolicy:
+    return StepRuntimePolicy(
+        operation_key="runtime.operation.test",
+        attempt_kind=kind,
+        retry=RetryPolicySnapshot(1, RetryBackoff.NONE),
+        timeout=TimeoutPolicySnapshot(30, 120),
+        budget=BudgetPolicySnapshot(20, 10, 20),
+        rate_limit=RateLimitPolicySnapshot(
+            RateLimitScope.TEMPLATE,
+            runtime_rate_limit_key(
+                template_id=template_id,
+                max_calls=10,
+                window_seconds=60,
+            ),
+            10,
+            60,
+        ),
+    )
 
 
 def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
@@ -141,9 +172,13 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         binding_id="mock.newsletter.default",
         binding_configuration_revision=1,
         request_schema_id=capability.request_schema_id,
+        result_schema_id=capability.result_schema_id,
         request_redaction_fields=("/email",),
+        result_redaction_fields=(),
+        data_classification=DataClassification.PERSONAL,
         idempotency_support=capability.idempotency_support,
         timeout_seconds=30,
+        runtime_policy=_runtime_policy(template.id, AttemptKind.TOOL),
         approval_policy_id=policy.id,
         approval_required_roles=("role.operator",),
         approval_required_scopes=("scope.external-write",),
@@ -341,9 +376,13 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
             binding_id=None,
             binding_configuration_revision=None,
             request_schema_id="schema.model.request",
+            result_schema_id="schema.model.result",
             request_redaction_fields=(),
+            result_redaction_fields=(),
+            data_classification=DataClassification.INTERNAL,
             idempotency_support="not_applicable",
             timeout_seconds=None,
+            runtime_policy=_runtime_policy("template.model.1", AttemptKind.MODEL),
             approval_policy_id="policy.none.v1",
             approval_required_roles=(),
             approval_required_scopes=(),

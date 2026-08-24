@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -65,6 +66,12 @@ from .approval_records import (
 )
 from .audit_events import AuditEventFactory
 
+_CANCEL_ACTOR_DOMAIN = b"marketing-agents:execution-cancel-actor:v1\x00"
+
+
+def _cancellation_actor_digest(audit_context: AuditContext) -> str:
+    return hashlib.sha256(_CANCEL_ACTOR_DOMAIN + audit_context.actor_id.encode("utf-8")).hexdigest()
+
 
 class ApprovalBoundaryServiceError(RuntimeError):
     def __init__(self, code: str, message: str, *, run_id: str) -> None:
@@ -104,6 +111,8 @@ class _BoundarySnapshot:
 
 class ApprovalBoundaryService:
     """Derive the current complete set and persist one all-or-none boundary outcome."""
+
+    _MAX_STALE_CONTROL_RETRIES = 3
 
     def __init__(self, dependencies: OrchestrationDependencies) -> None:
         self._dependencies = dependencies
@@ -269,6 +278,26 @@ class ApprovalBoundaryService:
         *,
         audit_context: AuditContext,
     ) -> ApprovalBoundaryResult:
+        for retry_index in range(self._MAX_STALE_CONTROL_RETRIES):
+            try:
+                return await self._cancel_once(
+                    run_id,
+                    audit_context=audit_context,
+                )
+            except ApprovalBoundaryServiceError as exc:
+                if (
+                    exc.code != "stale_execution_control"
+                    or retry_index == self._MAX_STALE_CONTROL_RETRIES - 1
+                ):
+                    raise
+        raise AssertionError("bounded boundary cancellation retry exhausted without an outcome")
+
+    async def _cancel_once(
+        self,
+        run_id: str,
+        *,
+        audit_context: AuditContext,
+    ) -> ApprovalBoundaryResult:
         async with self._dependencies.unit_of_work() as unit_of_work:
             snapshot = await self._load_current(unit_of_work, run_id)
             authorization_set = snapshot.selection.authorization_set
@@ -293,6 +322,30 @@ class ApprovalBoundaryService:
                 )
             await self._require_complete_history(unit_of_work, snapshot)
             closed_at = self._dependencies.utc_now()
+            control = await unit_of_work.execution_control.get(run_id)
+            if (
+                control is None
+                or control.policy_hash != authorization_set.plan_hash
+                or control.started_at is not None
+            ):
+                raise ApprovalBoundaryServiceError(
+                    "execution_control_invalid",
+                    "pre-release cancellation lacks its exact unstarted execution control",
+                    run_id=run_id,
+                )
+            try:
+                await unit_of_work.execution_control.request_cancel(
+                    run_id=run_id,
+                    expected_control_version=control.version,
+                    actor_digest=_cancellation_actor_digest(audit_context),
+                    requested_at=closed_at,
+                )
+            except RuntimeError as exc:
+                raise ApprovalBoundaryServiceError(
+                    getattr(exc, "code", "cancellation_conflict"),
+                    "pre-release cancellation fence could not be persisted",
+                    run_id=run_id,
+                ) from exc
             run_transition = transition_run(
                 snapshot.run,
                 RunLifecycleCommand.CANCEL,
@@ -359,6 +412,85 @@ class ApprovalBoundaryService:
                 run_id=snapshot.run.id,
             )
         occurred_at = self._dependencies.utc_now()
+        control = await unit_of_work.execution_control.get(snapshot.run.id)
+        if (
+            control is None
+            or control.policy_hash != authorization_set.plan_hash
+            or control.started_at != authorization_set.released_at
+        ):
+            raise ApprovalBoundaryServiceError(
+                "execution_control_invalid",
+                "post-release cancellation lacks its exact started execution control",
+                run_id=snapshot.run.id,
+            )
+        try:
+            await unit_of_work.execution_control.request_cancel(
+                run_id=snapshot.run.id,
+                expected_control_version=control.version,
+                actor_digest=_cancellation_actor_digest(audit_context),
+                requested_at=occurred_at,
+            )
+        except RuntimeError as exc:
+            raise ApprovalBoundaryServiceError(
+                getattr(exc, "code", "cancellation_conflict"),
+                "post-release cancellation fence could not be persisted",
+                run_id=snapshot.run.id,
+            ) from exc
+        cancellable_actions = tuple(
+            action
+            for action in snapshot.actions
+            if action.state
+            in {
+                ExternalActionState.DISPATCH_RESERVED,
+                ExternalActionState.DISPATCHING,
+            }
+            and action.call_started_at is None
+        )
+        cancelled_actions: list[tuple[ExternalAction, ExternalAction]] = []
+        for action in cancellable_actions:
+            cancelled = await unit_of_work.external_actions.cancel_unstarted_after_release(
+                action_id=action.id,
+                run_id=snapshot.run.id,
+                plan_hash=authorization_set.plan_hash,
+                expected_version=action.version,
+                occurred_at=occurred_at,
+            )
+            if cancelled is None:
+                raise ApprovalBoundaryServiceError(
+                    "action_cancellation_conflict",
+                    "released action changed before its pre-call cancellation committed",
+                    run_id=snapshot.run.id,
+                )
+            cancelled_actions.append((action, cancelled))
+
+        cancellable_steps = tuple(
+            step
+            for step in snapshot.plan_steps
+            if step.state in {StepState.PENDING, StepState.READY}
+        )
+        step_results = tuple(
+            transition_step(
+                step,
+                StepLifecycleCommand.CANCEL,
+                StepTerminalContext("run_cancelled"),
+                occurred_at,
+            )
+            for step in cancellable_steps
+        )
+        for result in step_results:
+            applied_step = await unit_of_work.run_steps.apply_transition(
+                expected_run_version=snapshot.run.version,
+                expected_run_state=RunState.EXECUTING,
+                expected_version=result.transition.expected_version,
+                expected_state=result.transition.previous_state or StepState.PENDING,
+                result=result,
+            )
+            if not applied_step:
+                raise ApprovalBoundaryServiceError(
+                    "step_cancellation_conflict",
+                    "queued step changed before cancellation committed",
+                    run_id=snapshot.run.id,
+                )
         completed_effect_count = sum(
             action.state is ExternalActionState.SUCCEEDED for action in snapshot.actions
         )
@@ -386,10 +518,18 @@ class ApprovalBoundaryService:
                 "released Run changed before cancellation committed",
                 run_id=snapshot.run.id,
             )
-        await unit_of_work.audits.append(
-            AuditEventFactory(audit_context).run_transition(
-                transition.run,
-                transition.transition,
+        factory = AuditEventFactory(audit_context)
+        await unit_of_work.audits.append_many(
+            (
+                *(
+                    factory.action_runtime_cancelled(previous, cancelled)
+                    for previous, cancelled in cancelled_actions
+                ),
+                *(
+                    factory.step_transition(result.step, result.transition)
+                    for result in step_results
+                ),
+                factory.run_transition(transition.run, transition.transition),
             )
         )
         await unit_of_work.commit()
@@ -501,6 +641,25 @@ class ApprovalBoundaryService:
                 f"authorization set changed before the complete barrier committed ({exc.code})",
                 run_id=snapshot.run.id,
             ) from None
+        control = await unit_of_work.execution_control.get(snapshot.run.id)
+        if control is None or control.policy_hash != authorization_set.plan_hash:
+            raise ApprovalBoundaryServiceError(
+                "execution_control_invalid",
+                "approval release lacks its exact sealed execution control",
+                run_id=snapshot.run.id,
+            )
+        try:
+            await unit_of_work.execution_control.start_execution(
+                run_id=snapshot.run.id,
+                expected_control_version=control.version,
+                started_at=released_at,
+            )
+        except RuntimeError as exc:
+            raise ApprovalBoundaryServiceError(
+                getattr(exc, "code", "execution_start_conflict"),
+                "Run execution deadline could not start atomically with approval release",
+                run_id=snapshot.run.id,
+            ) from exc
         await self._append_release_audits(
             unit_of_work,
             snapshot,
@@ -630,6 +789,18 @@ class ApprovalBoundaryService:
                 "authorization_release_replay_mismatch",
                 "released authorization set no longer binds its parent Run",
             )
+        control = await unit_of_work.execution_control.get(snapshot.run.id)
+        if (
+            control is None
+            or control.policy_hash != authorization_set.plan_hash
+            or control.started_at != authorization_set.released_at
+            or control.deadline_at is None
+        ):
+            self._replay_error(
+                snapshot.run.id,
+                "authorization_release_control_mismatch",
+                "released authorization set lacks its exact execution deadline witness",
+            )
         run_history = await unit_of_work.runs.list_transitions(snapshot.run.id)
         release_transitions = tuple(
             transition
@@ -683,6 +854,12 @@ class ApprovalBoundaryService:
                     "cancelled released Run lacks its one terminal transition",
                 )
             assert cancellation is not None
+            if control.cancel_requested_at != cancellation.occurred_at:
+                self._replay_error(
+                    snapshot.run.id,
+                    "post_release_cancel_control_missing",
+                    "cancelled released Run lacks its exact durable cancellation fence",
+                )
             await self._require_run_transition_audit(
                 unit_of_work,
                 cancellation,
@@ -692,6 +869,100 @@ class ApprovalBoundaryService:
         request_by_action = {stored.request.action_id: stored for stored in snapshot.requests}
         action_by_id = {action.id: action for action in snapshot.actions}
         step_by_id = {step.id: step for step in snapshot.member_steps}
+        if snapshot.run.state is RunState.CANCELLED:
+            cancelled_at = control.cancel_requested_at
+            assert cancelled_at is not None
+            for plan_step in snapshot.plan_steps:
+                if plan_step.state in {StepState.PENDING, StepState.READY}:
+                    self._replay_error(
+                        snapshot.run.id,
+                        "post_release_cancel_step_incomplete",
+                        "cancelled released Run retains queued step work",
+                    )
+                if plan_step.state is StepState.CANCELLED:
+                    step_cancellations = tuple(
+                        transition
+                        for transition in await unit_of_work.run_steps.list_transitions(
+                            plan_step.id
+                        )
+                        if transition.command is StepLifecycleCommand.CANCEL
+                        and transition.occurred_at == cancelled_at
+                    )
+                    if len(step_cancellations) != 1:
+                        self._replay_error(
+                            snapshot.run.id,
+                            "post_release_cancel_step_audit_missing",
+                            "cancelled queued step lacks its exact transition witness",
+                        )
+                    await self._require_step_transition_audit(
+                        unit_of_work,
+                        step_cancellations[0],
+                        step=plan_step,
+                    )
+            for action in snapshot.actions:
+                if action.state is ExternalActionState.DISPATCH_RESERVED or (
+                    action.state is ExternalActionState.DISPATCHING
+                    and action.call_started_at is None
+                ):
+                    self._replay_error(
+                        snapshot.run.id,
+                        "post_release_cancel_action_incomplete",
+                        "cancelled released Run retains unstarted connector work",
+                    )
+                if action.state is ExternalActionState.CANCELLED:
+                    event = await unit_of_work.audits.get_mutation_event(
+                        "external_action",
+                        action.id,
+                        action.version,
+                    )
+                    previous_state = None if event is None else event.previous_state
+                    if previous_state not in {
+                        ExternalActionState.DISPATCH_RESERVED.value,
+                        ExternalActionState.DISPATCHING.value,
+                    }:
+                        self._replay_error(
+                            snapshot.run.id,
+                            "post_release_cancel_action_audit_missing",
+                            "cancelled released action lacks its exact pre-call witness",
+                        )
+                    reservation = action.reservation
+                    if reservation is None or action.updated_at != cancelled_at:
+                        self._replay_error(
+                            snapshot.run.id,
+                            "post_release_cancel_action_mismatch",
+                            "cancelled released action lost its reservation or cancellation time",
+                        )
+                    self._require_bound_event(
+                        event,
+                        event_type="action.cancelled",
+                        run_id=snapshot.run.id,
+                        aggregate_id=action.id,
+                        mutation_version=action.version,
+                        occurred_at=cancelled_at,
+                        previous_state=previous_state,
+                        new_state=ExternalActionState.CANCELLED.value,
+                        reason_code="operator_cancelled",
+                        action_id=action.id,
+                        step_id=action.step_id,
+                        approval_request_id=reservation.approval_request_id,
+                        approval_decision_id=reservation.approval_decision_id,
+                        metadata_bindings={
+                            "approval_set_id": authorization_set.id,
+                            "approval_status": "released",
+                            "closure_reason": "operator_cancelled",
+                        },
+                    )
+                    expected_attempt = (
+                        action.delivery_attempt_count
+                        if previous_state == ExternalActionState.DISPATCHING.value
+                        else None
+                    )
+                    if event is None or event.action_attempt_number != expected_attempt:
+                        self._replay_error(
+                            snapshot.run.id,
+                            "post_release_cancel_action_attempt_mismatch",
+                            "cancelled released action audit lost its dispatch attempt identity",
+                        )
         for member in authorization_set.members:
             stored = request_by_action[member.action_id]
             action = action_by_id[member.action_id]
@@ -799,6 +1070,7 @@ class ApprovalBoundaryService:
                 reservation=None,
                 lease=None,
                 call_started_at=None,
+                call_deadline_at=None,
                 result=None,
                 terminal_reason_code=None,
             )
@@ -842,6 +1114,19 @@ class ApprovalBoundaryService:
             if authorization_set.status is AuthorizationSetStatus.REJECTED
             else RunLifecycleCommand.CANCEL
         )
+        if authorization_set.status is AuthorizationSetStatus.CANCELLED:
+            control = await unit_of_work.execution_control.get(snapshot.run.id)
+            if (
+                control is None
+                or control.policy_hash != authorization_set.plan_hash
+                or control.started_at is not None
+                or control.cancel_requested_at != authorization_set.updated_at
+            ):
+                self._replay_error(
+                    snapshot.run.id,
+                    "authorization_close_control_mismatch",
+                    "cancelled approval set lacks its exact durable cancellation fence",
+                )
         if (
             snapshot.run.state is not expected_run_state
             or snapshot.run.updated_at != authorization_set.updated_at

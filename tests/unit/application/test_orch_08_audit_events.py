@@ -1,4 +1,4 @@
-"""ORCH-08: approval-boundary and call-start mutations have exact typed audits."""
+"""ORCH-06/ORCH-08: release, call-start, and runtime cancellation audits."""
 
 from __future__ import annotations
 
@@ -368,6 +368,7 @@ def test_orch_08_dispatch_claim_and_call_start_audits_reject_delivery_drift() ->
         version=claimed.version + 1,
         updated_at=started_at,
         call_started_at=started_at,
+        call_deadline_at=started_at + timedelta(seconds=10),
     )
     factory = _factory()
 
@@ -383,6 +384,56 @@ def test_orch_08_dispatch_claim_and_call_start_audits_reject_delivery_drift() ->
     drifted = replace(marked, delivery_attempt_limit=3)
     with pytest.raises(ValueError, match="exact open dispatch"):
         factory.action_call_started(claimed, drifted)
+
+
+@pytest.mark.parametrize("claimed_before_call", (False, True))
+def test_orch_06_runtime_cancel_audit_binds_released_pre_call_state(
+    claimed_before_call: bool,
+) -> None:
+    _, reserved, _, _ = _released_member()
+    previous = reserved
+    if claimed_before_call:
+        claimed_at = NOW + timedelta(seconds=3)
+        previous = replace(
+            reserved,
+            state=ExternalActionState.DISPATCHING,
+            version=reserved.version + 1,
+            updated_at=claimed_at,
+            delivery_attempt_count=1,
+            lease=DispatchLease(
+                owner="worker.orch-06.cancel",
+                attempt_number=1,
+                claimed_at=claimed_at,
+                expires_at=claimed_at + timedelta(seconds=30),
+            ),
+        )
+    cancelled_at = NOW + timedelta(seconds=4)
+    cancelled = replace(
+        previous,
+        state=ExternalActionState.CANCELLED,
+        version=previous.version + 1,
+        updated_at=cancelled_at,
+        lease=None,
+        terminal_reason_code="operator_cancelled",
+    )
+
+    event = _factory().action_runtime_cancelled(previous, cancelled)
+
+    reservation = reserved.reservation
+    assert reservation is not None
+    assert event.previous_state == previous.state.value
+    assert event.new_state == ExternalActionState.CANCELLED.value
+    assert event.action_attempt_number == (1 if claimed_before_call else None)
+    assert event.approval_request_id == reservation.approval_request_id
+    assert event.approval_decision_id == reservation.approval_decision_id
+    assert event.safe_metadata.values["approval_status"] == "released"
+    assert event.safe_metadata.values["closure_reason"] == "operator_cancelled"
+
+    with pytest.raises(ValueError, match="pre-call released work"):
+        _factory().action_runtime_cancelled(
+            previous,
+            replace(cancelled, reservation=None),
+        )
 
 
 def test_orch_08_write_release_and_first_call_step_commands_are_auditable() -> None:

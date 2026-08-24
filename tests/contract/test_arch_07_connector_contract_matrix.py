@@ -34,7 +34,13 @@ from marketing_agents.application.ports.connector_families import (
 from marketing_agents.application.ports.connectors import (
     AuthorizedConnectorCommand,
     ConnectorCallContext,
+    ConnectorObservation,
     ConnectorPortError,
+)
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterContract,
+    ReadAdapterPermanentError,
+    ReadAdapterRequest,
 )
 from marketing_agents.config import Settings
 from marketing_agents.domain.action_hash import (
@@ -43,8 +49,18 @@ from marketing_agents.domain.action_hash import (
     canonical_action_hash,
     semantic_action_hash,
 )
-from marketing_agents.infrastructure.adapters.connectors import mock, registry
-from marketing_agents.infrastructure.adapters.connectors.mock import build_connector_bundle
+from marketing_agents.domain.data_classification import DataClassification
+from marketing_agents.domain.execution_control import OperationExecutionPolicy
+from marketing_agents.domain.runtime_policy import AttemptKind, RateLimitScope, RetryBackoff
+from marketing_agents.infrastructure.adapters.connectors import (
+    RegistryConnectorReadAdapter,
+    mock,
+    registry,
+)
+from marketing_agents.infrastructure.adapters.connectors.mock import (
+    MockConnectorBundle,
+    build_connector_bundle,
+)
 from marketing_agents.infrastructure.adapters.connectors.registry import (
     DISABLED_V1_CAPABILITIES,
     EXTERNAL_CONNECTOR_FAMILIES,
@@ -57,6 +73,7 @@ from marketing_agents.infrastructure.catalog import compile_catalog
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = compile_catalog(ROOT / "catalog" / "v1")
 IDEMPOTENCY_KEY = "arch-07-idempotency-key-0001"
+POLICY_HASH = "a" * 64
 
 
 def _context(family: str, *, run_id: str = "run:arch-07") -> ConnectorCallContext:
@@ -130,6 +147,62 @@ def _authorized_command(
     return AuthorizedConnectorCommand(authorization=authorization, command=command)
 
 
+def _read_operation(
+    operation_registry: ConnectorOperationRegistry,
+    *,
+    revision: int = 7,
+) -> OperationExecutionPolicy:
+    metadata = operation_registry.resolve("cap.social.read-posts").metadata
+    return OperationExecutionPolicy(
+        run_id="run:arch-07-read-adapter",
+        step_id="step:arch-07-read-adapter",
+        operation_key="operation:arch-07-read-posts",
+        kind=AttemptKind.TOOL,
+        capability_id=metadata.capability_id,
+        selected_instance_id="instance:arch-07-social",
+        configuration_revision=revision,
+        connector_family=metadata.connector_family,
+        binding_id="mock.social.default",
+        binding_configuration_revision=revision,
+        request_schema_id=metadata.request_schema_id,
+        result_schema_id=metadata.result_schema_id,
+        request_redaction_fields=metadata.request_redaction_fields,
+        result_redaction_fields=metadata.result_redaction_fields,
+        data_classification=metadata.data_classification,
+        connector_timeout_seconds=metadata.default_timeout_seconds,
+        policy_hash=POLICY_HASH,
+        max_attempts=2,
+        retry_backoff=RetryBackoff.BOUNDED_EXPONENTIAL,
+        step_timeout_seconds=20,
+        max_input_bytes=65_536,
+        max_input_field_bytes=16_384,
+        max_output_bytes=262_144,
+        max_model_output_tokens=4_096,
+        rate_limit_scope=RateLimitScope.TEMPLATE,
+        rate_limit_key="rate-limit:arch-07-read-posts",
+        rate_window_max_calls=10,
+        rate_window_seconds=60,
+    )
+
+
+def _read_request(operation: OperationExecutionPolicy) -> ReadAdapterRequest:
+    return ReadAdapterRequest(
+        attempt_id="attempt:arch-07-read-adapter:1",
+        run_id=operation.run_id,
+        step_id=operation.step_id,
+        operation_key=operation.operation_key,
+        policy_hash=operation.policy_hash,
+        attempt_number=1,
+        call_deadline_at=datetime.now(UTC) + timedelta(seconds=20),
+        correlation_id="correlation:arch-07-read-adapter",
+        requested_timeout_seconds=20,
+        provenance_ids=("work-input:arch-07-read-adapter",),
+        input_classification=DataClassification.INTERNAL,
+        contract=ReadAdapterContract.from_operation(operation),
+        input_payload={"resource_ids": ["post:1"]},
+    )
+
+
 def test_arch_07_registry_matches_catalog_contract_for_all_eight_families() -> None:
     operation_registry = build_connector_registry(CATALOG)
     catalog_external = {
@@ -175,6 +248,16 @@ def test_arch_07_registry_rejects_duplicate_and_drifted_operations() -> None:
     drifted_registry = ConnectorOperationRegistry((drifted, *registry.OPERATION_REGISTRATIONS[1:]))
     with pytest.raises(ConnectorBundleConfigurationError, match="metadata drift"):
         drifted_registry.validate_catalog(CATALOG)
+
+    schema_drifted = replace(
+        original,
+        metadata=replace(original.metadata, result_schema_id="schema:connector:drifted:result:v1"),
+    )
+    schema_drifted_registry = ConnectorOperationRegistry(
+        (schema_drifted, *registry.OPERATION_REGISTRATIONS[1:])
+    )
+    with pytest.raises(ConnectorBundleConfigurationError, match="schema identity drift"):
+        schema_drifted_registry.validate_catalog(CATALOG)
 
 
 def test_arch_07_each_family_exposes_a_typed_deterministic_mock() -> None:
@@ -243,6 +326,122 @@ def test_arch_07_each_family_exposes_a_typed_deterministic_mock() -> None:
     receipt = asyncio.run(bundle.newsletter.subscribe(write))  # type: ignore[arg-type]
     assert receipt.status == "mock_succeeded"
     assert receipt.safe_metadata["external_side_effect"] is False
+
+
+def test_arch_07_registry_read_adapter_declares_and_executes_the_exact_contract() -> None:
+    operation_registry = build_connector_registry(CATALOG)
+    bundle = MockConnectorBundle.create(operation_registry)
+    operation = _read_operation(operation_registry)
+    adapter = RegistryConnectorReadAdapter(
+        operation_registry,
+        bundle,
+        binding_configuration_revisions={"mock.social.default": 7},
+    )
+
+    assert adapter.contract_for(operation) == ReadAdapterContract.from_operation(operation)
+    request = _read_request(operation)
+    result = asyncio.run(adapter.execute(request))
+
+    assert result.attempt_id == request.attempt_id
+    assert result.contract == request.contract
+    assert result.capability_id == operation.capability_id
+    assert result.binding_id == operation.binding_id
+    assert result.provenance_ids == request.provenance_ids
+    assert result.classification is DataClassification.INTERNAL
+    assert result.trust_class == "untrusted_tool_result"
+    assert result.output_payload["records"][0]["resource_id"] == "post:1"
+
+
+def test_arch_07_registry_read_adapter_surfaces_current_contract_drift() -> None:
+    operation_registry = build_connector_registry(CATALOG)
+    bundle = MockConnectorBundle.create(operation_registry)
+    operation = _read_operation(operation_registry)
+    drifted = RegistryConnectorReadAdapter(
+        operation_registry,
+        bundle,
+        binding_configuration_revisions={"mock.social.default": 8},
+    )
+
+    declared = drifted.contract_for(operation)
+    assert declared.configuration_revision == 8
+    assert declared.binding_configuration_revision == 8
+    assert declared != ReadAdapterContract.from_operation(operation)
+    with pytest.raises(ReadAdapterPermanentError) as rejected:
+        asyncio.run(drifted.execute(_read_request(operation)))
+    assert rejected.value.code == "adapter_contract_drift"
+
+    unavailable = RegistryConnectorReadAdapter(
+        operation_registry,
+        bundle,
+        binding_configuration_revisions={},
+    )
+    with pytest.raises(ReadAdapterPermanentError) as missing:
+        unavailable.contract_for(operation)
+    assert missing.value.code == "adapter_contract_unavailable"
+
+
+def test_arch_07_registry_read_adapter_strictly_rebuilds_registered_requests() -> None:
+    operation_registry = build_connector_registry(CATALOG)
+    bundle = MockConnectorBundle.create(operation_registry)
+    operation = _read_operation(operation_registry)
+    adapter = RegistryConnectorReadAdapter(
+        operation_registry,
+        bundle,
+        binding_configuration_revisions={"mock.social.default": 7},
+    )
+    malformed = replace(
+        _read_request(operation),
+        input_payload={"resource_ids": "post:1", "undeclared": True},
+    )
+
+    with pytest.raises(ReadAdapterPermanentError) as rejected:
+        asyncio.run(adapter.execute(malformed))
+    assert rejected.value.code == "connector_request_rejected"
+
+
+@pytest.mark.parametrize("invalid_result", ("identity", "payload"))
+def test_arch_07_registry_read_adapter_rejects_malformed_observations(
+    invalid_result: str,
+) -> None:
+    operation_registry = build_connector_registry(CATALOG)
+    original = MockConnectorBundle.create(operation_registry)
+    bundle = replace(
+        original,
+        social=_InvalidObservationSocial(original.social, invalid_result),  # type: ignore[arg-type]
+    )
+    operation = _read_operation(operation_registry)
+    adapter = RegistryConnectorReadAdapter(
+        operation_registry,
+        bundle,
+        binding_configuration_revisions={"mock.social.default": 7},
+    )
+
+    with pytest.raises(ReadAdapterPermanentError) as rejected:
+        asyncio.run(adapter.execute(_read_request(operation)))
+    assert rejected.value.code in {"connector_result_mismatch", "connector_result_rejected"}
+
+
+class _InvalidObservationSocial:
+    def __init__(self, delegate: object, invalid_result: str) -> None:
+        self._delegate = delegate
+        self._invalid_result = invalid_result
+
+    async def read_posts(self, request: ReadPostsRequest) -> ConnectorObservation[PostsPayload]:
+        observation = await self._delegate.read_posts(request)  # type: ignore[attr-defined]
+        if self._invalid_result == "identity":
+            return observation.model_copy(update={"binding_id": "mock.social.drifted"})
+        return observation.model_copy(
+            update={
+                "payload": {
+                    "records": [
+                        {
+                            "resource_id": "post:1",
+                            "attributes": {"unexpected": object()},
+                        }
+                    ]
+                }
+            }
+        )
 
 
 async def _gather(awaitables: tuple[object, ...]) -> tuple[object, ...]:

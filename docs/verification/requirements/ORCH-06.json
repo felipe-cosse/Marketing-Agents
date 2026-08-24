@@ -1,0 +1,310 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-06",
+  "matrix_statement_sha256": "47e340ec0b405dfcdaa80ec169b5c086da03a4eaf9dc730ab5893728f04d012d",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "catalog/schema/template.schema.json",
+      "catalog/v1/release.lock.json",
+      "catalog/v1/templates/*.yaml",
+      "apps/api/src/marketing_agents/application/orchestration/**",
+      "apps/api/src/marketing_agents/application/policies/action_recovery.py",
+      "apps/api/src/marketing_agents/application/ports/**",
+      "apps/api/src/marketing_agents/application/services/**",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/external_action.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/execution_control.py",
+      "apps/api/src/marketing_agents/domain/plan_hash.py",
+      "apps/api/src/marketing_agents/domain/runtime_policy.py",
+      "apps/api/src/marketing_agents/domain/step_lifecycle.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/**",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/db/**",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "apps/api/src/marketing_agents/security/execution_control_digest.py",
+      "tests/catalog/test_arch_04_catalog_compiler.py",
+      "tests/catalog/test_dom_03_template_io_schemas.py",
+      "tests/contract/test_arch_07_connector_contract_matrix.py",
+      "tests/integration/db/test_orch_06_*.py",
+      "tests/integration/db/test_orch_07_idempotent_receipts.py",
+      "tests/integration/db/test_orch_08_approval_boundary.py",
+      "tests/integration/db/test_orch_08_authorization_storage.py",
+      "tests/integration/db/test_orch_09_audited_step_state.py",
+      "tests/integration/db/test_run_01_lifecycle_persistence.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/integration/db/test_run_08_approval_persistence.py",
+      "tests/support/**",
+      "tests/unit/application/test_orch_06_*.py",
+      "tests/unit/application/test_orch_07_action_recovery.py",
+      "tests/unit/application/test_orch_08_audit_events.py",
+      "tests/unit/application/test_run_02_effect_aware_planning.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/domain/test_orch_06_*.py",
+      "tests/unit/domain/test_orch_09_audit_contracts.py",
+      "docs/verification/requirements/ORCH-06.json",
+      "docs/verification/requirements/ORCH-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/runtime_policy.py",
+          "apps/api/src/marketing_agents/application/orchestration/effect_planner.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/execution_control.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/execution_control.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/run_cancellation.py",
+          "apps/api/src/marketing_agents/application/services/terminal_execution_cleanup.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/domain/test_orch_06_runtime_policy.py",
+          "tests/unit/application/test_orch_06_planning_budgets.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_orch_06_execution_control.py",
+          "tests/integration/db/test_orch_06_controlled_read_executor.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_run_05_external_action_idempotency.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "sealed-planning-policy-and-logical-budgets",
+      "type": "contract",
+      "statement": "Trusted catalog policies are frozen into Run and Step snapshots, and every effective policy and adapter-contract field is plan-hash-bound. Template and Run logical budgets fail before execution authority, while persistence independently rejects inflated or incomplete operation sets.",
+      "test_refs": [
+        "tests/unit/domain/test_orch_06_runtime_policy.py::test_orch_06_policy_projections_are_frozen_canonical_and_complete",
+        "tests/unit/domain/test_orch_06_runtime_policy.py::test_orch_06_every_policy_field_is_semantically_hash_bound",
+        "tests/unit/application/test_orch_06_planning_budgets.py::test_orch_06_planner_snapshots_exact_policy_and_derives_effective_run_timeout",
+        "tests/unit/application/test_orch_06_planning_budgets.py::test_orch_06_template_and_run_limit_plus_one_fail_before_execution_authority",
+        "tests/unit/application/test_orch_06_planning_budgets.py::test_orch_06_every_template_policy_change_changes_the_structural_plan_hash",
+        "tests/unit/application/test_orch_06_planning_budgets.py::test_orch_06_forged_policy_with_original_hash_is_rejected",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_initialize_rejects_policy_inflation_or_incomplete_operation_set"
+      ]
+    },
+    {
+      "id": "atomic-control-budget-rate-and-integrity-fences",
+      "type": "negative_control",
+      "statement": "Plan persistence atomically installs HMAC-protected controls and operations. Attempt reservations atomically consume the correct logical-call budget and fixed-window capacity, with exact boundaries, one-winner races, rollback, sanitized contention, and fail-closed tamper detection.",
+      "test_refs": [
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_plan_creation_installs_exact_control_and_replay_is_a_noop",
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_plan_creation_fault_rolls_back_plan_and_control",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_schema_compiles_with_portable_attempt_and_capacity_fences",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_reservation_commits_before_call_and_completion_is_separate",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_fixed_window_denial_is_atomic_and_exact_end_opens_new_window",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_reservation_rollback_and_concurrent_unique_winner",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_busy_cancel_or_completion_is_sanitized_and_rolls_back",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_hmac_tamper_blocks_every_authoritative_record"
+      ]
+    },
+    {
+      "id": "bounded-read-timeout-retry-and-recovery",
+      "type": "contract",
+      "statement": "Controlled READ commits its attempt before calling outside the transaction, applies absolute UTC and monotonic timeout fences, retries only transient outcomes with persisted bounded backoff, and recovers crash-open attempts without double-counting or creating post-terminal retry authority.",
+      "test_refs": [
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_first_start_commits_before_adapter_and_success_completes_later",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_transient_retry_leaves_step_executing_then_succeeds_without_restarting",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_effective_attempt_timeout_cancels_adapter_and_fails_exhausted_step",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_adapter_cannot_swallow_timeout_and_return_success",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_restart_expires_open_attempt_then_retries_or_fails_terminally",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_expired_attempt_recovery_has_one_cas_winner_and_exact_replay",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_cancellation_wins_completion_control_cas_and_forces_cancelled_replay",
+        "tests/integration/db/test_orch_06_execution_control.py::test_orch_06_completion_wins_control_cas_then_fresh_cancellation_blocks_retry",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_in_flight_read_closes_without_retry_after_parent_terminalizes",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_expired_open_read_under_failed_parent_recovers_terminally"
+      ]
+    },
+    {
+      "id": "payload-and-adapter-contract-boundaries",
+      "type": "negative_control",
+      "statement": "Controlled READ rejects WRITE or no-call steps, contract drift, oversized total or nested UTF-8 input fields before reservation, and oversized output or invalid model-token usage after return. Terminal denial completion, output suppression, audits, Step cleanup, and Run cleanup commit atomically.",
+      "test_refs": [
+        "tests/unit/application/test_orch_06_controlled_read_executor_boundaries.py::test_orch_06_write_and_no_call_steps_are_rejected_before_adapter_or_commit",
+        "tests/unit/application/test_orch_06_controlled_read_executor_boundaries.py::test_orch_06_adapter_contract_deep_freezes_canonical_payloads",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_adapter_contract_drift_precedes_attempt_and_budget_mutation",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_input_byte_limit_is_inclusive_and_precedes_every_runtime_mutation",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_recursive_utf8_input_field_limit_is_inclusive",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_output_byte_limit_is_inclusive_and_denial_completes_atomically",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_output_denial_completion_rollback_retains_open_attempt_only",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_model_output_token_usage_is_required_and_bounded"
+      ]
+    },
+    {
+      "id": "write-delivery-call-permit-and-bounded-projection",
+      "type": "negative_control",
+      "statement": "The WRITE dispatcher derives one exact released action, Step, and control permit; the first physical call consumes logical tool and rate capacity, idempotent recovery consumes only rate, durable deadlines bound recovery, input denials make zero calls, and receipt-first success retains only a bounded result projection.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_permit_requires_exact_step_action_and_control_binding",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_first_write_call_consumes_one_logical_tool_and_rate_slot",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_provider_recovery_consumes_rate_but_not_logical_tool_budget",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_stale_recovery_waits_for_durable_call_deadline",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_recovery_rejects_action_attempt_call_deadline_drift",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_control_denials_make_zero_gateway_calls",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_dispatch_rejects_sibling_runtime_policy_tamper_pre_claim",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_timeout_is_minimum_of_all_durable_bounds",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_gateway_cannot_swallow_timeout_and_return_success",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_call_start_commit_latency_cannot_extend_absolute_deadline",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_cancellation_and_call_start_control_cas_have_one_winner",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_malformed_gateway_output_cannot_corrupt_the_action_result",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_oversized_durable_receipt_keeps_success_with_bounded_projection"
+      ]
+    },
+    {
+      "id": "cancellation-and-terminal-plan-cleanup",
+      "type": "negative_control",
+      "statement": "Cancellation installs the shared control fence before queued mutations and retries only stale-control races in bounded fresh units of work. It closes queued READ and pre-call WRITE work while preserving call-started effects until bounded return or receipt-first recovery, without reversing success.",
+      "test_refs": [
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_direct_cancellation_fences_first_and_preserves_in_flight_step",
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_read_cancellation_reloads_whole_uow_after_stale_control",
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_approval_cancellation_installs_pre_or_post_release_fence",
+        "tests/integration/db/test_orch_06_runtime_composition.py::test_orch_06_released_write_cancellation_reloads_after_stale_control",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_post_return_cancellation_preserves_success_and_stops_non_success",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_terminal_write_denial_closes_mixed_siblings_and_inflight_at_deadline",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_read_output_denial_code_closes_inflight_write_without_replay",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_terminal_sibling_cleanup_and_audits_rollback_atomically",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_post_release_cancellation_closes_every_unstarted_write",
+        "tests/unit/application/test_orch_08_audit_events.py::test_orch_06_runtime_cancel_audit_binds_released_pre_call_state"
+      ]
+    },
+    {
+      "id": "redacted-denial-audit-and-portable-storage",
+      "type": "contract",
+      "statement": "runtime.control_denied is a deterministic redacted witness containing bounded codes, identities, operation key, and optional retry-after only. Exact replay is idempotent, malformed linkage fails closed, terminal mutation audits share the unit of work, and mapped constraints compile for SQLite and PostgreSQL.",
+      "test_refs": [
+        "tests/unit/application/test_orch_06_runtime_control_audit.py::test_orch_06_runtime_denial_is_exact_redacted_nonmutation",
+        "tests/unit/application/test_orch_06_runtime_control_audit.py::test_orch_06_runtime_denial_identity_is_deterministic_and_context_bound",
+        "tests/unit/application/test_orch_06_runtime_control_audit.py::test_orch_06_runtime_denial_rejects_untrusted_codes_and_retry_bounds",
+        "tests/unit/application/test_orch_06_runtime_control_audit.py::test_orch_06_runtime_denial_factory_has_no_raw_error_or_provider_fields",
+        "tests/integration/db/test_orch_06_runtime_control_audit_persistence.py::test_orch_06_runtime_denial_constraint_compiles_for_sqlite_and_postgresql",
+        "tests/integration/db/test_orch_06_runtime_control_audit_persistence.py::test_orch_06_runtime_denial_persists_redacted_and_replay_rolls_back",
+        "tests/integration/db/test_orch_06_runtime_control_audit_persistence.py::test_orch_06_runtime_denial_action_link_must_reference_exact_run_step",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_orch_06_denied_read_reservation_audits_once_without_consuming_control"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-06-bounded-runtime-controls",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/catalog/test_arch_04_catalog_compiler.py",
+        "tests/catalog/test_dom_04_template_runtime_policy.py",
+        "tests/security/test_safe_06_runtime_policy.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/unit/domain/test_orch_06_runtime_policy.py",
+        "tests/unit/application/test_orch_06_planning_budgets.py",
+        "tests/unit/application/test_orch_06_controlled_read_executor_boundaries.py",
+        "tests/unit/application/test_orch_06_runtime_control_audit.py",
+        "tests/integration/db/test_orch_06_execution_control.py",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py",
+        "tests/integration/db/test_orch_06_runtime_composition.py",
+        "tests/integration/db/test_orch_06_runtime_control_audit_persistence.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/unit/application/test_orch_08_audit_events.py",
+        "tests/integration/db/test_orch_08_authorization_storage.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py",
+        "tests/integration/db/test_run_08_approval_persistence.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200,
+      "network_requirement": "deny",
+      "covers": [
+        "sealed-planning-policy-and-logical-budgets",
+        "atomic-control-budget-rate-and-integrity-fences",
+        "bounded-read-timeout-retry-and-recovery",
+        "payload-and-adapter-contract-boundaries",
+        "write-delivery-call-permit-and-bounded-projection",
+        "cancellation-and-terminal-plan-cleanup",
+        "redacted-denial-audit-and-portable-storage"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "catalog/schema/template.schema.json",
+      "catalog/v1/templates/*.yaml",
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/application/ports/read_adapter.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/execution_activation.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/application/services/run_cancellation.py",
+      "apps/api/src/marketing_agents/application/services/terminal_execution_cleanup.py",
+      "apps/api/src/marketing_agents/domain/entities/external_action.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/execution_control.py",
+      "apps/api/src/marketing_agents/domain/plan_hash.py",
+      "apps/api/src/marketing_agents/domain/runtime_policy.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/execution_control.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/execution_control.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "apps/api/src/marketing_agents/security/execution_control_digest.py"
+    ],
+    "gate_id": "orch-06-bounded-runtime-controls"
+  },
+  "limitations": [
+    "Database transactions cannot make external provider effects atomic and do not provide a general compensation workflow. ORCH-06 fences internal authority and recovery only.",
+    "Cancellation after call-start is best effort and cannot recall an already-sent request. Authoritative successful receipts remain successful and visible after cancellation or a sibling terminal denial.",
+    "Generic READ retries and RUN-05 WRITE delivery or reconciliation attempts deliberately use separate durable paths. ORCH-06 does not claim provider exactly-once effects.",
+    "Tests use deterministic adapters, injected clocks, and file-backed SQLite services rather than a production worker loop, live provider, distributed rate-limit load, or multi-region environment.",
+    "Rate limiting is durable fixed-window and template-scoped only. No token bucket, cross-region fairness, or live policy-revocation claim is made.",
+    "Schema IDs and payload budgets are sealed, but full runtime JSON-Schema output validation, artifact persistence, and a complete attempt/output operator timeline remain SAFE-06, RUN-06, and AC-14 composition work.",
+    "The WRITE dispatcher bounds the action result projection. Connector-owned durable receipt storage may retain a larger JSON-safe metadata record before dispatcher reconciliation; receipt-store quotas and retention remain adapter and RUN-06 hardening scope.",
+    "Audit context pseudonymizes provenance but does not authenticate cancellation callers. API and worker composition must derive cancellation identity from server-owned authentication.",
+    "No Alembic migration is added. PostgreSQL DDL compilation is covered, but PostgreSQL runtime locking, contention, and parity are not executed here.",
+    "A concrete registry-backed connector READ adapter is covered. A production model adapter and live token-provider integration remain adapter-composition work."
+  ]
+}

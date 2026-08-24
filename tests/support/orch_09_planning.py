@@ -17,6 +17,30 @@ from marketing_agents.application.orchestration import (
 )
 from marketing_agents.domain.enums import TriggerKind
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
+from marketing_agents.domain.runtime_policy import (
+    BudgetPolicySnapshot,
+    RateLimitPolicySnapshot,
+    RateLimitScope,
+    RetryBackoff,
+    RetryPolicySnapshot,
+    RunRuntimePolicy,
+    TimeoutPolicySnapshot,
+    runtime_rate_limit_key,
+)
+
+_RETRY_POLICY = RetryPolicySnapshot(1, RetryBackoff.NONE)
+_TIMEOUT_POLICY = TimeoutPolicySnapshot(60, 120)
+_BUDGET_POLICY = BudgetPolicySnapshot(20, 10, 20)
+_RATE_LIMIT_POLICY = RateLimitPolicySnapshot(
+    RateLimitScope.TEMPLATE,
+    runtime_rate_limit_key(
+        template_id="tpl.test.read-only",
+        max_calls=100,
+        window_seconds=60,
+    ),
+    100,
+    60,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +59,12 @@ class _Template:
     supported_trigger_types: tuple[str, ...] = ("manual",)
     operation_classification: str = "read_only"
     approval_policy_id: str = "approval.none"
+    input_schema_id: str = "schema:template:test.read-only:input:v1"
+    output_schema_id: str = "schema:template:test.read-only:output:v1"
+    retry_policy: RetryPolicySnapshot = _RETRY_POLICY
+    timeout_policy: TimeoutPolicySnapshot = _TIMEOUT_POLICY
+    budget_policy: BudgetPolicySnapshot = _BUDGET_POLICY
+    rate_limit_policy: RateLimitPolicySnapshot = _RATE_LIMIT_POLICY
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +190,12 @@ def build_read_only_plan(
         approval_policies=(_Policy(),),
         operations=(),
         bindings=(),
+        run_policy=RunRuntimePolicy(
+            max_steps=20,
+            max_model_calls=100,
+            max_tool_calls=1_000,
+            run_timeout_seconds=3_600,
+        ),
     )
     plan = planner.plan(
         EffectPlanRequest(
