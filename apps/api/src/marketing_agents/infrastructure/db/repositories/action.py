@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import (
     ConnectorReceiptInsertResult,
+    ExternalActionRepositoryConflict,
     ExternalActionSetInsertResult,
 )
 from marketing_agents.domain.action_hash import CanonicalExternalAction
@@ -36,12 +37,11 @@ from marketing_agents.infrastructure.db.models.action import (
 from marketing_agents.infrastructure.db.models.run import RunRecord
 
 
-class ExternalActionPersistenceConflict(RuntimeError):
+class ExternalActionPersistenceConflict(ExternalActionRepositoryConflict):
     """Raised when a stable key resolves to incompatible persisted semantics."""
 
     def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+        super().__init__(code, message)
 
 
 def _plain_json(value: object) -> object:

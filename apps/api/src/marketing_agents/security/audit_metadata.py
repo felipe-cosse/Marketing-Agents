@@ -51,6 +51,8 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "step.transitioned": _RUN_FIELDS | _STEP_FIELDS,
     "action.proposed": frozenset({"idempotency_support"}),
     "action.awaiting_approval": frozenset({"idempotency_support"}),
+    "action.approved": frozenset({"idempotency_support"}),
+    "action.rejected": frozenset({"idempotency_support"}),
     "action.dispatch_claimed": frozenset({"idempotency_support"}),
     "action.call_started": frozenset({"idempotency_support"}),
     "action.retry_released": _ACTION_FIELDS,
@@ -63,6 +65,28 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
         {
             "action_state",
             "action_version",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+        }
+    ),
+    "approval.approved": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "decision",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+        }
+    ),
+    "approval.rejected": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "decision",
             "generation",
             "policy_id",
             "proposal_revision",
@@ -108,8 +132,9 @@ _CONNECTOR_STATUSES = frozenset(
     {"accepted", "completed", "mock_committed", "mock_succeeded", "succeeded"}
 )
 _IDEMPOTENCY_SUPPORT = frozenset({"required", "supported", "unavailable"})
-_APPROVAL_STATUSES = frozenset({"pending", "expired"})
-_APPROVAL_ACTION_STATES = frozenset({"awaiting_approval"})
+_APPROVAL_STATUSES = frozenset({"pending", "approved", "rejected", "expired"})
+_APPROVAL_ACTION_STATES = frozenset({"awaiting_approval", "approved", "rejected"})
+_APPROVAL_DECISIONS = frozenset({"approve", "reject"})
 _COMMANDS = frozenset(
     {
         "activate_plan",
@@ -241,6 +266,10 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
     if field_name == "action_state" and value not in _APPROVAL_ACTION_STATES:
         raise AuditMetadataError(
             "metadata_value_invalid", "approval action state is not an allowlisted safe code"
+        )
+    if field_name == "decision" and value not in _APPROVAL_DECISIONS:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "approval decision is not an allowlisted safe code"
         )
 
 

@@ -95,6 +95,14 @@ class ExternalActionSetInsertResult:
     inserted: bool
 
 
+class ExternalActionRepositoryConflict(RuntimeError):
+    """Stable action hydration/mutation conflict exposed through the application port."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ExternalActionRepository(Protocol):
     async def get(self, action_id: str) -> ExternalAction | None: ...
 
@@ -223,6 +231,14 @@ class ApprovalRequestSetInsertResult:
 class ApprovalDecisionInsertResult:
     request: StoredActionApprovalRequest
     inserted: bool
+
+
+class ApprovalRepositoryConflict(RuntimeError):
+    """Stable approval mutation conflict exposed through the application port."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class ApprovalRepository(Protocol):

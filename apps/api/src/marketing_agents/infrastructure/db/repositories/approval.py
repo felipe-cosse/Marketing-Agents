@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import (
     ApprovalDecisionInsertResult,
+    ApprovalRepositoryConflict,
     ApprovalRequestSetInsertResult,
 )
 from marketing_agents.domain.action_hash import CanonicalExternalAction, canonical_action_hash
@@ -57,12 +58,11 @@ from marketing_agents.security.approval_digest import (
 from marketing_agents.security.digest_key import DigestKey
 
 
-class ApprovalPersistenceConflict(RuntimeError):
+class ApprovalPersistenceConflict(ApprovalRepositoryConflict):
     """Raised when persisted approval authority is missing, partial, or contradictory."""
 
     def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+        super().__init__(code, message)
 
 
 class _ApprovalCASLost(RuntimeError):

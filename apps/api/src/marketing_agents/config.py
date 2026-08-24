@@ -11,6 +11,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from marketing_agents.domain.retention import RetentionPolicy
+from marketing_agents.domain.validation import require_id
 from marketing_agents.infrastructure.db.url import parse_database_url, safe_database_url
 from marketing_agents.security.network_policy import AdapterNetworkPolicy, NetworkPolicyError
 from marketing_agents.security.secret_config import redact_config
@@ -28,6 +29,18 @@ class Settings(BaseSettings):
 
     app_env: Literal["local", "test", "production"] = "local"
     auth_mode: Literal["local"] = "local"
+    local_identity_actor_id: str = "local-operator"
+    local_identity_roles: tuple[str, ...] = (
+        "viewer",
+        "operator",
+        "approver",
+        "local_admin",
+    )
+    local_identity_scopes: tuple[str, ...] = (
+        "approvals:read",
+        "approvals:decide",
+        "scope.external-write",
+    )
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/marketing_agents.db",
         repr=False,
@@ -53,6 +66,26 @@ class Settings(BaseSettings):
     @classmethod
     def validate_database_url(cls, value: str) -> str:
         parse_database_url(value)
+        return value
+
+    @field_validator("local_identity_actor_id")
+    @classmethod
+    def validate_local_identity_actor_id(cls, value: str) -> str:
+        require_id(value, "local identity actor ID")
+        return value
+
+    @field_validator("local_identity_roles", "local_identity_scopes")
+    @classmethod
+    def validate_local_identity_authorities(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if type(value) is not tuple or not value or len(value) != len(set(value)):
+            raise ValueError("local identity authorities must be a nonempty unique tuple")
+        for authority in value:
+            if type(authority) is not str:
+                raise ValueError("local identity authorities must contain exact strings")
+            require_id(authority, "local identity authority")
         return value
 
     @field_validator("api_host")
