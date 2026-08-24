@@ -8,14 +8,17 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Literal, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import (
+    ActionCallStartResult,
     ConnectorReceiptInsertResult,
     ExternalActionRepositoryConflict,
     ExternalActionSetInsertResult,
+    ReleaseAuthority,
+    ReleaseCallMode,
 )
 from marketing_agents.domain.action_hash import CanonicalExternalAction
 from marketing_agents.domain.approval import ApprovalPolicySnapshot, ProposedExternalAction
@@ -28,13 +31,26 @@ from marketing_agents.domain.entities import (
     ExternalAction,
     ExternalActionResultSnapshot,
 )
-from marketing_agents.domain.enums import ExternalActionState
+from marketing_agents.domain.enums import ExternalActionState, RunState, StepState
+from marketing_agents.domain.step_lifecycle import StepLifecycleCommand, StepTransitionResult
 from marketing_agents.infrastructure.db.models.action import (
     ConnectorActionReceiptRecord,
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
 )
+from marketing_agents.infrastructure.db.models.approval import (
+    ApprovalRequestRecord,
+    ApprovalUseRecord,
+    AuthorizationSetHeadRecord,
+    AuthorizationSetMemberRecord,
+    AuthorizationSetRecord,
+)
 from marketing_agents.infrastructure.db.models.run import RunRecord
+from marketing_agents.infrastructure.db.models.step import (
+    RunStepDependencyRecord,
+    RunStepRecord,
+)
+from marketing_agents.infrastructure.db.repositories.step import SQLAlchemyRunStepRepository
 
 
 class ExternalActionPersistenceConflict(ExternalActionRepositoryConflict):
@@ -42,6 +58,10 @@ class ExternalActionPersistenceConflict(ExternalActionRepositoryConflict):
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(code, message)
+
+
+class _ActionCASLost(RuntimeError):
+    pass
 
 
 def _plain_json(value: object) -> object:
@@ -379,25 +399,208 @@ class SQLAlchemyExternalActionRepository:
             ) from None
         return ExternalActionSetInsertResult(actions=ordered, inserted=False)
 
-    async def _guard_executing_run(self, run_id: str, expected_version: int) -> bool:
-        statement = (
-            update(RunRecord)
-            .where(
-                RunRecord.id == run_id,
-                RunRecord.version == expected_version,
-                RunRecord.state == "executing",
-                RunRecord.approval_required.is_(True),
-            )
-            .values(version=RunRecord.version)
-            .returning(RunRecord.id)
-            .execution_options(synchronize_session=False)
+    @staticmethod
+    def _release_fence(authority: ReleaseAuthority) -> Any:
+        dependency_step = RunStepRecord.__table__.alias("authorization_dependency_step")
+        history_limit = func.coalesce(
+            ExternalActionRecord.dispatch_attempt_number,
+            ExternalActionRecord.delivery_attempt_count + 1,
         )
-        try:
-            return (await self._session.execute(statement)).scalar_one_or_none() is not None
-        except OperationalError as exc:
-            if _is_sqlite_busy(self._session, exc):
-                return False
-            raise
+        unsatisfied_dependency = (
+            select(dependency_step.c.id)
+            .select_from(
+                RunStepDependencyRecord.__table__.join(
+                    dependency_step,
+                    and_(
+                        dependency_step.c.run_id == RunStepDependencyRecord.run_id,
+                        dependency_step.c.key == RunStepDependencyRecord.dependency_key,
+                    ),
+                )
+            )
+            .where(
+                RunStepDependencyRecord.step_id == authority.step_id,
+                dependency_step.c.state != StepState.SUCCEEDED.value,
+            )
+            .exists()
+        )
+        attempt_count = (
+            select(func.count(ExternalActionDispatchAttemptRecord.attempt_number))
+            .where(ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id)
+            .scalar_subquery()
+        )
+        maximum_attempt = (
+            select(func.coalesce(func.max(ExternalActionDispatchAttemptRecord.attempt_number), 0))
+            .where(ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id)
+            .scalar_subquery()
+        )
+        invalid_historical_attempt = (
+            select(ExternalActionDispatchAttemptRecord.external_action_id)
+            .where(
+                ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id,
+                ExternalActionDispatchAttemptRecord.attempt_number < history_limit,
+                or_(
+                    ExternalActionDispatchAttemptRecord.idempotency_support
+                    != ExternalActionRecord.idempotency_support,
+                    ExternalActionDispatchAttemptRecord.completed_at.is_(None),
+                    ExternalActionDispatchAttemptRecord.conclusion.is_(None),
+                    and_(
+                        ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                        ExternalActionDispatchAttemptRecord.conclusion != "pre_call_expired",
+                    ),
+                    and_(
+                        ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
+                        ExternalActionDispatchAttemptRecord.conclusion != "provider_retry",
+                    ),
+                ),
+            )
+            .exists()
+        )
+        any_started_attempt = (
+            select(ExternalActionDispatchAttemptRecord.external_action_id)
+            .where(
+                ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id,
+                ExternalActionDispatchAttemptRecord.attempt_number < history_limit,
+                ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
+            )
+            .exists()
+        )
+        prior_provider_retry = (
+            select(ExternalActionDispatchAttemptRecord.external_action_id)
+            .where(
+                ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id,
+                ExternalActionDispatchAttemptRecord.attempt_number
+                == authority.prior_started_attempt_number,
+                ExternalActionDispatchAttemptRecord.attempt_number < history_limit,
+                ExternalActionDispatchAttemptRecord.idempotency_support
+                == ExternalActionRecord.idempotency_support,
+                ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
+                ExternalActionDispatchAttemptRecord.completed_at.is_not(None),
+                ExternalActionDispatchAttemptRecord.conclusion == "provider_retry",
+            )
+            .exists()
+        )
+        if authority.call_mode is ReleaseCallMode.FIRST_CALL:
+            call_mode_fence = ~any_started_attempt
+        elif authority.call_mode is ReleaseCallMode.PROVIDER_RETRY:
+            prior_started_attempt_number = authority.prior_started_attempt_number
+            if prior_started_attempt_number is None:  # pragma: no cover - domain guard
+                return ExternalActionRecord.id.is_(None)
+            started_after_prior = (
+                select(ExternalActionDispatchAttemptRecord.external_action_id)
+                .where(
+                    ExternalActionDispatchAttemptRecord.external_action_id == authority.action_id,
+                    ExternalActionDispatchAttemptRecord.attempt_number < history_limit,
+                    ExternalActionDispatchAttemptRecord.attempt_number
+                    > prior_started_attempt_number,
+                    ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
+                )
+                .exists()
+            )
+            call_mode_fence = (
+                prior_provider_retry
+                & ~started_after_prior
+                & ExternalActionRecord.idempotency_support.in_(("required", "supported"))
+            )
+        else:
+            call_mode_fence = ExternalActionRecord.id.is_(None)
+        return (
+            select(AuthorizationSetHeadRecord.run_id)
+            .select_from(
+                AuthorizationSetHeadRecord.__table__.join(
+                    AuthorizationSetRecord.__table__,
+                    and_(
+                        AuthorizationSetRecord.id == AuthorizationSetHeadRecord.current_set_id,
+                        AuthorizationSetRecord.run_id == AuthorizationSetHeadRecord.run_id,
+                        AuthorizationSetRecord.plan_hash == AuthorizationSetHeadRecord.plan_hash,
+                        AuthorizationSetRecord.proposal_revision
+                        == AuthorizationSetHeadRecord.proposal_revision,
+                        AuthorizationSetRecord.membership_hash
+                        == AuthorizationSetHeadRecord.membership_hash,
+                    ),
+                )
+                .join(
+                    AuthorizationSetMemberRecord.__table__,
+                    AuthorizationSetMemberRecord.authorization_set_id == AuthorizationSetRecord.id,
+                )
+                .join(
+                    ApprovalUseRecord.__table__,
+                    ApprovalUseRecord.id == AuthorizationSetMemberRecord.approval_use_id,
+                )
+                .join(
+                    ApprovalRequestRecord.__table__,
+                    ApprovalRequestRecord.id == AuthorizationSetMemberRecord.approval_request_id,
+                )
+                .join(RunRecord.__table__, RunRecord.id == AuthorizationSetRecord.run_id)
+                .join(
+                    RunStepRecord.__table__,
+                    RunStepRecord.id == AuthorizationSetMemberRecord.step_id,
+                )
+            )
+            .where(
+                AuthorizationSetHeadRecord.run_id == authority.run_id,
+                AuthorizationSetHeadRecord.current_set_id == authority.authorization_set_id,
+                AuthorizationSetHeadRecord.membership_hash == authority.membership_hash,
+                AuthorizationSetHeadRecord.version == authority.head_version,
+                AuthorizationSetRecord.status == "released",
+                AuthorizationSetRecord.version == authority.authorization_set_version,
+                AuthorizationSetRecord.membership_hash == authority.membership_hash,
+                AuthorizationSetRecord.release_hash == authority.release_hash,
+                AuthorizationSetRecord.released_run_version == authority.released_run_version,
+                AuthorizationSetMemberRecord.action_id == authority.action_id,
+                AuthorizationSetMemberRecord.action_hash == authority.action_hash,
+                AuthorizationSetMemberRecord.step_id == authority.step_id,
+                AuthorizationSetMemberRecord.step_key == authority.step_key,
+                AuthorizationSetMemberRecord.released_step_version
+                == authority.released_step_version,
+                AuthorizationSetMemberRecord.approval_request_id == authority.approval_request_id,
+                AuthorizationSetMemberRecord.approval_decision_id == authority.approval_decision_id,
+                AuthorizationSetMemberRecord.approval_use_id == authority.approval_use_id,
+                AuthorizationSetMemberRecord.reservation_id == authority.reservation_id,
+                AuthorizationSetMemberRecord.released_at == AuthorizationSetRecord.released_at,
+                ApprovalUseRecord.request_id == authority.approval_request_id,
+                ApprovalUseRecord.decision_id == authority.approval_decision_id,
+                ApprovalUseRecord.action_id == authority.action_id,
+                ApprovalUseRecord.action_hash == authority.action_hash,
+                ApprovalUseRecord.authorization_set_id == authority.authorization_set_id,
+                ApprovalUseRecord.run_id == authority.run_id,
+                ApprovalUseRecord.step_id == authority.step_id,
+                ApprovalUseRecord.step_key == authority.step_key,
+                ApprovalUseRecord.reservation_id == authority.reservation_id,
+                ApprovalUseRecord.used_at == AuthorizationSetRecord.released_at,
+                ApprovalRequestRecord.action_id == authority.action_id,
+                ApprovalRequestRecord.action_hash == authority.action_hash,
+                ApprovalRequestRecord.authorization_set_id == authority.authorization_set_id,
+                ApprovalRequestRecord.run_id == authority.run_id,
+                ApprovalRequestRecord.step_id == authority.step_id,
+                ApprovalRequestRecord.step_key == authority.step_key,
+                ApprovalRequestRecord.status == "consumed",
+                RunRecord.state == RunState.EXECUTING.value,
+                RunRecord.version == authority.released_run_version,
+                RunRecord.approval_required.is_(True),
+                RunStepRecord.run_id == authority.run_id,
+                RunStepRecord.key == authority.step_key,
+                RunStepRecord.effect == "write",
+                RunStepRecord.state == authority.step_state.value,
+                RunStepRecord.version == authority.step_version,
+                ExternalActionRecord.id == authority.action_id,
+                ExternalActionRecord.action_hash == authority.action_hash,
+                ExternalActionRecord.authorization_set_id == authority.authorization_set_id,
+                ExternalActionRecord.run_id == authority.run_id,
+                ExternalActionRecord.step_id == authority.step_id,
+                ExternalActionRecord.step_key == authority.step_key,
+                ExternalActionRecord.reservation_id == authority.reservation_id,
+                ExternalActionRecord.reservation_authorization_set_id
+                == authority.authorization_set_id,
+                ExternalActionRecord.approval_request_id == authority.approval_request_id,
+                ExternalActionRecord.approval_decision_id == authority.approval_decision_id,
+                attempt_count == ExternalActionRecord.delivery_attempt_count,
+                maximum_attempt == ExternalActionRecord.delivery_attempt_count,
+                ~invalid_historical_attempt,
+                call_mode_fence,
+                ~unsatisfied_dependency,
+            )
+            .exists()
+        )
 
     async def _updated(self, statement: Any) -> ExternalAction | None:
         try:
@@ -424,14 +627,35 @@ class SQLAlchemyExternalActionRepository:
         *,
         action_id: str,
         expected_version: int,
-        expected_run_version: int,
+        authority: ReleaseAuthority,
         lease_owner: str,
         claimed_at: datetime,
         lease_expires_at: datetime,
     ) -> ExternalAction | None:
         current = await self.get(action_id)
-        if current is None or not await self._guard_executing_run(
-            current.run_id, expected_run_version
+        if (
+            current is None
+            or type(authority) is not ReleaseAuthority
+            or authority.action_id != action_id
+            or authority.action_hash != current.action_hash
+            or (
+                authority.call_mode is ReleaseCallMode.FIRST_CALL
+                and (
+                    authority.step_state is not StepState.READY
+                    or authority.step_version != authority.released_step_version
+                    or authority.prior_started_attempt_number is not None
+                )
+            )
+            or (
+                authority.call_mode is ReleaseCallMode.PROVIDER_RETRY
+                and (
+                    authority.step_state is not StepState.EXECUTING
+                    or authority.step_version != authority.released_step_version + 1
+                    or authority.prior_started_attempt_number is None
+                )
+            )
+            or authority.call_mode
+            not in {ReleaseCallMode.FIRST_CALL, ReleaseCallMode.PROVIDER_RETRY}
         ):
             return None
         attempt = current.delivery_attempt_count + 1
@@ -445,6 +669,7 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionRecord.state == ExternalActionState.DISPATCH_RESERVED.value,
                 ExternalActionRecord.delivery_attempt_count
                 < (ExternalActionRecord.delivery_attempt_limit),
+                self._release_fence(authority),
             )
             .values(
                 state=ExternalActionState.DISPATCHING.value,
@@ -479,47 +704,136 @@ class SQLAlchemyExternalActionRepository:
         *,
         action_id: str,
         expected_version: int,
-        expected_run_version: int,
+        authority: ReleaseAuthority,
         lease_owner: str,
         attempt_number: int,
         started_at: datetime,
-    ) -> ExternalAction | None:
+        step_transition: StepTransitionResult | None,
+    ) -> ActionCallStartResult | None:
         current = await self.get(action_id)
-        if current is None or not await self._guard_executing_run(
-            current.run_id, expected_run_version
+        initial_start = authority.call_mode is ReleaseCallMode.FIRST_CALL
+        retry_start = authority.call_mode is ReleaseCallMode.PROVIDER_RETRY
+        if (
+            current is None
+            or type(authority) is not ReleaseAuthority
+            or authority.action_id != action_id
+            or (not initial_start and not retry_start)
+            or (
+                initial_start
+                and (
+                    type(step_transition) is not StepTransitionResult
+                    or step_transition.transition.command
+                    is not StepLifecycleCommand.START_RESERVED_WRITE
+                    or step_transition.transition.previous_state is not StepState.READY
+                    or step_transition.step.state is not StepState.EXECUTING
+                    or step_transition.step.id != authority.step_id
+                    or step_transition.step.run_id != authority.run_id
+                    or step_transition.step.key != authority.step_key
+                    or step_transition.transition.expected_version
+                    != authority.released_step_version
+                    or step_transition.transition.occurred_at != started_at
+                )
+            )
+            or (
+                retry_start
+                and (
+                    step_transition is not None
+                    or authority.step_state is not StepState.EXECUTING
+                    or authority.step_version != authority.released_step_version + 1
+                    or authority.prior_started_attempt_number is None
+                )
+            )
         ):
             return None
-        statement = (
-            update(ExternalActionRecord)
+        lease = current.lease
+        if lease is None or lease.owner != lease_owner or lease.attempt_number != attempt_number:
+            return None
+        current_attempt_fence = (
+            select(ExternalActionDispatchAttemptRecord.external_action_id)
             .where(
-                ExternalActionRecord.id == action_id,
-                ExternalActionRecord.version == expected_version,
-                ExternalActionRecord.state == ExternalActionState.DISPATCHING.value,
-                ExternalActionRecord.dispatch_lease_owner == lease_owner,
-                ExternalActionRecord.dispatch_attempt_number == attempt_number,
-                ExternalActionRecord.dispatch_lease_expires_at > started_at,
-                ExternalActionRecord.connector_call_started_at.is_(None),
+                ExternalActionDispatchAttemptRecord.external_action_id == action_id,
+                ExternalActionDispatchAttemptRecord.attempt_number == attempt_number,
+                ExternalActionDispatchAttemptRecord.idempotency_support
+                == ExternalActionRecord.idempotency_support,
+                ExternalActionDispatchAttemptRecord.lease_owner == lease_owner,
+                ExternalActionDispatchAttemptRecord.claimed_at
+                == ExternalActionRecord.dispatch_claimed_at,
+                ExternalActionDispatchAttemptRecord.lease_expires_at
+                == ExternalActionRecord.dispatch_lease_expires_at,
+                ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                ExternalActionDispatchAttemptRecord.completed_at.is_(None),
+                ExternalActionDispatchAttemptRecord.conclusion.is_(None),
             )
-            .values(
-                connector_call_started_at=started_at,
-                updated_at=started_at,
-                version=expected_version + 1,
-            )
-            .returning(ExternalActionRecord.id)
-            .execution_options(synchronize_session=False)
+            .exists()
         )
-        marked = await self._updated(statement)
-        if marked is not None:
-            await self._session.execute(
-                update(ExternalActionDispatchAttemptRecord)
-                .where(
-                    ExternalActionDispatchAttemptRecord.external_action_id == action_id,
-                    ExternalActionDispatchAttemptRecord.attempt_number == attempt_number,
-                    ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+        try:
+            async with self._session.begin_nested():
+                statement = (
+                    update(ExternalActionRecord)
+                    .where(
+                        ExternalActionRecord.id == action_id,
+                        ExternalActionRecord.version == expected_version,
+                        ExternalActionRecord.state == ExternalActionState.DISPATCHING.value,
+                        ExternalActionRecord.dispatch_lease_owner == lease_owner,
+                        ExternalActionRecord.dispatch_attempt_number == attempt_number,
+                        ExternalActionRecord.dispatch_lease_expires_at > started_at,
+                        ExternalActionRecord.connector_call_started_at.is_(None),
+                        self._release_fence(authority),
+                        current_attempt_fence,
+                    )
+                    .values(
+                        connector_call_started_at=started_at,
+                        updated_at=started_at,
+                        version=expected_version + 1,
+                    )
+                    .returning(ExternalActionRecord.id)
+                    .execution_options(synchronize_session=False)
                 )
-                .values(call_started_at=started_at)
-            )
-        return marked
+                marked = await self._updated(statement)
+                if marked is None:
+                    raise _ActionCASLost
+                if step_transition is not None:
+                    step_applied = await SQLAlchemyRunStepRepository(
+                        self._session
+                    ).apply_transition(
+                        expected_run_version=authority.released_run_version,
+                        expected_run_state=RunState.EXECUTING,
+                        expected_version=authority.released_step_version,
+                        expected_state=StepState.READY,
+                        result=step_transition,
+                    )
+                    if not step_applied:
+                        raise _ActionCASLost
+                attempt_update = await self._session.execute(
+                    update(ExternalActionDispatchAttemptRecord)
+                    .where(
+                        ExternalActionDispatchAttemptRecord.external_action_id == action_id,
+                        ExternalActionDispatchAttemptRecord.attempt_number == attempt_number,
+                        ExternalActionDispatchAttemptRecord.idempotency_support
+                        == current.delivery_contract.idempotency_support,
+                        ExternalActionDispatchAttemptRecord.lease_owner == lease_owner,
+                        ExternalActionDispatchAttemptRecord.claimed_at == lease.claimed_at,
+                        ExternalActionDispatchAttemptRecord.lease_expires_at == lease.expires_at,
+                        ExternalActionDispatchAttemptRecord.call_started_at.is_(None),
+                        ExternalActionDispatchAttemptRecord.completed_at.is_(None),
+                        ExternalActionDispatchAttemptRecord.conclusion.is_(None),
+                    )
+                    .values(call_started_at=started_at)
+                    .returning(ExternalActionDispatchAttemptRecord.external_action_id)
+                    .execution_options(synchronize_session=False)
+                )
+                if attempt_update.scalar_one_or_none() is None:
+                    raise _ActionCASLost
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return None
+            raise
+        except _ActionCASLost:
+            return None
+        return ActionCallStartResult(
+            action=marked,
+            step_transition=step_transition,
+        )
 
     async def complete_succeeded(
         self,

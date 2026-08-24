@@ -1,0 +1,197 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-08",
+  "matrix_statement_sha256": "90038309e0ad6021c1252a1a862a0ea4331aa861c7b17a6b26da2255edd198af",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_step_lifecycle.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/step_lifecycle.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/security/approval_digest.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "tests/integration/db/test_orch_08_approval_boundary.py",
+      "tests/integration/db/test_orch_08_authorization_storage.py",
+      "tests/integration/db/test_orch_09_audited_step_state.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/integration/db/test_run_08_approval_persistence.py",
+      "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+      "tests/unit/application/test_orch_08_audit_events.py",
+      "tests/unit/domain/test_orch_09_audit_contracts.py",
+      "tests/unit/domain/test_run_08_approval_records.py",
+      "docs/verification/requirements/ORCH-08.json",
+      "docs/verification/requirements/ORCH-08.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/approval_boundaries.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_orch_08_approval_boundary.py",
+          "tests/integration/db/test_orch_08_authorization_storage.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/application/test_orch_08_audit_events.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "atomic-complete-set-release",
+      "type": "contract",
+      "statement": "Write-plan activation persists the Run plan, steps, external actions, approval requests, one complete authorization set, and its current head atomically. One approved member leaves every action paused; only the final fresh approval consumes every member, records each use and reservation, releases every WRITE step, and moves the Run to EXECUTING in one unit of work.",
+      "test_refs": [
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_one_of_two_approvals_has_zero_release_then_final_is_atomic",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_write_activation_fault_rolls_back_the_complete_plan_boundary",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_release_audit_fault_rolls_back_every_release_projection"
+      ]
+    },
+    {
+      "id": "zero-call-terminal-boundaries",
+      "type": "negative_control",
+      "statement": "A rejected member closes the whole current set without a use, reservation, attempt, or connector call; exact expiry remains paused; pre-release cancellation closes all remaining siblings without consumption; and post-release cancellation invalidates release authority so a future claim makes zero connector calls.",
+      "test_refs": [
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_rejection_closes_full_mixed_plan_without_release",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_expiry_and_pre_release_cancel_consume_nothing",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_rejection_closes_an_expired_sibling_without_release",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_post_release_cancel_blocks_claim_and_connector_call"
+      ]
+    },
+    {
+      "id": "sealed-release-authority-before-call",
+      "type": "negative_control",
+      "statement": "Every claim and call-start derives a sealed ReleaseAuthority from the committed current set, decision, use, reservation, Run, and WRITE step. Forged release hashes, decision-authority tamper, generic WRITE start, stale Run state, or lineage mismatch fail before a connector call; the first real call atomically commits its attempt marker and READY-to-EXECUTING step transition before leaving the transaction.",
+      "test_refs": [
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_dispatch_forged_authority_is_zero_call_and_first_call_is_committed",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_released_decision_tamper_blocks_attempt_and_connector",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_retry_lineage_survives_intervening_pre_call_expiry"
+      ]
+    },
+    {
+      "id": "typed-boundary-audits-and-replay",
+      "type": "contract",
+      "statement": "Release writes linked action.dispatch_reserved and approval.consumed witnesses for every member plus Run and Step transitions; closure and dispatch mutations use exact typed redacted witnesses. Audit failure rolls back the boundary. Released, closed, and open-expiry replay validates every initial, renewed, current, and boundary member witness, returns stable current mixed-generation expiry IDs, and never heals missing history.",
+      "test_refs": [
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_released_replay_requires_every_member_audit_without_healing",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_open_expiry_replay_requires_every_audit_without_healing",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_mixed_generation_expiry_result_is_replay_stable",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_expiry_and_pre_release_cancel_consume_nothing",
+        "tests/integration/db/test_orch_08_approval_boundary.py::test_orch_08_rejection_closes_an_expired_sibling_without_release",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_release_audit_fault_rolls_back_every_release_projection",
+        "tests/unit/application/test_orch_08_audit_events.py::test_orch_08_release_member_audits_bind_use_reservation_and_decision",
+        "tests/unit/application/test_orch_08_audit_events.py::test_orch_08_closed_sibling_audits_bind_optional_decision_exactly",
+        "tests/unit/application/test_orch_08_audit_events.py::test_orch_08_dispatch_claim_and_call_start_audits_reject_delivery_drift"
+      ]
+    },
+    {
+      "id": "portable-relational-release-fences",
+      "type": "contract",
+      "statement": "Authorization-set heads, ordered members, approval uses, reservations, release hashes, released Run versions, and reserved WRITE-step transitions are constrained by exact composite keys and fail-closed hydration. The fresh SQLite schema enables foreign keys without violations, and every mapped table including these constraints compiles for SQLite and PostgreSQL dialects.",
+      "test_refs": [
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_authorization_schema_compiles_with_exact_portable_constraints",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_fresh_sqlite_schema_has_foreign_keys_and_no_violations",
+        "tests/integration/db/test_orch_08_authorization_storage.py::test_orch_08_released_decision_tamper_blocks_attempt_and_connector"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-08-approval-boundary",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_orch_08_audit_events.py",
+        "tests/integration/db/test_orch_08_authorization_storage.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/unit/domain/test_run_08_approval_records.py",
+        "tests/integration/db/test_run_08_approval_persistence.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "atomic-complete-set-release",
+        "zero-call-terminal-boundaries",
+        "sealed-release-authority-before-call",
+        "typed-boundary-audits-and-replay",
+        "portable-relational-release-fences"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "apps/api/src/marketing_agents/security/approval_digest.py"
+    ],
+    "gate_id": "orch-08-approval-boundary"
+  },
+  "limitations": [
+    "The database transaction makes the internal approval, release, reservation, Run, Step, and audit facts atomic; it cannot make an external provider call atomic. ORCH-08 establishes release and call-start authority only: RUN-05 owns downstream exact delivery replay, durable receipts, retry classification, and recovery. No exactly-once external effect or general compensation workflow is claimed.",
+    "Post-call cancellation is best effort: cancellation fences future claims but cannot recall a connector request that already left the process. Cleanup or terminalization of reserved and already-claimed actions remains ORCH-06 and RUN-03 scope.",
+    "EffectPlanRequest.requested_by and the stored approval requester remain free-string historical snapshots. ORCH-08 enforces the stored decision and set integrity but does not claim authenticated requester provenance or end-to-end two-person identity issuance.",
+    "Release retains the authenticated decision's sealed role and scope snapshot. It detects persisted authority tamper but does not perform live role revocation or identity-directory lookup between decision and release.",
+    "Expiry-only renewal preserves the same exact set epoch. Semantic, plan, membership, or proposal-revision change fails closed with full_set_epoch_required; creation, selection, and supersession of a wholly new complete-set epoch remains a later replan seam.",
+    "ORCH-08 emits exact per-member action and approval events plus Run and Step transition events, but it does not introduce a distinct authorization-set aggregate audit event or claim the full operator timeline. RUN-06 and AC-14 retain complete timeline and acceptance ownership.",
+    "The mapped schema and constraints are present in metadata only. DEL-04 owns Alembic migration revisions plus upgrade, downgrade, and deployed-schema verification.",
+    "File-backed SQLite exercises runtime rollback, tamper, replay, and dispatch behavior. PostgreSQL DDL compilation is verified, but PostgreSQL runtime locking and concurrency have not been executed here.",
+    "This requirement exposes application and persistence services only. Broader approval APIs, operator UI, and the end-to-end demo remain API, WEB, and DEMO requirement scope."
+  ]
+}

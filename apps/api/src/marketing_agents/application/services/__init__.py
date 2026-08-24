@@ -1,5 +1,11 @@
 """Framework-independent application services."""
 
+from .approval_boundaries import (
+    ApprovalBoundaryDisposition,
+    ApprovalBoundaryResult,
+    ApprovalBoundaryService,
+    ApprovalBoundaryServiceError,
+)
 from .approval_decisions import (
     ApprovalDecisionCommand,
     ApprovalDecisionService,
@@ -67,6 +73,10 @@ from .work_admission import (
 
 __all__ = [
     "AdmissionDisposition",
+    "ApprovalBoundaryDisposition",
+    "ApprovalBoundaryResult",
+    "ApprovalBoundaryService",
+    "ApprovalBoundaryServiceError",
     "ApprovalDecisionCommand",
     "ApprovalDecisionService",
     "ApprovalDecisionServiceError",

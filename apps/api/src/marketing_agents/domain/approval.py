@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -13,6 +15,7 @@ from marketing_agents.domain.action_hash import (
     ExternalActionKeyMaterial,
     canonical_action_hash,
 )
+from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.enums import ApprovalDecisionKind, ApprovalStatus
 from marketing_agents.domain.validation import (
     require_digest,
@@ -26,6 +29,289 @@ class ApprovalBindingError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+class AuthorizationSetStatus(StrEnum):
+    """Lifecycle of one complete, immutable write-authorization epoch."""
+
+    OPEN = "open"
+    RELEASED = "released"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetMember:
+    """One ordered action/step identity in a complete authorization set."""
+
+    authorization_set_id: str
+    ordinal: int
+    run_id: str
+    plan_hash: str
+    proposal_revision: int
+    action_id: str
+    action_hash: str
+    step_id: str
+    step_key: str
+
+    def __post_init__(self) -> None:
+        for value, name in (
+            (self.authorization_set_id, "authorization set ID"),
+            (self.run_id, "authorization set run ID"),
+            (self.action_id, "authorization set action ID"),
+            (self.step_id, "authorization set step ID"),
+            (self.step_key, "authorization set step key"),
+        ):
+            require_id(value, name)
+        require_digest(self.plan_hash, "authorization set plan hash")
+        require_digest(self.action_hash, "authorization set action hash")
+        if type(self.ordinal) is not int or self.ordinal < 1:
+            raise ValueError("authorization set member ordinal must be positive")
+        if type(self.proposal_revision) is not int or self.proposal_revision < 1:
+            raise ValueError("authorization set proposal revision must be positive")
+
+    def hash_material(self) -> Mapping[str, object]:
+        return {
+            "ordinal": self.ordinal,
+            "run_id": self.run_id,
+            "plan_hash": self.plan_hash,
+            "proposal_revision": self.proposal_revision,
+            "action_id": self.action_id,
+            "action_hash": self.action_hash,
+            "step_id": self.step_id,
+            "step_key": self.step_key,
+        }
+
+
+def authorization_set_membership_hash(
+    authorization_set_id: str,
+    members: tuple[AuthorizationSetMember, ...],
+) -> str:
+    """Hash the exact set identity and its stable, ordered membership."""
+
+    require_id(authorization_set_id, "authorization set ID")
+    if type(members) is not tuple or not members:
+        raise ValueError("authorization set membership must be a nonempty immutable tuple")
+    return hashlib.sha256(
+        b"marketing-agents:authorization-set-membership:v1\x00"
+        + canonical_json_bytes(
+            {
+                "authorization_set_id": authorization_set_id,
+                "members": [member.hash_material() for member in members],
+            }
+        )
+    ).hexdigest()
+
+
+def authorization_set_release_hash(
+    *,
+    authorization_set_id: str,
+    membership_hash: str,
+    released_run_version: int,
+    released_at: datetime,
+    members: tuple[Mapping[str, object], ...],
+) -> str:
+    """Hash every durable one-time-use and reservation fact in a barrier release."""
+
+    require_id(authorization_set_id, "authorization set ID")
+    require_digest(membership_hash, "authorization set membership hash")
+    require_utc(released_at, "authorization set release time")
+    if type(released_run_version) is not int or released_run_version < 1:
+        raise ValueError("released Run version must be positive")
+    if type(members) is not tuple or not members:
+        raise ValueError("authorization set release must contain every member")
+    return hashlib.sha256(
+        b"marketing-agents:authorization-set-release:v1\x00"
+        + canonical_json_bytes(
+            {
+                "authorization_set_id": authorization_set_id,
+                "membership_hash": membership_hash,
+                "released_run_version": released_run_version,
+                "released_at": released_at.isoformat(timespec="microseconds"),
+                "members": members,
+            }
+        )
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSet:
+    """Integrity-checked complete set and its one-way barrier lifecycle."""
+
+    id: str
+    run_id: str
+    plan_hash: str
+    proposal_revision: int
+    membership_hash: str
+    members: tuple[AuthorizationSetMember, ...] = field(repr=False)
+    status: AuthorizationSetStatus
+    version: int
+    opened_at: datetime
+    updated_at: datetime
+    release_hash: str | None = None
+    released_at: datetime | None = None
+    released_run_version: int | None = None
+    terminal_reason_code: str | None = None
+    superseded_by_set_id: str | None = None
+    superseded_at: datetime | None = None
+
+    @classmethod
+    def open(
+        cls,
+        *,
+        authorization_set_id: str,
+        members: tuple[AuthorizationSetMember, ...],
+        opened_at: datetime,
+    ) -> AuthorizationSet:
+        if not members:
+            raise ValueError("authorization set cannot be empty")
+        first = members[0]
+        return cls(
+            id=authorization_set_id,
+            run_id=first.run_id,
+            plan_hash=first.plan_hash,
+            proposal_revision=first.proposal_revision,
+            membership_hash=authorization_set_membership_hash(
+                authorization_set_id,
+                members,
+            ),
+            members=members,
+            status=AuthorizationSetStatus.OPEN,
+            version=1,
+            opened_at=opened_at,
+            updated_at=opened_at,
+        )
+
+    def __post_init__(self) -> None:
+        require_id(self.id, "authorization set ID")
+        require_id(self.run_id, "authorization set run ID")
+        require_digest(self.plan_hash, "authorization set plan hash")
+        require_digest(self.membership_hash, "authorization set membership hash")
+        if type(self.proposal_revision) is not int or self.proposal_revision < 1:
+            raise ValueError("authorization set proposal revision must be positive")
+        if type(self.members) is not tuple or not self.members:
+            raise ValueError("authorization set membership must be a nonempty tuple")
+        if type(self.status) is not AuthorizationSetStatus:
+            raise ValueError("authorization set status must use the exact enum")
+        if type(self.version) is not int or self.version < 1:
+            raise ValueError("authorization set version must be positive")
+        require_utc(self.opened_at, "authorization set open time")
+        require_utc(self.updated_at, "authorization set update time")
+        if self.updated_at < self.opened_at:
+            raise ValueError("authorization set cannot update before it opens")
+        expected_ordinals = tuple(range(1, len(self.members) + 1))
+        if tuple(member.ordinal for member in self.members) != expected_ordinals:
+            raise ValueError("authorization set members must have contiguous stable order")
+        action_ids = {member.action_id for member in self.members}
+        step_ids = {member.step_id for member in self.members}
+        step_keys = {member.step_key for member in self.members}
+        if any(len(values) != len(self.members) for values in (action_ids, step_ids, step_keys)):
+            raise ValueError("authorization set action and step identities must be unique")
+        if any(
+            member.authorization_set_id != self.id
+            or member.run_id != self.run_id
+            or member.plan_hash != self.plan_hash
+            or member.proposal_revision != self.proposal_revision
+            for member in self.members
+        ):
+            raise ValueError("authorization set members must retain one exact epoch")
+        if self.membership_hash != authorization_set_membership_hash(self.id, self.members):
+            raise ApprovalBindingError(
+                "authorization_set_hash_mismatch",
+                "authorization set membership hash is not current",
+            )
+        if self.release_hash is not None:
+            require_digest(self.release_hash, "authorization set release hash")
+        if self.released_at is not None:
+            require_utc(self.released_at, "authorization set release time")
+        if self.superseded_at is not None:
+            require_utc(self.superseded_at, "authorization set supersession time")
+        if self.superseded_by_set_id is not None:
+            require_id(self.superseded_by_set_id, "replacement authorization set ID")
+            if self.superseded_by_set_id == self.id:
+                raise ValueError("authorization set cannot supersede itself")
+        release_fields = (
+            self.release_hash,
+            self.released_at,
+            self.released_run_version,
+        )
+        if self.status is AuthorizationSetStatus.OPEN:
+            if (
+                self.version != 1
+                or self.updated_at != self.opened_at
+                or any(value is not None for value in release_fields)
+                or self.terminal_reason_code is not None
+                or self.superseded_by_set_id is not None
+                or self.superseded_at is not None
+            ):
+                raise ValueError("open authorization set must retain pristine state")
+            return
+        if self.version != 2:
+            raise ValueError("authorization set terminal mutation must be version two")
+        if self.status is AuthorizationSetStatus.RELEASED:
+            if (
+                any(value is None for value in release_fields)
+                or type(self.released_run_version) is not int
+                or self.released_run_version < 1
+                or self.released_at != self.updated_at
+                or self.terminal_reason_code != "approval_barrier_satisfied"
+                or self.superseded_by_set_id is not None
+                or self.superseded_at is not None
+            ):
+                raise ValueError("released authorization set is incomplete")
+            return
+        if any(value is not None for value in release_fields):
+            raise ValueError("unreleased authorization set cannot retain release evidence")
+        expected_reason = {
+            AuthorizationSetStatus.REJECTED: "approval_rejected",
+            AuthorizationSetStatus.CANCELLED: "operator_cancelled",
+            AuthorizationSetStatus.SUPERSEDED: "approval_set_superseded",
+        }[self.status]
+        if self.terminal_reason_code != expected_reason:
+            raise ValueError("authorization set terminal reason is inconsistent")
+        if self.status is AuthorizationSetStatus.SUPERSEDED:
+            if self.superseded_by_set_id is None or self.superseded_at != self.updated_at:
+                raise ValueError("superseded authorization set lacks replacement evidence")
+        elif self.superseded_by_set_id is not None or self.superseded_at is not None:
+            raise ValueError("terminal authorization set cannot retain supersession evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetHead:
+    """Run-owned pointer selecting the only current authorization-set epoch."""
+
+    run_id: str
+    current_set_id: str
+    plan_hash: str
+    proposal_revision: int
+    membership_hash: str
+    version: int
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        require_id(self.run_id, "authorization set head run ID")
+        require_id(self.current_set_id, "authorization set head current set ID")
+        require_digest(self.plan_hash, "authorization set head plan hash")
+        require_digest(self.membership_hash, "authorization set head membership hash")
+        if type(self.proposal_revision) is not int or self.proposal_revision < 1:
+            raise ValueError("authorization set head proposal revision must be positive")
+        if type(self.version) is not int or self.version < 1:
+            raise ValueError("authorization set head version must be positive")
+        require_utc(self.updated_at, "authorization set head update time")
+
+    def assert_selects(self, authorization_set: AuthorizationSet) -> None:
+        if (
+            self.current_set_id != authorization_set.id
+            or self.run_id != authorization_set.run_id
+            or self.plan_hash != authorization_set.plan_hash
+            or self.proposal_revision != authorization_set.proposal_revision
+            or self.membership_hash != authorization_set.membership_hash
+        ):
+            raise ApprovalBindingError(
+                "authorization_set_head_mismatch",
+                "authorization set head does not select the exact set",
+            )
 
 
 def _deep_freeze(value: Any) -> Any:
@@ -391,6 +677,8 @@ class StoredActionApprovalRequest:
     expired_at: datetime | None = None
     replacement_request_id: str | None = None
     renewed_at: datetime | None = None
+    superseded_at: datetime | None = None
+    superseded_reason_code: str | None = None
     use: ApprovalUse | None = field(default=None, repr=False)
 
     @classmethod
@@ -409,10 +697,6 @@ class StoredActionApprovalRequest:
             raise ValueError("stored approval request must use the exact request contract")
         if type(self.status) is not ApprovalStatus:
             raise ValueError("stored approval status must use the exact status enum")
-        if self.status is ApprovalStatus.SUPERSEDED:
-            raise ValueError(
-                "full-set epoch supersession requires the ORCH-08 authorization-set head"
-            )
         if type(self.version) is not int or self.version < 1:
             raise ValueError("stored approval version must be positive")
         require_utc(self.updated_at, "stored approval update time")
@@ -432,6 +716,18 @@ class StoredActionApprovalRequest:
             require_utc(self.renewed_at, "approval renewal time")
         if (self.replacement_request_id is None) != (self.renewed_at is None):
             raise ValueError("approval renewal request and time must be present together")
+        if (self.superseded_at is None) != (self.superseded_reason_code is None):
+            raise ValueError("approval supersession time and reason must be present together")
+        if self.superseded_at is not None:
+            require_utc(self.superseded_at, "approval supersession time")
+            if self.superseded_at < self.request.requested_at:
+                raise ValueError("approval cannot be superseded before it was requested")
+        if self.superseded_reason_code is not None and self.superseded_reason_code not in {
+            "approval_set_rejected",
+            "approval_set_superseded",
+            "run_cancelled",
+        }:
+            raise ValueError("approval supersession reason is not supported")
         if self.use is not None:
             if type(self.use) is not ApprovalUse:
                 raise ValueError("approval use must use the exact immutable contract")
@@ -447,6 +743,8 @@ class StoredActionApprovalRequest:
                         self.expired_at,
                         self.replacement_request_id,
                         self.renewed_at,
+                        self.superseded_at,
+                        self.superseded_reason_code,
                         self.use,
                     )
                 )
@@ -465,6 +763,8 @@ class StoredActionApprovalRequest:
                 or self.replacement_request_id is not None
                 or self.renewed_at is not None
                 or self.use is not None
+                or self.superseded_at is not None
+                or self.superseded_reason_code is not None
                 or self.version != 2
                 or self.updated_at != self.decision.decided_at
             ):
@@ -475,6 +775,8 @@ class StoredActionApprovalRequest:
                 self.expired_at is None
                 or self.expired_at < self.request.expires_at
                 or self.use is not None
+                or self.superseded_at is not None
+                or self.superseded_reason_code is not None
                 or (
                     self.decision is not None
                     and self.decision.decision is not ApprovalDecisionKind.APPROVE
@@ -502,11 +804,29 @@ class StoredActionApprovalRequest:
                 or self.expired_at is not None
                 or self.replacement_request_id is not None
                 or self.renewed_at is not None
-                or self.use.used_at > self.request.expires_at
+                or self.superseded_at is not None
+                or self.superseded_reason_code is not None
+                or self.use.used_at >= self.request.expires_at
                 or self.version != 3
                 or self.updated_at != self.use.used_at
             ):
                 raise ValueError("consumed approval must bind one unexpired approval use")
+        elif self.status is ApprovalStatus.SUPERSEDED:
+            base_version = 2 if self.decision is None else 3
+            if (
+                self.superseded_at is None
+                or self.updated_at != self.superseded_at
+                or self.version != base_version
+                or self.expired_at is not None
+                or self.replacement_request_id is not None
+                or self.renewed_at is not None
+                or self.use is not None
+                or (
+                    self.decision is not None
+                    and self.decision.decision is not ApprovalDecisionKind.APPROVE
+                )
+            ):
+                raise ValueError("superseded approval state is incomplete or contradictory")
         else:  # pragma: no cover - exact enum exhaustiveness
             raise AssertionError("unhandled approval status")
 

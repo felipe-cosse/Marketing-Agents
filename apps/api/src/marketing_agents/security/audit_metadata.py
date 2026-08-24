@@ -53,6 +53,14 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "action.awaiting_approval": frozenset({"idempotency_support"}),
     "action.approved": frozenset({"idempotency_support"}),
     "action.rejected": frozenset({"idempotency_support"}),
+    "action.dispatch_reserved": frozenset(
+        {
+            "approval_use_id",
+            "approval_set_id",
+            "idempotency_support",
+            "reservation_id",
+        }
+    ),
     "action.dispatch_claimed": frozenset({"idempotency_support"}),
     "action.call_started": frozenset({"idempotency_support"}),
     "action.retry_released": _ACTION_FIELDS,
@@ -60,6 +68,9 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "action.failed": _ACTION_FIELDS,
     "action.outcome_unknown": _ACTION_FIELDS,
     "action.receipt_reconciled": _ACTION_FIELDS,
+    "action.cancelled": frozenset(
+        {"approval_set_id", "approval_status", "closure_reason", "idempotency_support"}
+    ),
     "connector.receipt_committed": frozenset({"connector_status"}),
     "approval.requested": frozenset(
         {
@@ -91,6 +102,31 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
             "policy_id",
             "proposal_revision",
             "status",
+        }
+    ),
+    "approval.consumed": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "approval_use_id",
+            "approval_set_id",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "reservation_id",
+            "status",
+        }
+    ),
+    "approval.superseded": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "approval_set_id",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+            "supersession_reason",
         }
     ),
     "approval.expired": frozenset(
@@ -132,9 +168,17 @@ _CONNECTOR_STATUSES = frozenset(
     {"accepted", "completed", "mock_committed", "mock_succeeded", "succeeded"}
 )
 _IDEMPOTENCY_SUPPORT = frozenset({"required", "supported", "unavailable"})
-_APPROVAL_STATUSES = frozenset({"pending", "approved", "rejected", "expired"})
-_APPROVAL_ACTION_STATES = frozenset({"awaiting_approval", "approved", "rejected"})
+_APPROVAL_STATUSES = frozenset(
+    {"pending", "approved", "rejected", "expired", "consumed", "superseded"}
+)
+_APPROVAL_ACTION_STATES = frozenset(
+    {"awaiting_approval", "approved", "rejected", "dispatch_reserved", "cancelled"}
+)
 _APPROVAL_DECISIONS = frozenset({"approve", "reject"})
+_CLOSURE_REASONS = frozenset({"operator_cancelled", "sibling_approval_rejected"})
+_SUPERSESSION_REASONS = frozenset(
+    {"approval_set_rejected", "approval_set_superseded", "run_cancelled"}
+)
 _COMMANDS = frozenset(
     {
         "activate_plan",
@@ -146,11 +190,13 @@ _COMMANDS = frozenset(
         "mark_validated",
         "receive",
         "record_plan",
+        "release_approval",
         "release_approved_plan",
         "reject",
         "reject_approval",
         "skip",
         "start",
+        "start_reserved_write",
         "succeed",
         "wait_for_approval",
     }
@@ -270,6 +316,15 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
     if field_name == "decision" and value not in _APPROVAL_DECISIONS:
         raise AuditMetadataError(
             "metadata_value_invalid", "approval decision is not an allowlisted safe code"
+        )
+    if field_name == "closure_reason" and value not in _CLOSURE_REASONS:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "action closure reason is not an allowlisted safe code"
+        )
+    if field_name == "supersession_reason" and value not in _SUPERSESSION_REASONS:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "approval supersession reason is not an allowlisted safe code",
         )
 
 

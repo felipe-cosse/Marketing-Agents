@@ -98,8 +98,12 @@ def _allowed(
         return effect is Effect.READ and state is StepState.PENDING
     if command is StepLifecycleCommand.WAIT_FOR_APPROVAL:
         return effect is Effect.WRITE and state is StepState.PENDING
+    if command is StepLifecycleCommand.RELEASE_APPROVAL:
+        return effect is Effect.WRITE and state is StepState.AWAITING_APPROVAL
     if command is StepLifecycleCommand.START:
         return effect is Effect.READ and state is StepState.READY
+    if command is StepLifecycleCommand.START_RESERVED_WRITE:
+        return effect is Effect.WRITE and state is StepState.READY
     if command in {StepLifecycleCommand.SUCCEED, StepLifecycleCommand.FAIL}:
         return state is StepState.EXECUTING
     if command is StepLifecycleCommand.REJECT:

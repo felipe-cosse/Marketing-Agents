@@ -101,7 +101,8 @@ class ExternalActionRecord(Base):
             name="ck_actions_reservation_complete",
         ),
         CheckConstraint(
-            "reservation_id IS NULL OR (reservation_action_hash = action_hash AND "
+            "reservation_id IS NULL OR (reservation_authorization_set_id = authorization_set_id "
+            "AND reservation_action_hash = action_hash AND "
             "reservation_capability_id = capability_id AND "
             "reservation_binding_id = connector_binding_id AND "
             "reservation_idempotency_key = idempotency_key)",

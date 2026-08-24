@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from marketing_agents.application.orchestration.dependencies import (
     OrchestrationDependencies,
 )
 from marketing_agents.application.orchestration.effect_planner import EffectPlan
+from marketing_agents.application.policies.approval_authorization import (
+    APPROVAL_DECIDE_SCOPE,
+    APPROVER_ROLE,
+)
+from marketing_agents.application.ports.repositories import ApprovalRepositoryConflict
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services.approval_integrity import (
     ApprovalIntegrityError,
@@ -24,11 +30,17 @@ from marketing_agents.application.services.external_action_registration import (
 from marketing_agents.domain.approval import (
     ActionApprovalRequest,
     ApprovalRenewal,
+    AuthorizationSet,
+    AuthorizationSetHead,
     StoredActionApprovalRequest,
 )
 from marketing_agents.domain.audit import AuditContext, AuditEventDraft
 from marketing_agents.domain.entities import ExternalAction
-from marketing_agents.domain.enums import ApprovalStatus, ExternalActionState
+from marketing_agents.domain.enums import (
+    ApprovalDecisionKind,
+    ApprovalStatus,
+    ExternalActionState,
+)
 from marketing_agents.domain.validation import require_digest, require_id
 
 
@@ -68,6 +80,44 @@ def _approval_semantics(request: ActionApprovalRequest) -> tuple[object, ...]:
         request.policy,
         request.requested_by,
     )
+
+
+def _require_authorization_set_binding(
+    plan: EffectPlan,
+    authorization_set: AuthorizationSet,
+    head: AuthorizationSetHead,
+    stored_requests: tuple[StoredActionApprovalRequest, ...],
+) -> None:
+    """Require the head-selected complete epoch; this verifier never creates or repairs it."""
+
+    try:
+        head.assert_selects(authorization_set)
+    except ValueError:
+        raise ApprovalRecordServiceError(
+            "authorization_set_head_mismatch",
+            "authorization set head does not select the exact persisted epoch",
+        ) from None
+    expected_by_action = {stored.request.action_id: stored.request for stored in stored_requests}
+    members_by_action = {member.action_id: member for member in authorization_set.members}
+    first = stored_requests[0].request
+    if (
+        authorization_set.id != first.authorization_set_id
+        or authorization_set.run_id != plan.run_id
+        or authorization_set.plan_hash != plan.plan_hash
+        or authorization_set.proposal_revision != first.proposal_revision
+        or set(members_by_action) != set(expected_by_action)
+        or any(
+            member.action_hash != expected_by_action[action_id].action_hash
+            or member.step_id != expected_by_action[action_id].step_id
+            or member.step_key != expected_by_action[action_id].step_key
+            or member.authorization_set_id != expected_by_action[action_id].authorization_set_id
+            for action_id, member in members_by_action.items()
+        )
+    ):
+        raise ApprovalRecordServiceError(
+            "authorization_set_binding_mismatch",
+            "authorization set does not exactly bind the planned write set",
+        )
 
 
 async def _mutation_draft(
@@ -309,6 +359,192 @@ async def _require_renewal_audit(
         )
 
 
+async def _require_decision_audits(
+    unit_of_work: UnitOfWork,
+    stored: StoredActionApprovalRequest,
+    action: ExternalAction,
+    *,
+    action_version: int,
+) -> None:
+    decision = stored.decision
+    if decision is None:
+        raise ApprovalRecordServiceError(
+            "approval_decision_corrupt",
+            "approval history expected a missing decision",
+        )
+    request = stored.request
+    expected_status = (
+        ApprovalStatus.APPROVED
+        if decision.decision is ApprovalDecisionKind.APPROVE
+        else ApprovalStatus.REJECTED
+    )
+    expected_action_state = (
+        ExternalActionState.APPROVED
+        if expected_status is ApprovalStatus.APPROVED
+        else ExternalActionState.REJECTED
+    )
+    if (
+        decision.authentication_method not in {"local_fixed", "bearer"}
+        or decision.authority_roles != request.policy.required_roles | frozenset({APPROVER_ROLE})
+        or decision.authority_scopes
+        != request.policy.required_scopes | frozenset({APPROVAL_DECIDE_SCOPE})
+        or (not request.policy.allow_self_approval and decision.actor_id == request.requested_by)
+    ):
+        raise ApprovalRecordServiceError(
+            "approval_authority_snapshot_mismatch",
+            "approval history lost its exact authorized human decision",
+        )
+    decided_request = StoredActionApprovalRequest(
+        request=request,
+        status=expected_status,
+        version=2,
+        updated_at=decision.decided_at,
+        decision=decision,
+    )
+    decided_action = replace(
+        action,
+        state=expected_action_state,
+        updated_at=decision.decided_at,
+        version=action_version,
+        delivery_attempt_count=0,
+        reservation=None,
+        lease=None,
+        call_started_at=None,
+        result=None,
+        terminal_reason_code=(
+            None if expected_action_state is ExternalActionState.APPROVED else "approval_rejected"
+        ),
+        superseded_by_action_id=None,
+        superseded_at=None,
+    )
+    pending_action = replace(
+        decided_action,
+        state=ExternalActionState.AWAITING_APPROVAL,
+        updated_at=request.requested_at,
+        version=action_version - 1,
+        terminal_reason_code=None,
+    )
+    context = AuditContext.authenticated_user(
+        decision.actor_id,
+        authentication_method=decision.authentication_method,
+        correlation_id=decision.correlation_id,
+    )
+    factory = AuditEventFactory(context)
+    expected_action = factory.action_decided(
+        pending_action,
+        decided_action,
+        decided_request,
+    )
+    expected_approval = factory.approval_decided(
+        StoredActionApprovalRequest.created(request),
+        decided_request,
+        decided_action,
+    )
+    action_draft = await _mutation_draft(
+        unit_of_work,
+        aggregate_type="external_action",
+        aggregate_id=action.id,
+        mutation_version=action_version,
+    )
+    approval_draft = await _mutation_draft(
+        unit_of_work,
+        aggregate_type="approval_request",
+        aggregate_id=request.id,
+        mutation_version=2,
+    )
+    if action_draft != expected_action or approval_draft != expected_approval:
+        raise ApprovalRecordServiceError(
+            "approval_audit_conflict",
+            "stored approval decision audits differ from their exact lifecycle",
+        )
+
+
+async def require_complete_member_history(
+    unit_of_work: UnitOfWork,
+    histories: tuple[StoredActionApprovalRequest, ...],
+    actions: tuple[ExternalAction, ...],
+) -> None:
+    """Require initial registration and every renewal generation audit witness."""
+
+    if histories:
+        await _require_complete_run_timeline(
+            unit_of_work,
+            histories[0].request.run_id,
+        )
+    grouped: dict[str, list[StoredActionApprovalRequest]] = defaultdict(list)
+    for stored in histories:
+        grouped[stored.request.action_id].append(stored)
+    action_by_id = {action.id: action for action in actions}
+    if not grouped or set(grouped) != set(action_by_id):
+        raise ApprovalRecordServiceError(
+            "approval_history_membership_mismatch",
+            "approval history does not exactly cover the authorization members",
+        )
+    for action_id, action in action_by_id.items():
+        chain = sorted(grouped[action_id], key=lambda stored: stored.request.generation)
+        if [stored.request.generation for stored in chain] != list(range(1, len(chain) + 1)):
+            raise ApprovalRecordServiceError(
+                "approval_history_generation_gap",
+                "approval history generations are not contiguous",
+            )
+        await _require_initial_action_audits(unit_of_work, action)
+        expected_action_version = 2
+        for index, stored in enumerate(chain):
+            await _require_request_audit(
+                unit_of_work,
+                stored,
+                expected_action_version=expected_action_version,
+            )
+            if stored.decision is not None:
+                expected_action_version += 1
+                await _require_decision_audits(
+                    unit_of_work,
+                    stored,
+                    action,
+                    action_version=expected_action_version,
+                )
+            if stored.expired_at is not None:
+                expiry_action_version, expiry_time = await _require_expiry_audit(
+                    unit_of_work,
+                    stored,
+                )
+                expected_expiry_action_version = expected_action_version + (
+                    1 if stored.decision is not None else 0
+                )
+                if expiry_action_version != expected_expiry_action_version:
+                    raise ApprovalRecordServiceError(
+                        "approval_history_action_version_mismatch",
+                        "approval expiry history disagrees with its action generation",
+                    )
+                if stored.decision is not None:
+                    await _require_action_reopened_audit(
+                        unit_of_work,
+                        action,
+                        mutation_version=expiry_action_version,
+                        occurred_at=expiry_time,
+                    )
+                expected_action_version = expiry_action_version
+            if stored.replacement_request_id is not None:
+                if (
+                    index + 1 >= len(chain)
+                    or chain[index + 1].request.id != stored.replacement_request_id
+                ):
+                    raise ApprovalRecordServiceError(
+                        "approval_history_replacement_missing",
+                        "approval renewal history lost its exact replacement request",
+                    )
+                await _require_renewal_audit(
+                    unit_of_work,
+                    stored,
+                    expected_action_version=expected_action_version,
+                )
+            elif index + 1 != len(chain):
+                raise ApprovalRecordServiceError(
+                    "approval_history_replacement_mismatch",
+                    "approval history contains an unlinked later generation",
+                )
+
+
 class ApprovalRecordService:
     """Compose RUN-05 action persistence with a complete approval request set."""
 
@@ -356,12 +592,35 @@ class ApprovalRecordService:
                     "new actions unexpectedly resolved to an existing approval set",
                 )
             requests = inserted.requests
+            authorization_set = inserted.authorization_set
+            authorization_head = inserted.head
         else:
-            requests = await unit_of_work.approvals.list_current_set(
-                plan.run_id,
-                plan.plan_hash,
-                plan.proposed_actions[0].envelope.proposal_revision,
-            )
+            try:
+                selection = await unit_of_work.approvals.get_current_authorization_set(plan.run_id)
+                epoch = await unit_of_work.approvals.get_authorization_set_epoch(
+                    plan.run_id,
+                    plan.plan_hash,
+                    plan.proposed_actions[0].envelope.proposal_revision,
+                )
+                requests = await unit_of_work.approvals.list_current_set(
+                    plan.run_id,
+                    plan.plan_hash,
+                    plan.proposed_actions[0].envelope.proposal_revision,
+                )
+            except ApprovalRepositoryConflict:
+                raise
+            except RuntimeError as exc:
+                raise ApprovalRecordServiceError(
+                    getattr(exc, "code", "approval_set_corrupt"),
+                    "authorization set replay could not be validated",
+                ) from None
+            if selection is None or epoch is None or selection.authorization_set != epoch:
+                raise ApprovalRecordServiceError(
+                    "authorization_set_head_missing",
+                    "replayed approval set lacks its exact current head and epoch",
+                )
+            authorization_set = selection.authorization_set
+            authorization_head = selection.head
             candidate_by_step = {request.step_key: request for request in plan.approval_requests}
             stored_by_step = {stored.request.step_key: stored for stored in requests}
             actions_by_step = {
@@ -383,6 +642,12 @@ class ApprovalRecordService:
                     "approval_replay_conflict",
                     "replayed plan differs from the authoritative approval request set",
                 )
+        _require_authorization_set_binding(
+            plan,
+            authorization_set,
+            authorization_head,
+            tuple(requests),
+        )
         reloaded_actions = await unit_of_work.external_actions.list_plan_set(
             plan.run_id,
             plan.plan_hash,
@@ -447,6 +712,96 @@ class ApprovalRecordService:
         expected_version: int,
         audit_context: AuditContext,
     ) -> StoredActionApprovalRequest:
+        self._validate_expiry_identity(request_id, expected_version)
+        async with self._dependencies.unit_of_work() as unit_of_work:
+            expired = await self.mark_expired_in_uow(
+                unit_of_work,
+                request_id=request_id,
+                expected_version=expected_version,
+                audit_context=audit_context,
+            )
+            await unit_of_work.commit()
+            return expired
+
+    async def mark_expired_in_uow(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        request_id: str,
+        expected_version: int,
+        audit_context: AuditContext,
+        expired_at: datetime | None = None,
+    ) -> StoredActionApprovalRequest:
+        """Expire one leaf without committing so a boundary check can stay atomic."""
+
+        self._validate_expiry_identity(request_id, expected_version)
+        current = await unit_of_work.approvals.get(request_id)
+        if current is None:
+            raise ApprovalRecordServiceError(
+                "approval_request_missing", "approval expiration request does not exist"
+            )
+        if current.status is ApprovalStatus.EXPIRED:
+            await _require_complete_run_timeline(
+                unit_of_work,
+                current.request.run_id,
+            )
+            if expected_version not in {current.version, current.version - 1}:
+                raise ApprovalRecordServiceError(
+                    "approval_expiration_conflict",
+                    "expiration replay does not match the original approval version",
+                )
+            action = await unit_of_work.external_actions.get(current.request.action_id)
+            if action is None:
+                raise ApprovalRecordServiceError(
+                    "approval_action_missing",
+                    "expired approval lost its exact action",
+                )
+            if current.decision is not None:
+                action_version, recorded_expiry = await _require_expiry_audit(
+                    unit_of_work,
+                    current,
+                )
+                await _require_action_reopened_audit(
+                    unit_of_work,
+                    action,
+                    mutation_version=action_version,
+                    occurred_at=recorded_expiry,
+                )
+            else:
+                await _require_expiry_audit(unit_of_work, current)
+            return current
+        action = await unit_of_work.external_actions.get(current.request.action_id)
+        if action is None:
+            raise ApprovalRecordServiceError(
+                "approval_action_missing", "approval expiration lost its exact action"
+            )
+        expiration_time = expired_at or self._dependencies.utc_now()
+        expired = await unit_of_work.approvals.mark_expired(
+            request_id=request_id,
+            expected_version=expected_version,
+            expected_action_version=action.version,
+            expired_at=expiration_time,
+        )
+        updated_action = await unit_of_work.external_actions.get(action.id)
+        if updated_action is None:
+            raise ApprovalRecordServiceError(
+                "approval_action_missing", "expired approval action disappeared"
+            )
+        factory = AuditEventFactory(audit_context)
+        events: list[AuditEventDraft] = []
+        if current.status is ApprovalStatus.APPROVED:
+            events.append(
+                factory.action_awaiting_approval(
+                    updated_action,
+                    previous_state=ExternalActionState.APPROVED,
+                )
+            )
+        events.append(factory.approval_expired(current, expired, updated_action))
+        await unit_of_work.audits.append_many(tuple(events))
+        return expired
+
+    @staticmethod
+    def _validate_expiry_identity(request_id: str, expected_version: int) -> None:
         if type(expected_version) is not int or expected_version < 1:
             raise ApprovalRecordServiceError(
                 "approval_version_invalid",
@@ -458,69 +813,6 @@ class ApprovalRecordService:
             raise ApprovalRecordServiceError(
                 "approval_request_invalid", "approval request ID is invalid"
             ) from None
-        async with self._dependencies.unit_of_work() as unit_of_work:
-            current = await unit_of_work.approvals.get(request_id)
-            if current is None:
-                raise ApprovalRecordServiceError(
-                    "approval_request_missing", "approval expiration request does not exist"
-                )
-            if current.status is ApprovalStatus.EXPIRED:
-                await _require_complete_run_timeline(
-                    unit_of_work,
-                    current.request.run_id,
-                )
-                if expected_version not in {current.version, current.version - 1}:
-                    raise ApprovalRecordServiceError(
-                        "approval_expiration_conflict",
-                        "expiration replay does not match the original approval version",
-                    )
-                action = await unit_of_work.external_actions.get(current.request.action_id)
-                if action is None:
-                    raise ApprovalRecordServiceError(
-                        "approval_action_missing",
-                        "expired approval lost its exact action",
-                    )
-                if current.decision is not None:
-                    action_version, expired_at = await _require_expiry_audit(unit_of_work, current)
-                    await _require_action_reopened_audit(
-                        unit_of_work,
-                        action,
-                        mutation_version=action_version,
-                        occurred_at=expired_at,
-                    )
-                else:
-                    await _require_expiry_audit(unit_of_work, current)
-                return current
-            action = await unit_of_work.external_actions.get(current.request.action_id)
-            if action is None:
-                raise ApprovalRecordServiceError(
-                    "approval_action_missing", "approval expiration lost its exact action"
-                )
-            expired_at = self._dependencies.utc_now()
-            expired = await unit_of_work.approvals.mark_expired(
-                request_id=request_id,
-                expected_version=expected_version,
-                expected_action_version=action.version,
-                expired_at=expired_at,
-            )
-            updated_action = await unit_of_work.external_actions.get(action.id)
-            if updated_action is None:
-                raise ApprovalRecordServiceError(
-                    "approval_action_missing", "expired approval action disappeared"
-                )
-            factory = AuditEventFactory(audit_context)
-            events: list[AuditEventDraft] = []
-            if current.status is ApprovalStatus.APPROVED:
-                events.append(
-                    factory.action_awaiting_approval(
-                        updated_action,
-                        previous_state=ExternalActionState.APPROVED,
-                    )
-                )
-            events.append(factory.approval_expired(current, expired, updated_action))
-            await unit_of_work.audits.append_many(tuple(events))
-            await unit_of_work.commit()
-            return expired
 
     async def renew_expired(
         self,

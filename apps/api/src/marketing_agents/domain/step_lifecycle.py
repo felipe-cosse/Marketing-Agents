@@ -16,7 +16,9 @@ class StepLifecycleCommand(StrEnum):
     INITIALIZE = "initialize"
     MARK_READY = "mark_ready"
     WAIT_FOR_APPROVAL = "wait_for_approval"
+    RELEASE_APPROVAL = "release_approval"
     START = "start"
+    START_RESERVED_WRITE = "start_reserved_write"
     SUCCEED = "succeed"
     FAIL = "fail"
     REJECT = "reject"
@@ -90,7 +92,11 @@ class StepStateTransition:
                 StepLifecycleCommand.WAIT_FOR_APPROVAL: {
                     (StepState.PENDING, StepState.AWAITING_APPROVAL)
                 },
+                StepLifecycleCommand.RELEASE_APPROVAL: {
+                    (StepState.AWAITING_APPROVAL, StepState.READY)
+                },
                 StepLifecycleCommand.START: {(StepState.READY, StepState.EXECUTING)},
+                StepLifecycleCommand.START_RESERVED_WRITE: {(StepState.READY, StepState.EXECUTING)},
                 StepLifecycleCommand.SUCCEED: {(StepState.EXECUTING, StepState.SUCCEEDED)},
                 StepLifecycleCommand.FAIL: {(StepState.EXECUTING, StepState.FAILED)},
                 StepLifecycleCommand.REJECT: {(StepState.AWAITING_APPROVAL, StepState.REJECTED)},
@@ -142,6 +148,8 @@ class StepTransitionResult:
             self.transition.command
             in {
                 StepLifecycleCommand.WAIT_FOR_APPROVAL,
+                StepLifecycleCommand.RELEASE_APPROVAL,
+                StepLifecycleCommand.START_RESERVED_WRITE,
                 StepLifecycleCommand.REJECT,
             }
             and self.step.effect is not Effect.WRITE
@@ -221,6 +229,14 @@ def transition_step(
         ):
             _reject("invalid_transition", "step cannot await approval")
         next_state, reason_code = StepState.AWAITING_APPROVAL, "step_approval_required"
+    elif command is StepLifecycleCommand.RELEASE_APPROVAL:
+        if (
+            step.state is not StepState.AWAITING_APPROVAL
+            or step.effect.value != "write"
+            or not isinstance(context, NoStepTransitionContext)
+        ):
+            _reject("invalid_transition", "write step approval cannot release")
+        next_state, reason_code = StepState.READY, "approval_barrier_released"
     elif command is StepLifecycleCommand.START:
         if (
             step.state is not StepState.READY
@@ -229,6 +245,14 @@ def transition_step(
         ):
             _reject("invalid_transition", "step cannot start")
         next_state, reason_code = StepState.EXECUTING, "step_execution_started"
+    elif command is StepLifecycleCommand.START_RESERVED_WRITE:
+        if (
+            step.state is not StepState.READY
+            or step.effect.value != "write"
+            or not isinstance(context, NoStepTransitionContext)
+        ):
+            _reject("invalid_transition", "reserved write step cannot start")
+        next_state, reason_code = StepState.EXECUTING, "reserved_write_started"
     elif command is StepLifecycleCommand.SUCCEED:
         if step.state is not StepState.EXECUTING or not isinstance(
             context, NoStepTransitionContext
