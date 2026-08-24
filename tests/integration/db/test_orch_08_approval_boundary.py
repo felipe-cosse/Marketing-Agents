@@ -1,4 +1,4 @@
-"""ORCH-08 complete-set approval boundary and terminal zero-call branches."""
+"""ORCH-06/ORCH-08 approval boundary, cancellation, and zero-call branches."""
 
 from __future__ import annotations
 
@@ -14,6 +14,10 @@ from marketing_agents.application.ports.external_writes import (
     ConnectorDeliveryContract,
     ConnectorDeliveryFailure,
 )
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterRequest,
+    ReadAdapterResult,
+)
 from marketing_agents.application.services.approval_boundaries import (
     ApprovalBoundaryDisposition,
     ApprovalBoundaryService,
@@ -24,6 +28,11 @@ from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionService,
 )
 from marketing_agents.application.services.approval_records import ApprovalRecordService
+from marketing_agents.application.services.audit_events import AuditEventFactory
+from marketing_agents.application.services.controlled_read_executor import (
+    ControlledReadCommand,
+    ControlledReadExecutor,
+)
 from marketing_agents.application.services.external_action_dispatcher import (
     DispatchDisposition,
     ExternalActionDispatcher,
@@ -91,6 +100,7 @@ from tests.integration.db.test_run_08_approval_persistence import (
 )
 from tests.support.identity import human_principal
 from tests.support.incoming_work import validate_incoming_for_test
+from tests.support.read_adapter import ExactReadContractAdapter, observation_for
 from tests.unit.application.test_run_02_effect_aware_planning import CATALOG
 
 
@@ -283,20 +293,26 @@ async def _complete_read_dependency(
 ) -> None:
     _, steps, _, _, _ = await _current(dependencies, run_id)
     read = steps[0]
-    for command in (
+    clock.current += timedelta(seconds=1)
+    ready = await RunStepLifecycleService(dependencies).advance(
+        read.id,
+        read.version,
         StepLifecycleCommand.MARK_READY,
-        StepLifecycleCommand.START,
-        StepLifecycleCommand.SUCCEED,
-    ):
-        clock.current += timedelta(seconds=1)
-        result = await RunStepLifecycleService(dependencies).advance(
-            read.id,
-            read.version,
-            command,
-            NoStepTransitionContext(),
-            audit_context=_context(f"dispatch.read.{command.value}"),
-        )
-        read = result.step
+        NoStepTransitionContext(),
+        audit_context=_context("dispatch.read.mark_ready"),
+    )
+
+    class _ReadAdapter(ExactReadContractAdapter):
+        async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+            assert request.step_id == ready.step.id
+            return observation_for(request, {"membership": "confirmed"})
+
+    clock.current += timedelta(seconds=1)
+    completed = await ControlledReadExecutor(dependencies, _ReadAdapter()).execute(
+        ControlledReadCommand(ready.step.id, {"query": "release-write-dependency"}),
+        audit_context=_context("dispatch.read.controlled"),
+    )
+    assert completed.step.state is StepState.SUCCEEDED
 
 
 @pytest.mark.asyncio
@@ -955,10 +971,12 @@ async def test_orch_08_rejection_closes_an_expired_sibling_without_release(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claim_before_cancel", (False, True))
 async def test_orch_08_post_release_cancel_blocks_claim_and_connector_call(
     tmp_path: Path,
+    claim_before_cancel: bool,
 ) -> None:
-    runtime = await _runtime(tmp_path / "orch-08-post-release-cancel.db")
+    runtime = await _runtime(tmp_path / f"orch-08-post-release-cancel-{claim_before_cancel}.db")
     clock = MutableClock()
     dependencies = _dependencies(runtime, clock=clock, ids=IncrementingIds(1300))
     gateway = _ObservingRejectGateway(runtime)
@@ -974,11 +992,37 @@ async def test_orch_08_post_release_cancel_blocks_claim_and_connector_call(
             plan.run_id,
             suffix="post-release-cancel",
         )
+        if claim_before_cancel:
+            await _complete_read_dependency(dependencies, clock, plan.run_id)
         run, _, selected, _, actions = await _current(dependencies, plan.run_id)
         assert run.state is RunState.EXECUTING
         assert selected.authorization_set.status.value == "released"
-        action = actions[0]
-        assert action is not None
+        action = next(
+            candidate
+            for candidate in actions
+            if candidate is not None and candidate.envelope.step_key == "welcome-z"
+        )
+        if claim_before_cancel:
+            async with dependencies.unit_of_work() as unit_of_work:
+                authority = await unit_of_work.approvals.get_release_authority(action.id)
+                assert authority is not None
+                clock.current += timedelta(seconds=1)
+                claimed = await unit_of_work.external_actions.claim_reserved(
+                    action_id=action.id,
+                    expected_version=action.version,
+                    authority=authority,
+                    lease_owner="worker.orch-06.claimed-before-cancel",
+                    claimed_at=clock.current,
+                    lease_expires_at=clock.current + timedelta(minutes=1),
+                )
+                assert claimed is not None
+                await unit_of_work.audits.append(
+                    AuditEventFactory(
+                        _context("post-release-cancel.claim")
+                    ).action_dispatch_claimed(action, claimed)
+                )
+                await unit_of_work.commit()
+                action = claimed
 
         clock.current += timedelta(seconds=1)
         cancelled = await ApprovalBoundaryService(dependencies).cancel(
@@ -992,23 +1036,36 @@ async def test_orch_08_post_release_cancel_blocks_claim_and_connector_call(
                 gateway,
                 WriteAuthorizationGuard(),
             ).dispatch_once(action.id, lease_owner="worker.orch-08.cancelled")
-        assert blocked.value.code == "release_authority_missing"
+        assert blocked.value.code == "action_not_dispatchable"
         assert gateway.calls == 0
 
-        run, _, selected, _, actions = await _current(dependencies, plan.run_id)
+        run, steps, selected, _, actions = await _current(dependencies, plan.run_id)
         assert run.state is RunState.CANCELLED
         assert selected.authorization_set.status.value == "released"
-        assert actions[0] is not None
-        assert actions[0].state is ExternalActionState.DISPATCH_RESERVED
+        assert all(candidate is not None for candidate in actions)
+        assert all(
+            candidate.state is ExternalActionState.CANCELLED
+            and candidate.terminal_reason_code == "operator_cancelled"
+            and candidate.lease is None
+            and candidate.call_started_at is None
+            for candidate in actions
+            if candidate is not None
+        )
+        assert all(step.state is not StepState.READY for step in steps)
+        replay = await ApprovalBoundaryService(dependencies).evaluate(
+            plan.run_id,
+            audit_context=_context("post-release-cancel.replay"),
+        )
+        assert replay.disposition is ApprovalBoundaryDisposition.CANCELLED
         async with runtime.session_factory() as session:
-            attempts = int(
-                (
-                    await session.execute(
-                        select(func.count(ExternalActionDispatchAttemptRecord.external_action_id))
-                    )
-                ).scalar_one()
+            attempt_rows = tuple(
+                (await session.execute(select(ExternalActionDispatchAttemptRecord))).scalars()
             )
-        assert attempts == 0
+        assert len(attempt_rows) == int(claim_before_cancel)
+        if attempt_rows:
+            assert attempt_rows[0].call_started_at is None
+            assert attempt_rows[0].conclusion == "cancelled"
+            assert attempt_rows[0].reason_code == "operator_cancelled"
     finally:
         await runtime.dispose()
 

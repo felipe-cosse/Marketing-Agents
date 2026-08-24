@@ -9,6 +9,12 @@ from typing import Any
 
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import Effect, RunState, StepState
+from marketing_agents.domain.runtime_policy import (
+    RunRuntimePolicy,
+    StepRuntimePolicy,
+    attempt_kind_for_connector,
+    runtime_rate_limit_key,
+)
 
 from ._validation import (
     frozen_mapping,
@@ -32,6 +38,7 @@ class RunPlanSnapshot:
     routing_hash: str
     approval_required: bool
     step_count: int
+    runtime_policy: RunRuntimePolicy
     created_at: datetime
 
     def __post_init__(self) -> None:
@@ -62,6 +69,10 @@ class RunPlanSnapshot:
                 raise ValueError(f"{name} must be positive")
         if not isinstance(self.approval_required, bool):
             raise ValueError("plan approval disposition must be boolean")
+        if type(self.runtime_policy) is not RunRuntimePolicy:
+            raise ValueError("plan runtime policy must use the exact immutable snapshot")
+        if self.step_count > self.runtime_policy.max_steps:
+            raise ValueError("plan step count exceeds its immutable runtime policy")
         require_utc(self.created_at, "plan creation time")
 
 
@@ -218,9 +229,13 @@ class RunStep:
     binding_id: str | None = field(kw_only=True)
     binding_configuration_revision: int | None = field(kw_only=True)
     request_schema_id: str | None = field(kw_only=True)
+    result_schema_id: str | None = field(kw_only=True)
     request_redaction_fields: tuple[str, ...] = field(kw_only=True)
+    result_redaction_fields: tuple[str, ...] = field(kw_only=True)
+    data_classification: DataClassification = field(kw_only=True)
     idempotency_support: str = field(kw_only=True)
     timeout_seconds: int | None = field(kw_only=True)
+    runtime_policy: StepRuntimePolicy = field(kw_only=True)
     approval_policy_id: str = field(kw_only=True)
     approval_required_roles: tuple[str, ...] = field(kw_only=True)
     approval_required_scopes: tuple[str, ...] = field(kw_only=True)
@@ -257,6 +272,10 @@ class RunStep:
             require_id(self.binding_id, "step binding ID")
         if self.request_schema_id is not None:
             require_id(self.request_schema_id, "step request schema ID")
+        if self.result_schema_id is not None:
+            require_id(self.result_schema_id, "step result schema ID")
+        if type(self.data_classification) is not DataClassification:
+            raise ValueError("step data classification must use the exact enum")
         if not isinstance(self.ordinal, int) or isinstance(self.ordinal, bool) or self.ordinal < 1:
             raise ValueError("step ordinal must be positive")
         if (
@@ -281,6 +300,10 @@ class RunStep:
             self.request_redaction_fields,
             "step request redaction fields",
         )
+        require_json_pointers(
+            self.result_redaction_fields,
+            "step result redaction fields",
+        )
         for values, name in (
             (self.approval_required_roles, "step approval roles"),
             (self.approval_required_scopes, "step approval scopes"),
@@ -295,6 +318,18 @@ class RunStep:
             "unavailable",
         }:
             raise ValueError("step idempotency support is invalid")
+        if type(self.runtime_policy) is not StepRuntimePolicy:
+            raise ValueError("step runtime policy must use the exact immutable snapshot")
+        if self.runtime_policy.attempt_kind is not attempt_kind_for_connector(
+            self.connector_family
+        ):
+            raise ValueError("step runtime attempt kind differs from its connector family")
+        if self.runtime_policy.rate_limit.key != runtime_rate_limit_key(
+            template_id=self.template_id,
+            max_calls=self.runtime_policy.rate_limit.max_calls,
+            window_seconds=self.runtime_policy.rate_limit.window_seconds,
+        ):
+            raise ValueError("step runtime rate limit must bind its selected template")
         require_id(self.approval_policy_id, "step approval policy ID")
         if self.timeout_seconds is not None and (
             not isinstance(self.timeout_seconds, int)
@@ -307,15 +342,28 @@ class RunStep:
                 self.binding_id is not None
                 or self.binding_configuration_revision is not None
                 or self.timeout_seconds is not None
+                or self.request_redaction_fields
+                or self.result_redaction_fields
+                or self.data_classification is not DataClassification.INTERNAL
             ):
-                raise ValueError("non-connector steps cannot retain a binding or timeout")
+                raise ValueError("non-connector steps cannot retain connector contract metadata")
+            if self.connector_family == "model" and (
+                self.request_schema_id is None or self.result_schema_id is None
+            ):
+                raise ValueError("model steps require their selected template schema pair")
+            if self.connector_family == "artifact" and (
+                self.request_schema_id is not None or self.result_schema_id is not None
+            ):
+                raise ValueError("artifact no-call steps cannot retain call schema IDs")
         elif (
             self.binding_id is None
             or self.binding_configuration_revision is None
             or self.binding_configuration_revision != self.configuration_revision
             or self.timeout_seconds is None
+            or self.request_schema_id is None
+            or self.result_schema_id is None
         ):
-            raise ValueError("external connector steps require a complete binding snapshot")
+            raise ValueError("external connector steps require a complete contract snapshot")
         if self.approval_expires_after_seconds is not None and (
             not isinstance(self.approval_expires_after_seconds, int)
             or isinstance(self.approval_expires_after_seconds, bool)
@@ -344,6 +392,7 @@ class RunStep:
             or self.approval_expires_after_seconds is None
             or self.approval_allow_self_approval is None
             or self.request_schema_id is None
+            or self.result_schema_id is None
         ):
             raise ValueError("write step requires a complete external approval snapshot")
         if not isinstance(self.terminal_result, bool):

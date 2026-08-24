@@ -438,6 +438,12 @@ class ConnectorOperationRegistry:
 
         for capability_id, catalog_item in catalog_external.items():
             metadata = self._operations[capability_id].metadata
+            if metadata.request_schema_id != _schema_id(
+                capability_id, "request"
+            ) or metadata.result_schema_id != _schema_id(capability_id, "result"):
+                raise ConnectorBundleConfigurationError(
+                    f"connector schema identity drift for {capability_id!r}"
+                )
             actual = (
                 metadata.connector_family,
                 metadata.effect.value,

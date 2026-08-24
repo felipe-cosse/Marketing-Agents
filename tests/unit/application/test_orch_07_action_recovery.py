@@ -85,6 +85,7 @@ def _dispatching_action(
             expires_at=NOW - timedelta(minutes=1),
         ),
         call_started_at=claimed_at if call_started else None,
+        call_deadline_at=(claimed_at + timedelta(seconds=30) if call_started else None),
     )
 
 
@@ -129,8 +130,20 @@ def test_orch_07_recovery_classifier_rejects_nonpersisted_or_unexpired_state() -
 
     with pytest.raises(TypeError, match="authoritative ExternalAction"):
         classify_stale_action_recovery(object(), now=NOW)  # type: ignore[arg-type]
+    pre_call_action = _dispatching_action(
+        call_started=False,
+        idempotency_support="required",
+        attempts_remain=True,
+    )
     with pytest.raises(ValueError, match="unexpired"):
-        classify_stale_action_recovery(action, now=NOW - timedelta(minutes=2))
+        classify_stale_action_recovery(pre_call_action, now=NOW - timedelta(minutes=2))
+    active_call = replace(
+        action,
+        call_started_at=NOW - timedelta(seconds=2),
+        call_deadline_at=NOW + timedelta(seconds=1),
+    )
+    with pytest.raises(ValueError, match="cannot preempt"):
+        classify_stale_action_recovery(active_call, now=NOW)
     with pytest.raises(ValueError, match="dispatching action"):
         classify_stale_action_recovery(
             replace(
@@ -138,6 +151,7 @@ def test_orch_07_recovery_classifier_rejects_nonpersisted_or_unexpired_state() -
                 state=ExternalActionState.DISPATCH_RESERVED,
                 lease=None,
                 call_started_at=None,
+                call_deadline_at=None,
                 delivery_attempt_count=0,
             ),
             now=NOW,

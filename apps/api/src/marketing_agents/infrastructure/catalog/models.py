@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .errors import CatalogIssue
 
@@ -80,6 +80,16 @@ class BudgetPolicy(FrozenModel):
     max_steps: int = Field(ge=1, le=20)
     max_model_calls: int = Field(ge=0, le=10)
     max_tool_calls: int = Field(ge=0, le=20)
+    max_input_bytes: int = Field(ge=1, le=1_048_576)
+    max_input_field_bytes: int = Field(ge=1, le=262_144)
+    max_output_bytes: int = Field(ge=1, le=4_194_304)
+    max_model_output_tokens: int = Field(ge=1, le=32_768)
+
+    @model_validator(mode="after")
+    def validate_input_limits(self) -> Self:
+        if self.max_input_field_bytes > self.max_input_bytes:
+            raise ValueError("maximum input field bytes cannot exceed total input bytes")
+        return self
 
 
 class RateLimitPolicy(FrozenModel):
@@ -109,6 +119,18 @@ class AgentTemplateRecord(FrozenModel):
     source_confidence: Literal["high", "medium", "low"]
     source_references: tuple[str, ...]
     implementation_notes: str
+
+    @property
+    def input_schema_id(self) -> str:
+        """Compiler-validated stable identity of this template's input schema."""
+
+        return f"urn:marketing-agents:catalog:v1:{self.id}:input"
+
+    @property
+    def output_schema_id(self) -> str:
+        """Compiler-validated stable identity of this template's output schema."""
+
+        return f"urn:marketing-agents:catalog:v1:{self.id}:output"
 
 
 class InstanceVariant(FrozenModel):

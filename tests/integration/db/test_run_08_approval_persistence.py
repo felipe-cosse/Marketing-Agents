@@ -73,10 +73,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.schema import CreateTable
 
+from tests.support.execution_control import execution_control_repository
 from tests.support.incoming_work import validate_incoming_for_test
 from tests.unit.application.test_run_02_effect_aware_planning import (
     CATALOG,
     TARGET_INSTANCE,
+    WORKER_TEMPLATE,
     WORKFLOW_HASH,
     RecordingClock,
     RecordingIds,
@@ -205,6 +207,7 @@ def _uow_factory(
             approvals=approval_factory,
             run_steps=SQLAlchemyRunStepRepository,
             external_actions=SQLAlchemyExternalActionRepository,
+            execution_control=execution_control_repository,
         ),
     )
 
@@ -271,7 +274,15 @@ def _plan(
 
 
 def _multi_plan(run_id: str, *, seed: int) -> tuple[EffectPlan, EffectPlanRequest]:
-    planner, _, _ = _planner(ids=RecordingIds(seed=seed))
+    templates = tuple(
+        item.model_copy(
+            update={"budget_policy": item.budget_policy.model_copy(update={"max_tool_calls": 3})}
+        )
+        if item.id == WORKER_TEMPLATE
+        else item
+        for item in CATALOG.templates
+    )
+    planner, _, _ = _planner(ids=RecordingIds(seed=seed), templates=templates)
     request = EffectPlanRequest(
         run_id=run_id,
         workflow_definition_hash=WORKFLOW_HASH,

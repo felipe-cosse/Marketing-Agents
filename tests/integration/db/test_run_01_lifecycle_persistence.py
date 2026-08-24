@@ -10,6 +10,10 @@ from typing import cast
 
 import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
+from marketing_agents.application.ports.read_adapter import (
+    ReadAdapterRequest,
+    ReadAdapterResult,
+)
 from marketing_agents.application.ports.repositories import (
     RunInsertResult,
     RunRepository,
@@ -17,17 +21,19 @@ from marketing_agents.application.ports.repositories import (
 from marketing_agents.application.services import (
     AdmissionDisposition,
     AuditedPlanPersistenceService,
+    ControlledReadCommand,
+    ControlledReadExecutor,
+    ExecutionActivationService,
     ReceiveRunRequest,
     ReceiveRunResult,
     RunLifecycleService,
     RunLifecycleServiceError,
-    RunStepLifecycleService,
     WorkAdmissionService,
 )
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run
-from marketing_agents.domain.enums import RunState, WorkMode
+from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.run_lifecycle import (
     CancellationContext,
     CompletionContext,
@@ -36,10 +42,6 @@ from marketing_agents.domain.run_lifecycle import (
     RunStateTransition,
     RunTransitionContext,
     RunTransitionResult,
-)
-from marketing_agents.domain.step_lifecycle import (
-    NoStepTransitionContext,
-    StepLifecycleCommand,
 )
 from marketing_agents.infrastructure.db import (
     Base,
@@ -62,8 +64,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.execution_control import execution_control_repository
 from tests.support.incoming_work import validate_incoming_for_test
 from tests.support.orch_09_planning import build_read_only_plan
+from tests.support.read_adapter import ExactReadContractAdapter, observation_for
 
 NOW = datetime(2026, 8, 18, 12, tzinfo=UTC)
 CATALOG_HASH = "c" * 64
@@ -90,6 +94,11 @@ class IncrementingIds:
         value = f"{namespace}.{self._next:04d}"
         self.generated.append(value)
         return value
+
+
+class SuccessfulReadAdapter(ExactReadContractAdapter):
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        return observation_for(request, {"attempt_id": request.attempt_id, "completed": True})
 
 
 class AsyncBarrier:
@@ -245,6 +254,7 @@ def _unit_of_work_factory(
             runs=run_factory,
             audits=SQLAlchemyAuditRepository,
             run_steps=SQLAlchemyRunStepRepository,
+            execution_control=execution_control_repository,
         ),
     )
 
@@ -377,33 +387,21 @@ async def test_run_01_lifecycle_survives_restart_with_ordered_terminal_history(
             expected_run_version=run.version,
             audit_context=_audit_context("run-01.persist-plan"),
         )
-        run = persisted.run
-        run = await _advance(
-            restarted_lifecycle,
-            restarted_clock,
-            run,
-            RunLifecycleCommand.ACTIVATE_PLAN,
-            NoRunTransitionContext(),
+        restarted_clock.tick()
+        activated = await ExecutionActivationService(dependencies).activate(
+            persisted.run.id,
+            audit_context=_audit_context("run-01.activate-controlled-plan"),
         )
-        step_service = RunStepLifecycleService(dependencies)
-        step = persisted.steps[0]
-        for command in (
-            StepLifecycleCommand.MARK_READY,
-            StepLifecycleCommand.START,
-            StepLifecycleCommand.SUCCEED,
-        ):
-            restarted_clock.tick()
-            step = (
-                await step_service.advance(
-                    step.id,
-                    step.version,
-                    command,
-                    NoStepTransitionContext(),
-                    audit_context=_audit_context(
-                        f"run-01.step.{step.id}.{step.version}.{command.value}"
-                    ),
-                )
-            ).step
+        run = activated.run
+        restarted_clock.tick()
+        executed = await ControlledReadExecutor(
+            dependencies,
+            SuccessfulReadAdapter(),
+        ).execute(
+            ControlledReadCommand(activated.steps[0].id, {"campaign": "restart-safe"}),
+            audit_context=_audit_context("run-01.execute-controlled-read"),
+        )
+        assert executed.step.state is StepState.SUCCEEDED
         run = await _advance(
             restarted_lifecycle,
             restarted_clock,

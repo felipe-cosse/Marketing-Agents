@@ -98,7 +98,10 @@ class StepStateTransition:
                 StepLifecycleCommand.START: {(StepState.READY, StepState.EXECUTING)},
                 StepLifecycleCommand.START_RESERVED_WRITE: {(StepState.READY, StepState.EXECUTING)},
                 StepLifecycleCommand.SUCCEED: {(StepState.EXECUTING, StepState.SUCCEEDED)},
-                StepLifecycleCommand.FAIL: {(StepState.EXECUTING, StepState.FAILED)},
+                StepLifecycleCommand.FAIL: {
+                    (StepState.READY, StepState.FAILED),
+                    (StepState.EXECUTING, StepState.FAILED),
+                },
                 StepLifecycleCommand.REJECT: {(StepState.AWAITING_APPROVAL, StepState.REJECTED)},
                 StepLifecycleCommand.CANCEL: {
                     (StepState.PENDING, StepState.CANCELLED),
@@ -260,7 +263,9 @@ def transition_step(
             _reject("invalid_transition", "step cannot succeed")
         next_state, reason_code = StepState.SUCCEEDED, "step_succeeded"
     elif command is StepLifecycleCommand.FAIL:
-        if step.state is not StepState.EXECUTING or not isinstance(context, StepTerminalContext):
+        if step.state not in {StepState.READY, StepState.EXECUTING} or not isinstance(
+            context, StepTerminalContext
+        ):
             _reject("invalid_transition", "step cannot fail")
         next_state, reason_code = StepState.FAILED, context.reason_code
     elif command is StepLifecycleCommand.REJECT:

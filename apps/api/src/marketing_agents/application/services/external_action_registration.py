@@ -21,6 +21,7 @@ from marketing_agents.domain.entities import (
     ExternalAction,
 )
 from marketing_agents.domain.enums import Effect
+from marketing_agents.domain.runtime_policy import effective_call_timeout_seconds
 
 
 class ExternalActionRegistrationError(ValueError):
@@ -160,7 +161,10 @@ class ExternalActionRegistrationService:
                     Literal["required", "supported", "unavailable"],
                     step.idempotency_support,
                 ),
-                timeout_seconds=step.connector_timeout_seconds,
+                timeout_seconds=effective_call_timeout_seconds(
+                    step.runtime_policy,
+                    step.connector_timeout_seconds,
+                ),
             )
             actions.append(
                 ExternalAction.proposed(

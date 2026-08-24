@@ -18,6 +18,10 @@ from marketing_agents.domain.entities import (
     RunStep,
 )
 from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.execution_control import (
+    OperationExecutionPolicy,
+    RunExecutionPolicy,
+)
 from marketing_agents.domain.graph import DependencyGraph
 from marketing_agents.domain.run_lifecycle import (
     NoRunTransitionContext,
@@ -25,6 +29,7 @@ from marketing_agents.domain.run_lifecycle import (
     RunStateTransition,
     transition_run,
 )
+from marketing_agents.domain.runtime_policy import AttemptKind, effective_call_timeout_seconds
 from marketing_agents.domain.step_lifecycle import (
     NoStepTransitionContext,
     StepLifecycleCommand,
@@ -98,6 +103,12 @@ class AuditedPlanPersistenceService:
                         "persisted Run plan conflicts with its authoritative snapshot",
                         run_id=current.id,
                     ) from exc
+                await _initialize_execution_control(
+                    unit_of_work,
+                    stored.plan,
+                    stored.steps,
+                    expect_inserted=False,
+                )
                 await _require_plan_replay(
                     unit_of_work,
                     current,
@@ -193,6 +204,12 @@ class AuditedPlanPersistenceService:
                     "another transaction persisted the Run plan first",
                     run_id=current.id,
                 )
+            await _initialize_execution_control(
+                unit_of_work,
+                stored.plan,
+                stored.steps,
+                expect_inserted=True,
+            )
             factory = AuditEventFactory(audit_context)
             plan_event = factory.run_plan_recorded(
                 transition_result.run,
@@ -332,6 +349,7 @@ def _materialize_plan(
         routing_hash=effect_plan.routing_hash,
         approval_required=effect_plan.lifecycle_context.contains_write_actions,
         step_count=len(effect_plan.steps),
+        runtime_policy=effect_plan.run_policy,
         created_at=created_at,
     )
     selected = tuple(
@@ -394,9 +412,13 @@ def _materialize_plan(
                 binding_id=planned.binding_id,
                 binding_configuration_revision=planned.binding_configuration_revision,
                 request_schema_id=planned.request_schema_id,
+                result_schema_id=planned.result_schema_id,
                 request_redaction_fields=planned.request_redaction_fields,
+                result_redaction_fields=planned.result_redaction_fields,
+                data_classification=planned.data_classification,
                 idempotency_support=planned.idempotency_support,
                 timeout_seconds=planned.connector_timeout_seconds,
+                runtime_policy=planned.runtime_policy,
                 approval_policy_id=planned.approval_policy_id,
                 approval_required_roles=planned.approval_required_roles,
                 approval_required_scopes=planned.approval_required_scopes,
@@ -410,6 +432,86 @@ def _materialize_plan(
     step_tuple = tuple(steps)
     transitions = tuple(initial_pending_transition(step) for step in step_tuple)
     return plan, selected, assignments, step_tuple, transitions
+
+
+def _execution_policy_for_plan(
+    plan: RunPlanSnapshot,
+    steps: tuple[RunStep, ...],
+) -> RunExecutionPolicy:
+    """Derive the only executable READ-operation policy from sealed plan snapshots."""
+
+    operations = tuple(
+        OperationExecutionPolicy(
+            run_id=plan.run_id,
+            step_id=step.id,
+            operation_key=step.runtime_policy.operation_key,
+            kind=step.runtime_policy.attempt_kind,
+            capability_id=step.capability_id,
+            selected_instance_id=step.selected_instance_id,
+            configuration_revision=step.configuration_revision,
+            connector_family=step.connector_family,
+            binding_id=step.binding_id,
+            binding_configuration_revision=step.binding_configuration_revision,
+            request_schema_id=step.request_schema_id,
+            result_schema_id=step.result_schema_id,
+            request_redaction_fields=step.request_redaction_fields,
+            result_redaction_fields=step.result_redaction_fields,
+            data_classification=step.data_classification,
+            connector_timeout_seconds=step.timeout_seconds,
+            policy_hash=plan.plan_hash,
+            max_attempts=step.runtime_policy.retry.max_attempts,
+            retry_backoff=step.runtime_policy.retry.backoff,
+            step_timeout_seconds=effective_call_timeout_seconds(
+                step.runtime_policy,
+                step.timeout_seconds,
+            ),
+            max_input_bytes=step.runtime_policy.budget.max_input_bytes,
+            max_input_field_bytes=step.runtime_policy.budget.max_input_field_bytes,
+            max_output_bytes=step.runtime_policy.budget.max_output_bytes,
+            max_model_output_tokens=step.runtime_policy.budget.max_model_output_tokens,
+            rate_limit_scope=step.runtime_policy.rate_limit.scope,
+            rate_limit_key=step.runtime_policy.rate_limit.key,
+            rate_window_max_calls=step.runtime_policy.rate_limit.max_calls,
+            rate_window_seconds=step.runtime_policy.rate_limit.window_seconds,
+        )
+        for step in steps
+        if step.effect.value == "read"
+        and step.runtime_policy.attempt_kind in {AttemptKind.MODEL, AttemptKind.TOOL}
+    )
+    return RunExecutionPolicy(
+        run_id=plan.run_id,
+        policy_hash=plan.plan_hash,
+        run_timeout_seconds=plan.runtime_policy.run_timeout_seconds,
+        max_model_calls=plan.runtime_policy.max_model_calls,
+        max_tool_calls=plan.runtime_policy.max_tool_calls,
+        operations=operations,
+        created_at=plan.created_at,
+    )
+
+
+async def _initialize_execution_control(
+    unit_of_work: UnitOfWork,
+    plan: RunPlanSnapshot,
+    steps: tuple[RunStep, ...],
+    *,
+    expect_inserted: bool,
+) -> None:
+    try:
+        result = await unit_of_work.execution_control.initialize(
+            _execution_policy_for_plan(plan, steps)
+        )
+    except RuntimeError as exc:
+        raise PlanPersistenceError(
+            getattr(exc, "code", "execution_policy_conflict"),
+            "Run execution policy could not be installed with its sealed plan",
+            run_id=plan.run_id,
+        ) from exc
+    if result.inserted is not expect_inserted:
+        raise PlanPersistenceError(
+            "execution_policy_replay_mismatch",
+            "execution control creation does not match the plan persistence disposition",
+            run_id=plan.run_id,
+        )
 
 
 def _validate_admission_scope(

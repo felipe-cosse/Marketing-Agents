@@ -214,6 +214,27 @@ class RunLifecycleService:
                 audit_context=audit_context,
                 error=error,
             )
+        if (
+            current.approval_required is False
+            and command in {RunLifecycleCommand.ACTIVATE_PLAN, RunLifecycleCommand.CANCEL}
+            and await unit_of_work.execution_control.get(current.id) is not None
+        ):
+            error = RunLifecycleServiceError(
+                "execution_control_service_required",
+                "controlled activation and cancellation require runtime-control composition",
+                run_id=run_id,
+                current_version=current.version,
+            )
+            return await self._rejected_attempt_in_uow(
+                unit_of_work,
+                current=current,
+                expected_version=expected_version,
+                command=command,
+                reason_code="invalid_transition",
+                occurred_at=self._dependencies.utc_now(),
+                audit_context=audit_context,
+                error=error,
+            )
         if command is RunLifecycleCommand.RECORD_PLAN:
             error = RunLifecycleServiceError(
                 "record_plan_requires_snapshot",

@@ -13,6 +13,7 @@ from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
     AuditRepository,
     ConnectorReceiptRepository,
+    ExecutionControlRepository,
     ExternalActionRepository,
     RunRepository,
     RunStepRepository,
@@ -33,6 +34,7 @@ class RepositoryBundle:
     run_steps: RunStepRepository | None = None
     external_actions: ExternalActionRepository | None = None
     connector_receipts: ConnectorReceiptRepository | None = None
+    execution_control: ExecutionControlRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +46,7 @@ class SQLAlchemyRepositoryFactories:
     run_steps: Callable[[AsyncSession], RunStepRepository] | None = None
     external_actions: Callable[[AsyncSession], ExternalActionRepository] | None = None
     connector_receipts: Callable[[AsyncSession], ConnectorReceiptRepository] | None = None
+    execution_control: Callable[[AsyncSession], ExecutionControlRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
@@ -57,6 +60,9 @@ class SQLAlchemyRepositoryFactories:
             ),
             connector_receipts=(
                 None if self.connector_receipts is None else self.connector_receipts(session)
+            ),
+            execution_control=(
+                None if self.execution_control is None else self.execution_control(session)
             ),
         )
 
@@ -123,6 +129,13 @@ class SQLAlchemyUnitOfWork:
         repository = self._require_repositories().connector_receipts
         if repository is None:
             raise SQLAlchemyUnitOfWorkError("connector receipt repository is not configured")
+        return repository
+
+    @property
+    def execution_control(self) -> ExecutionControlRepository:
+        repository = self._require_repositories().execution_control
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("execution-control repository is not configured")
         return repository
 
     async def __aenter__(self) -> SQLAlchemyUnitOfWork:

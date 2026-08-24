@@ -37,7 +37,20 @@ from marketing_agents.domain.enums import (
     RunState,
     StepState,
 )
+from marketing_agents.domain.execution_control import (
+    AttemptCompletionCommand,
+    AttemptReservationCommand,
+    DeliveryCallPermit,
+    DeliveryCallReservationCommand,
+    ExecutionAttempt,
+    ExpiredAttemptRecoveryCommand,
+    OperationExecutionPolicy,
+    RateLimitWindow,
+    RunExecutionControl,
+    RunExecutionPolicy,
+)
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
+from marketing_agents.domain.runtime_policy import RateLimitScope
 from marketing_agents.domain.step_lifecycle import (
     StepLifecycleCommand,
     StepStateTransition,
@@ -102,6 +115,137 @@ class RunRepository(Protocol):
     ) -> bool: ...
 
     async def list_transitions(self, run_id: str) -> tuple[RunStateTransition, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionControlInsertResult:
+    control: RunExecutionControl
+    operations: tuple[OperationExecutionPolicy, ...]
+    inserted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionControlStartResult:
+    control: RunExecutionControl
+    started: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionCancellationFenceResult:
+    control: RunExecutionControl
+    fenced: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptReservationResult:
+    control: RunExecutionControl
+    attempt: ExecutionAttempt
+    rate_window: RateLimitWindow
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptCompletionResult:
+    attempt: ExecutionAttempt
+    completed: bool
+
+    @property
+    def retry_not_before(self) -> datetime | None:
+        return self.attempt.retry_not_before
+
+    @property
+    def terminal_reason_code(self) -> str | None:
+        return self.attempt.terminal_reason_code
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryCallReservationResult:
+    control: RunExecutionControl
+    permit: DeliveryCallPermit
+    rate_window: RateLimitWindow
+
+
+class ExecutionControlRepositoryConflict(RuntimeError):
+    """Stable fail-closed runtime-control persistence conflict."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        if retry_after_seconds is not None and not 1 <= retry_after_seconds <= 3_600:
+            raise ValueError("retry-after seconds must be bounded")
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ExecutionControlRepository(Protocol):
+    async def initialize(
+        self,
+        policy: RunExecutionPolicy,
+    ) -> ExecutionControlInsertResult: ...
+
+    async def get(self, run_id: str) -> RunExecutionControl | None: ...
+
+    async def get_operation(
+        self,
+        step_id: str,
+        operation_key: str,
+    ) -> OperationExecutionPolicy | None: ...
+
+    async def start_execution(
+        self,
+        *,
+        run_id: str,
+        expected_control_version: int,
+        started_at: datetime,
+    ) -> ExecutionControlStartResult: ...
+
+    async def request_cancel(
+        self,
+        *,
+        run_id: str,
+        expected_control_version: int,
+        actor_digest: str,
+        requested_at: datetime,
+    ) -> ExecutionCancellationFenceResult: ...
+
+    async def reserve_attempt(
+        self,
+        command: AttemptReservationCommand,
+    ) -> AttemptReservationResult: ...
+
+    async def complete_attempt(
+        self,
+        command: AttemptCompletionCommand,
+    ) -> AttemptCompletionResult: ...
+
+    async def recover_expired_attempt(
+        self,
+        command: ExpiredAttemptRecoveryCommand,
+    ) -> AttemptCompletionResult: ...
+
+    async def reserve_delivery_call(
+        self,
+        command: DeliveryCallReservationCommand,
+    ) -> DeliveryCallReservationResult: ...
+
+    async def get_attempt(self, attempt_id: str) -> ExecutionAttempt | None: ...
+
+    async def list_attempts(
+        self,
+        step_id: str,
+        operation_key: str,
+    ) -> tuple[ExecutionAttempt, ...]: ...
+
+    async def get_rate_window(
+        self,
+        scope: RateLimitScope,
+        key: str,
+        started_at: datetime,
+    ) -> RateLimitWindow | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +362,12 @@ class ExternalActionRepository(Protocol):
         proposal_revision: int,
     ) -> tuple[ExternalAction, ...]: ...
 
+    async def list_run_plan(
+        self,
+        run_id: str,
+        plan_hash: str,
+    ) -> tuple[ExternalAction, ...]: ...
+
     async def add_proposed_set_or_get(
         self,
         actions: tuple[ExternalAction, ...],
@@ -243,8 +393,20 @@ class ExternalActionRepository(Protocol):
         lease_owner: str,
         attempt_number: int,
         started_at: datetime,
+        call_deadline_at: datetime,
         step_transition: StepTransitionResult | None,
     ) -> ActionCallStartResult | None: ...
+
+    async def cancel_unstarted_after_release(
+        self,
+        *,
+        action_id: str,
+        run_id: str,
+        plan_hash: str,
+        expected_version: int,
+        occurred_at: datetime,
+        reason_code: str = "operator_cancelled",
+    ) -> ExternalAction | None: ...
 
     async def complete_succeeded(
         self,

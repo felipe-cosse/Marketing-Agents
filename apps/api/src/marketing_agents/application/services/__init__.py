@@ -18,6 +18,18 @@ from .approval_records import (
     RegisteredApprovalSet,
     RenewedApprovalRequest,
 )
+from .controlled_read_executor import (
+    ControlledReadCommand,
+    ControlledReadExecutor,
+    ControlledReadExecutorError,
+    ControlledReadResult,
+    ReadExecutionClassification,
+)
+from .execution_activation import (
+    ExecutionActivationError,
+    ExecutionActivationResult,
+    ExecutionActivationService,
+)
 from .external_action_dispatcher import (
     DispatchDisposition,
     ExternalActionDispatcher,
@@ -52,6 +64,11 @@ from .plan_persistence import (
     PersistedRunPlan,
     PlanPersistenceError,
 )
+from .run_cancellation import (
+    RunCancellationResult,
+    RunCancellationService,
+    RunCancellationServiceError,
+)
 from .run_lifecycle import (
     ReceiveRunRequest,
     ReceiveRunResult,
@@ -63,6 +80,11 @@ from .run_lifecycle import (
 from .run_step_lifecycle import (
     RunStepLifecycleService,
     RunStepLifecycleServiceError,
+)
+from .terminal_execution_cleanup import (
+    TerminalExecutionCleanupError,
+    TerminalExecutionCleanupResult,
+    TerminalExecutionCleanupService,
 )
 from .work_admission import (
     AdmissionDisposition,
@@ -87,7 +109,14 @@ __all__ = [
     "CampaignBriefPolicy",
     "CampaignBriefRevision",
     "ConfiguredIncomingTrigger",
+    "ControlledReadCommand",
+    "ControlledReadExecutor",
+    "ControlledReadExecutorError",
+    "ControlledReadResult",
     "DispatchDisposition",
+    "ExecutionActivationError",
+    "ExecutionActivationResult",
+    "ExecutionActivationService",
     "ExternalActionDispatchError",
     "ExternalActionDispatchResult",
     "ExternalActionDispatcher",
@@ -99,6 +128,7 @@ __all__ = [
     "IncomingWorkValidator",
     "PersistedRunPlan",
     "PlanPersistenceError",
+    "ReadExecutionClassification",
     "ReceiveRunRequest",
     "ReceiveRunResult",
     "RegisteredApprovalSet",
@@ -107,10 +137,16 @@ __all__ = [
     "RenewedApprovalRequest",
     "RunAdvanceAttempt",
     "RunAdvanceDisposition",
+    "RunCancellationResult",
+    "RunCancellationService",
+    "RunCancellationServiceError",
     "RunLifecycleService",
     "RunLifecycleServiceError",
     "RunStepLifecycleService",
     "RunStepLifecycleServiceError",
+    "TerminalExecutionCleanupError",
+    "TerminalExecutionCleanupResult",
+    "TerminalExecutionCleanupService",
     "ValidatedIncomingWork",
     "WorkAdmissionResult",
     "WorkAdmissionService",

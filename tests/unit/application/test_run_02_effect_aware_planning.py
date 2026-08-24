@@ -36,6 +36,7 @@ from marketing_agents.domain.action_hash import (
 )
 from marketing_agents.domain.enums import Effect, TriggerKind
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
+from marketing_agents.domain.runtime_policy import RunRuntimePolicy
 from marketing_agents.infrastructure.adapters.connectors.registry import (
     build_connector_registry,
 )
@@ -95,6 +96,7 @@ def _planner(
     policies: tuple[object, ...] | None = None,
     operations: tuple[object, ...] | None = None,
     bindings: tuple[BindingSource, ...] | None = None,
+    run_policy: RunRuntimePolicy | None = None,
 ) -> tuple[EffectAwarePlanner, RecordingClock, RecordingIds]:
     clock = clock or RecordingClock()
     ids = ids or RecordingIds()
@@ -107,6 +109,13 @@ def _planner(
         approval_policies=policies or CATALOG.approval_policies,  # type: ignore[arg-type]
         operations=operations or REGISTRY.operations,  # type: ignore[arg-type]
         bindings=bindings if bindings is not None else _bindings(),
+        run_policy=run_policy
+        or RunRuntimePolicy(
+            max_steps=20,
+            max_model_calls=100,
+            max_tool_calls=1_000,
+            run_timeout_seconds=3_600,
+        ),
     )
     return planner, clock, ids
 
@@ -284,7 +293,15 @@ def test_run_02_all_writes_are_proposed_before_one_authorization_set_releases() 
         steps=(_read_step(), first, second),
         requested_by="principal.local.operator",
     )
-    planner, clock, ids = _planner()
+    templates = tuple(
+        item.model_copy(
+            update={"budget_policy": item.budget_policy.model_copy(update={"max_tool_calls": 3})}
+        )
+        if item.id == WORKER_TEMPLATE
+        else item
+        for item in CATALOG.templates
+    )
+    planner, clock, ids = _planner(templates=templates)
 
     plan = planner.plan(request)
 
@@ -541,12 +558,12 @@ def test_run_02_hash_domains_have_fixed_golden_vectors() -> None:
     plan = planner.plan(_request(include_write=True))
     proposal = plan.proposed_actions[0]
 
-    assert plan.plan_hash == "97de8173613e6d20a41e351c25c71b56274ff6537c6dcb2bce5601622f18d870"
+    assert plan.plan_hash == "99aaeadd503de1db32cdc3dc1395e3f3b78415c4898c89c71a5442ea31b4ec11"
     assert proposal.envelope.semantic_action_hash == (
         "4f4bee4353522eac5819cbc2ecec847b0363793723366418bfa3d8284a19a223"
     )
     assert proposal.action_hash == (
-        "29124bd4fe335c18487d19b6a037a040d82610601a5742c92cd827994b179e9b"
+        "b18d191851ad4881691fa5b547302698fc9ee024a62601ea2f21ea27e4e05b68"
     )
     assert proposal.envelope.destination == (
         "destination-sha256-v1:b074c70e6a182db3e95b92955b4e844318b52194d9ed0221ad0c13bc5300e386"

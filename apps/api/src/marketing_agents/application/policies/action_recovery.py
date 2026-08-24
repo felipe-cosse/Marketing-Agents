@@ -30,8 +30,14 @@ def classify_stale_action_recovery(
     lease = action.lease
     if action.state is not ExternalActionState.DISPATCHING or lease is None:
         raise ValueError("stale recovery requires a dispatching action with a current lease")
-    if lease.expires_at > now:
-        raise ValueError("stale recovery cannot classify an unexpired dispatch lease")
+    if action.call_started_at is not None:
+        call_deadline_at = action.call_deadline_at
+        if call_deadline_at is None:  # pragma: no cover - domain invariant
+            raise ValueError("started connector call lacks its durable deadline")
+        if now < call_deadline_at:
+            raise ValueError("stale recovery cannot preempt unexpired connector call authority")
+    elif lease.expires_at > now:
+        raise ValueError("stale recovery cannot classify an unexpired pre-call dispatch lease")
 
     attempts_remain = action.delivery_attempt_count < action.delivery_attempt_limit
     if action.call_started_at is None:

@@ -13,6 +13,17 @@ from marketing_agents.domain.audit import (
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import RunStep
 from marketing_agents.domain.enums import Effect, StepState
+from marketing_agents.domain.runtime_policy import (
+    AttemptKind,
+    BudgetPolicySnapshot,
+    RateLimitPolicySnapshot,
+    RateLimitScope,
+    RetryBackoff,
+    RetryPolicySnapshot,
+    StepRuntimePolicy,
+    TimeoutPolicySnapshot,
+    runtime_rate_limit_key,
+)
 from marketing_agents.domain.step_lifecycle import (
     NoStepTransitionContext,
     StepLifecycleCommand,
@@ -37,6 +48,26 @@ TERMINAL_STATES = frozenset(
 )
 
 
+def _runtime_policy(*, write: bool) -> StepRuntimePolicy:
+    return StepRuntimePolicy(
+        operation_key="runtime.operation.orch-09",
+        attempt_kind=AttemptKind.TOOL if write else AttemptKind.MODEL,
+        retry=RetryPolicySnapshot(1, RetryBackoff.NONE),
+        timeout=TimeoutPolicySnapshot(30, 120),
+        budget=BudgetPolicySnapshot(20, 10, 20),
+        rate_limit=RateLimitPolicySnapshot(
+            RateLimitScope.TEMPLATE,
+            runtime_rate_limit_key(
+                template_id="tpl.orch-09.01",
+                max_calls=10,
+                window_seconds=60,
+            ),
+            10,
+            60,
+        ),
+    )
+
+
 def _step(effect: Effect, state: StepState, *, version: int = 1) -> RunStep:
     write = effect is Effect.WRITE
     return RunStep(
@@ -59,10 +90,18 @@ def _step(effect: Effect, state: StepState, *, version: int = 1) -> RunStep:
         routing_slot_key="slot.publish" if write else None,
         binding_id="binding.newsletter.01" if write else None,
         binding_configuration_revision=1 if write else None,
-        request_schema_id="schema.newsletter.write.v1" if write else None,
+        request_schema_id=(
+            "schema.newsletter.write.request.v1" if write else "schema.model.read.request.v1"
+        ),
+        result_schema_id=(
+            "schema.newsletter.write.result.v1" if write else "schema.model.read.result.v1"
+        ),
         request_redaction_fields=("/body",) if write else (),
+        result_redaction_fields=("/receipt",) if write else (),
+        data_classification=(DataClassification.PERSONAL if write else DataClassification.INTERNAL),
         idempotency_support="required" if write else "not_applicable",
         timeout_seconds=30 if write else None,
+        runtime_policy=_runtime_policy(write=write),
         approval_policy_id="approval.human-write" if write else "approval.none",
         approval_required_roles=("role.operator",) if write else (),
         approval_required_scopes=("scope.external-write",) if write else (),
@@ -104,8 +143,10 @@ def _allowed(
         return effect is Effect.READ and state is StepState.READY
     if command is StepLifecycleCommand.START_RESERVED_WRITE:
         return effect is Effect.WRITE and state is StepState.READY
-    if command in {StepLifecycleCommand.SUCCEED, StepLifecycleCommand.FAIL}:
+    if command is StepLifecycleCommand.SUCCEED:
         return state is StepState.EXECUTING
+    if command is StepLifecycleCommand.FAIL:
+        return state in {StepState.READY, StepState.EXECUTING}
     if command is StepLifecycleCommand.REJECT:
         return effect is Effect.WRITE and state is StepState.AWAITING_APPROVAL
     if command in {StepLifecycleCommand.CANCEL, StepLifecycleCommand.SKIP}:

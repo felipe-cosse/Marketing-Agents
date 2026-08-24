@@ -56,7 +56,15 @@ class CatalogFixture:
             "approval_policy_id": "policy.no-approval.read-only.v1",
             "retry_policy": {"max_attempts": 1, "backoff": "none"},
             "timeout_policy": {"step_seconds": 10, "run_seconds": 30},
-            "budget_policy": {"max_steps": 2, "max_model_calls": 1, "max_tool_calls": 1},
+            "budget_policy": {
+                "max_steps": 2,
+                "max_model_calls": 1,
+                "max_tool_calls": 1,
+                "max_input_bytes": 65_536,
+                "max_input_field_bytes": 16_384,
+                "max_output_bytes": 262_144,
+                "max_model_output_tokens": 4_096,
+            },
             "rate_limit_policy": {"max_calls": 10, "window_seconds": 60},
             "source_confidence": "high",
             "source_references": ["IMPLEMENTATION_PROMPT.md#test"],
@@ -202,6 +210,17 @@ class CatalogCompilerTests(unittest.TestCase):
         self.assertEqual(("dept.test",), tuple(item.id for item in first.departments))
         self.assertEqual({"dept.test": 1}, dict(first.department_instance_counts))
         self.assertNotIn(str(fixture.root), first.content_hash)
+
+    def test_arch_04_rejects_input_field_budget_above_total_input_budget(self) -> None:
+        fixture = self.fixture()
+        fixture.template["budget_policy"]["max_input_bytes"] = 8
+        fixture.template["budget_policy"]["max_input_field_bytes"] = 9
+        fixture.write_yaml("templates/test.yaml", {"templates": [fixture.template]})
+
+        report = validate_catalog(fixture.root, contract=fixture.contract)
+
+        self.assertFalse(report.valid)
+        self.assertTrue(any(issue.code == "boundary-model" for issue in report.issues))
 
     def test_arch_04_rejects_duplicate_yaml_keys(self) -> None:
         fixture = self.fixture()

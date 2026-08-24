@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -18,12 +18,16 @@ class FrozenConnectorModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
+ConnectorIdentifier = Annotated[str, Field(min_length=1, max_length=200)]
+MetricName = Annotated[str, Field(min_length=1, max_length=120)]
+
+
 class ExplicitIds(FrozenConnectorModel):
-    resource_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+    resource_ids: tuple[ConnectorIdentifier, ...] = Field(min_length=1, max_length=100)
 
 
 class MetricsParameters(ExplicitIds):
-    metric_names: tuple[str, ...] = Field(min_length=1, max_length=32)
+    metric_names: tuple[MetricName, ...] = Field(min_length=1, max_length=32)
 
 
 class CourseProgressParameters(ExplicitIds):

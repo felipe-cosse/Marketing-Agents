@@ -6,7 +6,11 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from marketing_agents.domain.audit import SealedAuditMetadata, _issue_sealed_audit_metadata
+from marketing_agents.domain.audit import (
+    RUNTIME_CONTROL_DENIAL_CODES,
+    SealedAuditMetadata,
+    _issue_sealed_audit_metadata,
+)
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
@@ -150,6 +154,7 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
             "status",
         }
     ),
+    "runtime.control_denied": frozenset({"denial_code", "operation_key", "retry_after_seconds"}),
 }
 _DIGEST_FIELDS = frozenset({"graph_hash", "plan_hash", "routing_hash", "workflow_definition_hash"})
 _POSITIVE_INTEGER_FIELDS = frozenset(
@@ -159,6 +164,7 @@ _POSITIVE_INTEGER_FIELDS = frozenset(
         "generation",
         "ordinal",
         "proposal_revision",
+        "retry_after_seconds",
         "step_count",
         "workflow_version",
     }
@@ -175,7 +181,9 @@ _APPROVAL_ACTION_STATES = frozenset(
     {"awaiting_approval", "approved", "rejected", "dispatch_reserved", "cancelled"}
 )
 _APPROVAL_DECISIONS = frozenset({"approve", "reject"})
-_CLOSURE_REASONS = frozenset({"operator_cancelled", "sibling_approval_rejected"})
+_CLOSURE_REASONS = frozenset(
+    {"operator_cancelled", "runtime_control_denied", "sibling_approval_rejected"}
+)
 _SUPERSESSION_REASONS = frozenset(
     {"approval_set_rejected", "approval_set_superseded", "run_cancelled"}
 )
@@ -304,6 +312,16 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
     if field_name == "conclusion" and value not in _CONCLUSIONS:
         raise AuditMetadataError(
             "metadata_value_invalid", "action conclusion is not an allowlisted value"
+        )
+    if field_name == "denial_code" and value not in RUNTIME_CONTROL_DENIAL_CODES:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "runtime-control denial is not an allowlisted safe code",
+        )
+    if field_name == "retry_after_seconds" and value > 3_600:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "runtime-control retry-after exceeds its safe bound",
         )
     if field_name == "status" and value not in _APPROVAL_STATUSES:
         raise AuditMetadataError(

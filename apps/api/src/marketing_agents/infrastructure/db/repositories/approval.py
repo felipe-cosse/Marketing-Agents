@@ -53,6 +53,7 @@ from marketing_agents.domain.enums import (
     RunState,
     StepState,
 )
+from marketing_agents.domain.runtime_policy import effective_call_timeout_seconds
 from marketing_agents.infrastructure.db.models.action import (
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
@@ -991,7 +992,8 @@ class SQLAlchemyApprovalRepository:
             == step.binding_configuration_revision
             == step.configuration_revision,
             action.delivery_contract.idempotency_support == step.idempotency_support,
-            action.delivery_contract.timeout_seconds == step.timeout_seconds,
+            action.delivery_contract.timeout_seconds
+            == effective_call_timeout_seconds(step.runtime_policy, step.timeout_seconds),
             step.template_id == envelope.template_id,
             step.selected_instance_id == envelope.instance_id,
             step.approval_policy_id == policy.policy_id,

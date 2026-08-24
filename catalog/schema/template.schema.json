@@ -34,8 +34,8 @@
       "properties": {"step_seconds": {"type": "integer", "minimum": 1, "maximum": 120}, "run_seconds": {"type": "integer", "minimum": 1, "maximum": 600}}
     },
     "budget_policy": {
-      "type": "object", "additionalProperties": false, "required": ["max_steps", "max_model_calls", "max_tool_calls"],
-      "properties": {"max_steps": {"type": "integer", "minimum": 1, "maximum": 20}, "max_model_calls": {"type": "integer", "minimum": 0, "maximum": 10}, "max_tool_calls": {"type": "integer", "minimum": 0, "maximum": 20}}
+      "type": "object", "additionalProperties": false, "required": ["max_steps", "max_model_calls", "max_tool_calls", "max_input_bytes", "max_input_field_bytes", "max_output_bytes", "max_model_output_tokens"],
+      "properties": {"max_steps": {"type": "integer", "minimum": 1, "maximum": 20}, "max_model_calls": {"type": "integer", "minimum": 0, "maximum": 10}, "max_tool_calls": {"type": "integer", "minimum": 0, "maximum": 20}, "max_input_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576}, "max_input_field_bytes": {"type": "integer", "minimum": 1, "maximum": 262144}, "max_output_bytes": {"type": "integer", "minimum": 1, "maximum": 4194304}, "max_model_output_tokens": {"type": "integer", "minimum": 1, "maximum": 32768}}
     },
     "rate_limit_policy": {
       "type": "object", "additionalProperties": false, "required": ["max_calls", "window_seconds"],

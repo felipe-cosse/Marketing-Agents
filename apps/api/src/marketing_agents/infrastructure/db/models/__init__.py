@@ -14,6 +14,12 @@ from .approval import (
     AuthorizationSetRecord,
 )
 from .audit import AuditEventRecord
+from .execution_control import (
+    ExecutionAttemptRecord,
+    ExecutionOperationPolicyRecord,
+    RateLimitWindowRecord,
+    RunExecutionControlRecord,
+)
 from .run import RunRecord, RunStateTransitionRecord
 from .step import (
     RunPlanRecord,
@@ -34,8 +40,12 @@ __all__ = [
     "AuthorizationSetMemberRecord",
     "AuthorizationSetRecord",
     "ConnectorActionReceiptRecord",
+    "ExecutionAttemptRecord",
+    "ExecutionOperationPolicyRecord",
     "ExternalActionDispatchAttemptRecord",
     "ExternalActionRecord",
+    "RateLimitWindowRecord",
+    "RunExecutionControlRecord",
     "RunPlanRecord",
     "RunPlanRoutingAssignmentRecord",
     "RunPlanSelectedInstanceRecord",

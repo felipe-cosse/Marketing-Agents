@@ -23,6 +23,7 @@ from marketing_agents.domain.audit import (
     AuditEventDraft,
     AuditOutcome,
     _issue_audit_event_draft,
+    _runtime_control_denial_aggregate_id,
     normalize_audit_reason_code,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
@@ -281,6 +282,48 @@ class AuditEventFactory:
             requested_state=_requested_run_state(run, command),
             mutation_version=None,
             reason_code=safe_reason,
+        )
+
+    def runtime_control_denied(
+        self,
+        *,
+        run_id: str,
+        step_id: str,
+        operation_key: str,
+        denial_code: str,
+        occurred_at: datetime,
+        action_id: str | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> AuditEventDraft:
+        """Build one redacted, replay-stable runtime-control denial witness."""
+
+        aggregate_id = _runtime_control_denial_aggregate_id(
+            actor_id=self._context.actor_id,
+            actor_source=self._context.actor_source.value,
+            correlation_id=self._context.correlation_id,
+            run_id=run_id,
+            step_id=step_id,
+            action_id=action_id,
+            operation_key=operation_key,
+            denial_code=denial_code,
+        )
+        metadata: dict[str, Any] = {
+            "denial_code": denial_code,
+            "operation_key": operation_key,
+        }
+        if retry_after_seconds is not None:
+            metadata["retry_after_seconds"] = retry_after_seconds
+        return self._build(
+            run_id=run_id,
+            event_type="runtime.control_denied",
+            aggregate_type="runtime_control_denial",
+            aggregate_id=aggregate_id,
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            step_id=step_id,
+            action_id=action_id,
+            mutation_version=None,
         )
 
     def action_proposed(self, action: ExternalAction) -> AuditEventDraft:
@@ -961,6 +1004,82 @@ class AuditEventFactory:
             reason_code=cancelled.terminal_reason_code,
         )
 
+    def action_runtime_cancelled(
+        self,
+        previous: ExternalAction,
+        cancelled: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness released queued or claimed-before-call work cancelled by its Run."""
+
+        if type(previous) is not ExternalAction or type(cancelled) is not ExternalAction:
+            raise ValueError("runtime action cancellation requires exact pre-call released work")
+        reservation = previous.reservation
+        if (
+            previous.state
+            not in {
+                ExternalActionState.DISPATCH_RESERVED,
+                ExternalActionState.DISPATCHING,
+            }
+            or previous.call_started_at is not None
+            or reservation is None
+            or cancelled.state is not ExternalActionState.CANCELLED
+            or not _same_action_definition(previous, cancelled)
+            or cancelled.version != previous.version + 1
+            or cancelled.updated_at < previous.updated_at
+            or cancelled.reservation != reservation
+            or cancelled.delivery_attempt_count != previous.delivery_attempt_count
+            or cancelled.lease is not None
+            or cancelled.call_started_at is not None
+            or cancelled.result is not None
+            or cancelled.terminal_reason_code
+            not in {"operator_cancelled", "runtime_control_denied"}
+            or previous.result is not None
+            or previous.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or cancelled.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or cancelled.superseded_at is not None
+            or (
+                previous.state is ExternalActionState.DISPATCH_RESERVED
+                and previous.lease is not None
+            )
+            or (
+                previous.state is ExternalActionState.DISPATCHING
+                and (
+                    previous.lease is None
+                    or previous.delivery_attempt_count != previous.lease.attempt_number
+                )
+            )
+        ):
+            raise ValueError("runtime action cancellation requires exact pre-call released work")
+        return self._build(
+            run_id=cancelled.run_id,
+            event_type="action.cancelled",
+            aggregate_type="external_action",
+            aggregate_id=cancelled.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=cancelled.updated_at,
+            metadata={
+                "approval_set_id": reservation.authorization_set_id,
+                "approval_status": "released",
+                "closure_reason": cancelled.terminal_reason_code,
+                "idempotency_support": cancelled.delivery_contract.idempotency_support,
+            },
+            step_id=cancelled.step_id,
+            action_id=cancelled.id,
+            action_attempt_number=(
+                previous.delivery_attempt_count
+                if previous.state is ExternalActionState.DISPATCHING
+                else None
+            ),
+            approval_request_id=reservation.approval_request_id,
+            approval_decision_id=reservation.approval_decision_id,
+            mutation_version=cancelled.version,
+            previous_state=previous.state.value,
+            new_state=cancelled.state.value,
+            reason_code=cancelled.terminal_reason_code,
+        )
+
     def action_dispatch_claimed(
         self,
         previous: ExternalAction,
@@ -984,7 +1103,9 @@ class AuditEventFactory:
             or claimed.delivery_attempt_count != lease.attempt_number
             or previous.lease is not None
             or previous.call_started_at is not None
+            or previous.call_deadline_at is not None
             or claimed.call_started_at is not None
+            or claimed.call_deadline_at is not None
             or previous.result is not None
             or claimed.result is not None
             or previous.terminal_reason_code is not None
@@ -1031,9 +1152,12 @@ class AuditEventFactory:
             or marked.reservation != previous.reservation
             or marked.delivery_attempt_count != previous.delivery_attempt_count
             or previous.call_started_at is not None
+            or previous.call_deadline_at is not None
             or marked.call_started_at is None
+            or marked.call_deadline_at is None
             or marked.updated_at != marked.call_started_at
             or not lease.claimed_at <= marked.call_started_at < lease.expires_at
+            or marked.call_started_at >= marked.call_deadline_at
             or previous.result is not None
             or marked.result is not None
             or previous.terminal_reason_code is not None
@@ -1058,6 +1182,124 @@ class AuditEventFactory:
             mutation_version=marked.version,
             previous_state=previous.state.value,
             new_state=marked.state.value,
+        )
+
+    def action_outcome_unknown(
+        self,
+        previous: ExternalAction,
+        unknown: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness one call-started action closed without authoritative provider evidence."""
+
+        lease = previous.lease
+        if (
+            type(previous) is not ExternalAction
+            or type(unknown) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCHING
+            or unknown.state is not ExternalActionState.OUTCOME_UNKNOWN
+            or not _same_action_definition(previous, unknown)
+            or unknown.version != previous.version + 1
+            or lease is None
+            or previous.call_started_at is None
+            or previous.call_deadline_at is None
+            or unknown.updated_at < previous.call_deadline_at
+            or unknown.reservation != previous.reservation
+            or unknown.delivery_attempt_count != previous.delivery_attempt_count
+            or unknown.lease is not None
+            or unknown.call_started_at is not None
+            or unknown.call_deadline_at is not None
+            or previous.result is not None
+            or unknown.result is not None
+            or previous.terminal_reason_code is not None
+            or unknown.terminal_reason_code
+            not in {
+                "connector_delivery_uncertain",
+                "connector_timeout",
+                "run_cancelled_after_call_start",
+                "runtime_control_denied_after_call_start",
+                "stale_delivery_outcome_unknown",
+            }
+            or previous.superseded_by_action_id is not None
+            or unknown.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or unknown.superseded_at is not None
+        ):
+            raise ValueError("outcome-unknown audit requires one exact call-started conclusion")
+        return self._build(
+            run_id=unknown.run_id,
+            event_type="action.outcome_unknown",
+            aggregate_type="external_action",
+            aggregate_id=unknown.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=unknown.updated_at,
+            metadata={
+                "conclusion": "outcome_unknown",
+                "idempotency_support": unknown.delivery_contract.idempotency_support,
+            },
+            step_id=unknown.step_id,
+            action_id=unknown.id,
+            action_attempt_number=lease.attempt_number,
+            mutation_version=unknown.version,
+            previous_state=previous.state.value,
+            new_state=unknown.state.value,
+            reason_code=unknown.terminal_reason_code,
+        )
+
+    def action_receipt_reconciled(
+        self,
+        previous: ExternalAction,
+        succeeded: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness a call-started action completed from exact durable receipt evidence."""
+
+        lease = previous.lease
+        result = succeeded.result
+        if (
+            type(previous) is not ExternalAction
+            or type(succeeded) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCHING
+            or succeeded.state is not ExternalActionState.SUCCEEDED
+            or not _same_action_definition(previous, succeeded)
+            or succeeded.version != previous.version + 1
+            or lease is None
+            or previous.call_started_at is None
+            or previous.call_deadline_at is None
+            or result is None
+            or succeeded.updated_at != result.completed_at
+            or succeeded.updated_at < previous.call_deadline_at
+            or succeeded.reservation != previous.reservation
+            or succeeded.delivery_attempt_count != previous.delivery_attempt_count
+            or succeeded.lease is not None
+            or succeeded.call_started_at is not None
+            or succeeded.call_deadline_at is not None
+            or previous.result is not None
+            or previous.terminal_reason_code is not None
+            or succeeded.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or succeeded.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or succeeded.superseded_at is not None
+        ):
+            raise ValueError("receipt-reconciled audit requires one exact durable conclusion")
+        return self._build(
+            run_id=succeeded.run_id,
+            event_type="action.receipt_reconciled",
+            aggregate_type="external_action",
+            aggregate_id=succeeded.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=succeeded.updated_at,
+            metadata={
+                "conclusion": "receipt_reconciled",
+                "connector_status": result.status,
+                "idempotency_support": succeeded.delivery_contract.idempotency_support,
+            },
+            step_id=succeeded.step_id,
+            action_id=succeeded.id,
+            action_attempt_number=lease.attempt_number,
+            receipt_id=result.receipt_id,
+            mutation_version=succeeded.version,
+            previous_state=previous.state.value,
+            new_state=succeeded.state.value,
         )
 
     def run_attempt_id(self, run_id: str, command: RunLifecycleCommand) -> str:
