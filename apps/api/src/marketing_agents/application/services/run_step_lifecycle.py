@@ -5,7 +5,7 @@ from __future__ import annotations
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.audit import AuditContext
-from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.step_lifecycle import (
     StepLifecycleCommand,
     StepTransitionContext,
@@ -83,6 +83,21 @@ class RunStepLifecycleService:
             raise RunStepLifecycleServiceError(
                 "stale_step_version",
                 "Run step changed before its lifecycle command was applied",
+                step_id=step_id,
+                current_version=current.version,
+            )
+        if current.effect is Effect.WRITE and command in {
+            StepLifecycleCommand.WAIT_FOR_APPROVAL,
+            StepLifecycleCommand.RELEASE_APPROVAL,
+            StepLifecycleCommand.START,
+            StepLifecycleCommand.START_RESERVED_WRITE,
+            StepLifecycleCommand.REJECT,
+            StepLifecycleCommand.CANCEL,
+            StepLifecycleCommand.SKIP,
+        }:
+            raise RunStepLifecycleServiceError(
+                "approval_boundary_service_required",
+                "write-step lifecycle commands require persisted approval-boundary composition",
                 step_id=step_id,
                 current_version=current.version,
             )

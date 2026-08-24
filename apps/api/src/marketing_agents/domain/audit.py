@@ -38,6 +38,7 @@ _EVENT_AGGREGATES = {
     "action.awaiting_approval": "external_action",
     "action.approved": "external_action",
     "action.rejected": "external_action",
+    "action.dispatch_reserved": "external_action",
     "action.dispatch_claimed": "external_action",
     "action.call_started": "external_action",
     "action.retry_released": "external_action",
@@ -45,10 +46,13 @@ _EVENT_AGGREGATES = {
     "action.failed": "external_action",
     "action.outcome_unknown": "external_action",
     "action.receipt_reconciled": "external_action",
+    "action.cancelled": "external_action",
     "connector.receipt_committed": "connector_receipt",
     "approval.requested": "approval_request",
     "approval.approved": "approval_request",
     "approval.rejected": "approval_request",
+    "approval.consumed": "approval_request",
+    "approval.superseded": "approval_request",
     "approval.expired": "approval_request",
     "approval.renewed": "approval_request",
 }
@@ -105,6 +109,14 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     "action.awaiting_approval": frozenset({"idempotency_support"}),
     "action.approved": frozenset({"idempotency_support"}),
     "action.rejected": frozenset({"idempotency_support"}),
+    "action.dispatch_reserved": frozenset(
+        {
+            "approval_use_id",
+            "approval_set_id",
+            "idempotency_support",
+            "reservation_id",
+        }
+    ),
     "action.dispatch_claimed": frozenset({"idempotency_support"}),
     "action.call_started": frozenset({"idempotency_support"}),
     "action.retry_released": frozenset({"conclusion", "idempotency_support"}),
@@ -113,6 +125,9 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     "action.outcome_unknown": frozenset({"conclusion", "idempotency_support"}),
     "action.receipt_reconciled": frozenset(
         {"conclusion", "connector_status", "idempotency_support"}
+    ),
+    "action.cancelled": frozenset(
+        {"approval_set_id", "approval_status", "closure_reason", "idempotency_support"}
     ),
     "connector.receipt_committed": frozenset({"connector_status"}),
     "approval.requested": frozenset(
@@ -145,6 +160,31 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
             "policy_id",
             "proposal_revision",
             "status",
+        }
+    ),
+    "approval.consumed": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "approval_use_id",
+            "approval_set_id",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "reservation_id",
+            "status",
+        }
+    ),
+    "approval.superseded": frozenset(
+        {
+            "action_state",
+            "action_version",
+            "approval_set_id",
+            "generation",
+            "policy_id",
+            "proposal_revision",
+            "status",
+            "supersession_reason",
         }
     ),
     "approval.expired": frozenset(
@@ -199,11 +239,15 @@ _SAFE_AUDIT_REASONS = frozenset(
     {
         "approval_barrier_incomplete",
         "approval_barrier_satisfied",
+        "approval_barrier_released",
+        "approval_consumed",
         "approval_expired",
         "approval_granted",
         "approval_renewed",
         "approval_rejected",
         "approval_requested",
+        "approval_set_rejected",
+        "approval_set_superseded",
         "approval_rejection_mismatch",
         "connector_delivery_uncertain",
         "connector_request_rejected",
@@ -220,6 +264,9 @@ _SAFE_AUDIT_REASONS = frozenset(
         "plan_step_recorded",
         "pre_call_attempts_exhausted",
         "read_only_plan_released",
+        "reserved_write_started",
+        "run_cancelled",
+        "sibling_approval_rejected",
         "stale_delivery_outcome_unknown",
         "stale_run_version",
         "step_approval_required",
@@ -711,11 +758,23 @@ class AuditEventDraft:
             }
             if success_event != (self.receipt_id is not None):
                 raise ValueError("action receipt link does not match its event type")
-            decision_event = self.event_type in {"action.approved", "action.rejected"}
-            if decision_event != (
-                self.approval_request_id is not None and self.approval_decision_id is not None
+            request_event = self.event_type in {
+                "action.approved",
+                "action.rejected",
+                "action.dispatch_reserved",
+                "action.cancelled",
+            }
+            required_decision_event = self.event_type in {
+                "action.approved",
+                "action.rejected",
+                "action.dispatch_reserved",
+            }
+            if request_event != (self.approval_request_id is not None):
+                raise ValueError("action approval-request link does not match its event type")
+            if required_decision_event != (self.approval_decision_id is not None) and not (
+                self.event_type == "action.cancelled" and self.approval_decision_id is not None
             ):
-                raise ValueError("action decision links do not match its event type")
+                raise ValueError("action approval-decision link does not match its event type")
         elif self.aggregate_type == "connector_receipt" and (
             self.step_id is None
             or self.action_id is None
@@ -731,8 +790,14 @@ class AuditEventDraft:
             or self.action_attempt_number is not None
             or self.receipt_id is not None
             or self.approval_request_id is None
-            or (self.event_type in {"approval.approved", "approval.rejected"})
-            != (self.approval_decision_id is not None)
+            or (
+                self.event_type != "approval.superseded"
+                and (
+                    self.event_type
+                    in {"approval.approved", "approval.rejected", "approval.consumed"}
+                )
+                != (self.approval_decision_id is not None)
+            )
             or self.artifact_id is not None
             or self.attempt_id is not None
             or self.transition_sequence is not None
@@ -875,17 +940,27 @@ def _draft_fingerprint_payload(draft: AuditEventDraft) -> Mapping[str, Any]:
 def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.artifact_id is not None:
         raise ValueError("future audit subject links are not valid for current event families")
-    decision_witness = draft.event_type in {
+    required_decision_witness = draft.event_type in {
         "action.approved",
         "action.rejected",
+        "action.dispatch_reserved",
         "approval.approved",
         "approval.rejected",
+        "approval.consumed",
     }
-    if decision_witness != (draft.approval_decision_id is not None):
+    optional_decision_witness = draft.event_type in {
+        "action.cancelled",
+        "approval.superseded",
+    }
+    if required_decision_witness != (draft.approval_decision_id is not None) and not (
+        optional_decision_witness and draft.approval_decision_id is not None
+    ):
         raise ValueError("approval decision link does not match its event family")
     approval_link = draft.aggregate_type == "approval_request" or draft.event_type in {
         "action.approved",
         "action.rejected",
+        "action.dispatch_reserved",
+        "action.cancelled",
     }
     if approval_link != (draft.approval_request_id is not None):
         raise ValueError("approval request link does not match its event family")
@@ -1034,7 +1109,9 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
         step_edges: Mapping[str, frozenset[tuple[str, str]]] = {
             "mark_ready": frozenset({("pending", "ready")}),
             "wait_for_approval": frozenset({("pending", "awaiting_approval")}),
+            "release_approval": frozenset({("awaiting_approval", "ready")}),
             "start": frozenset({("ready", "executing")}),
+            "start_reserved_write": frozenset({("ready", "executing")}),
             "succeed": frozenset({("executing", "succeeded")}),
             "fail": frozenset({("executing", "failed")}),
             "reject": frozenset({("awaiting_approval", "rejected")}),
@@ -1066,7 +1143,9 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
         fixed_step_reasons = {
             "mark_ready": "step_dependencies_satisfied",
             "wait_for_approval": "step_approval_required",
+            "release_approval": "approval_barrier_released",
             "start": "step_execution_started",
+            "start_reserved_write": "reserved_write_started",
             "succeed": "step_succeeded",
         }
         fixed_step_reason = fixed_step_reasons.get(command)
@@ -1077,6 +1156,8 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "approval.requested": "awaiting_approval",
             "approval.approved": "approved",
             "approval.rejected": "rejected",
+            "approval.consumed": "dispatch_reserved",
+            "approval.superseded": "cancelled",
             "approval.expired": "awaiting_approval",
             "approval.renewed": "awaiting_approval",
         }[draft.event_type]
@@ -1109,6 +1190,26 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
                 or metadata["decision"] != expected_decision
             ):
                 raise ValueError("approval decision audit has an invalid lifecycle shape")
+        elif draft.event_type == "approval.consumed":
+            if (
+                draft.mutation_version != 3
+                or draft.previous_state != "approved"
+                or draft.new_state != "consumed"
+                or draft.reason_code != "approval_consumed"
+            ):
+                raise ValueError("approval consumption audit has an invalid lifecycle shape")
+        elif draft.event_type == "approval.superseded":
+            expected_version = 3 if draft.previous_state == "approved" else 2
+            expected_decision_link = draft.previous_state == "approved"
+            if (
+                draft.previous_state not in {"pending", "approved"}
+                or draft.mutation_version != expected_version
+                or draft.new_state != "superseded"
+                or draft.reason_code not in {"approval_set_rejected", "run_cancelled"}
+                or (draft.approval_decision_id is not None) != expected_decision_link
+                or metadata["supersession_reason"] != draft.reason_code
+            ):
+                raise ValueError("approval supersession audit has an invalid lifecycle shape")
         elif draft.event_type == "approval.expired":
             if (
                 draft.mutation_version is None
@@ -1133,6 +1234,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.awaiting_approval": (None, "awaiting_approval", False, False),
             "action.approved": ("awaiting_approval", "approved", False, False),
             "action.rejected": ("awaiting_approval", "rejected", False, False),
+            "action.dispatch_reserved": ("approved", "dispatch_reserved", False, False),
             "action.dispatch_claimed": ("dispatch_reserved", "dispatching", True, False),
             "action.call_started": ("dispatching", "dispatching", True, False),
             "action.retry_released": ("dispatching", "dispatch_reserved", True, False),
@@ -1140,11 +1242,14 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.failed": ("dispatching", "failed", True, False),
             "action.outcome_unknown": ("dispatching", "outcome_unknown", True, False),
             "action.receipt_reconciled": ("dispatching", "succeeded", True, True),
+            "action.cancelled": (None, "cancelled", False, False),
         }
         previous, current, requires_attempt, requires_receipt = action_shapes[draft.event_type]
         allowed_previous = (
             {"proposed", "approved"}
             if draft.event_type == "action.awaiting_approval"
+            else {"awaiting_approval", "approved"}
+            if draft.event_type == "action.cancelled"
             else {previous}
         )
         if (
@@ -1169,6 +1274,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.awaiting_approval": None,
             "action.approved": None,
             "action.rejected": None,
+            "action.dispatch_reserved": None,
             "action.dispatch_claimed": None,
             "action.call_started": None,
             "action.retry_released": {"pre_call_expired", "provider_retry"},
@@ -1176,6 +1282,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.failed": {"failed"},
             "action.outcome_unknown": {"outcome_unknown"},
             "action.receipt_reconciled": {"receipt_reconciled"},
+            "action.cancelled": None,
         }
         expected_conclusion = expected_conclusions[draft.event_type]
         actual_conclusion = metadata.get("conclusion")
@@ -1188,6 +1295,8 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.awaiting_approval",
             "action.approved",
             "action.rejected",
+            "action.dispatch_reserved",
+            "action.cancelled",
             "action.failed",
             "action.outcome_unknown",
         }
@@ -1197,12 +1306,58 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.awaiting_approval": {"approval_requested", "approval_expired"},
             "action.approved": {"approval_granted"},
             "action.rejected": {"approval_rejected"},
+            "action.dispatch_reserved": {"approval_consumed"},
+            "action.cancelled": {"operator_cancelled", "sibling_approval_rejected"},
         }.get(draft.event_type)
         if (
             expected_approval_reason is not None
             and draft.reason_code not in expected_approval_reason
         ):
             raise ValueError("action approval audit reason disagrees with its transition")
+        if draft.event_type == "action.dispatch_reserved" and (
+            draft.mutation_version is None
+            or draft.mutation_version < 4
+            or draft.mutation_version % 2 != 0
+            or metadata["approval_set_id"] is None
+            or metadata["approval_use_id"] is None
+            or metadata["reservation_id"] is None
+        ):
+            raise ValueError("action reservation audit has an invalid barrier shape")
+        if draft.event_type == "action.cancelled":
+            approval_status = metadata["approval_status"]
+            cancel_expected_decision_link: bool | None = (
+                draft.previous_state == "approved" if approval_status == "superseded" else None
+            )
+            valid_version = draft.mutation_version is not None and (
+                (
+                    draft.previous_state == "approved"
+                    and draft.mutation_version >= 4
+                    and draft.mutation_version % 2 == 0
+                )
+                or (
+                    draft.previous_state == "awaiting_approval"
+                    and draft.mutation_version >= 3
+                    and draft.mutation_version % 2 == 1
+                )
+            )
+            if (
+                not valid_version
+                or approval_status not in {"superseded", "expired"}
+                or (
+                    cancel_expected_decision_link is not None
+                    and (draft.approval_decision_id is not None) != cancel_expected_decision_link
+                )
+                or (
+                    approval_status == "expired"
+                    and (
+                        draft.previous_state != "awaiting_approval"
+                        or draft.reason_code
+                        not in {"operator_cancelled", "sibling_approval_rejected"}
+                    )
+                )
+                or metadata["closure_reason"] != draft.reason_code
+            ):
+                raise ValueError("action cancellation audit has an invalid closure shape")
 
 
 def _event_fingerprint(draft: AuditEventDraft) -> str:

@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from marketing_agents.application.orchestration import OrchestrationDependencies
+from marketing_agents.application.orchestration import (
+    OrchestrationDependencies,
+    RoutingResult,
+)
 from marketing_agents.application.orchestration.effect_planner import EffectPlanRequest
 from marketing_agents.application.policies.write_authorization import (
     ApprovalReservation,
@@ -24,8 +27,14 @@ from marketing_agents.application.ports.external_writes import (
     ConnectorDeliveryFailure,
     ExternalWriteConnectorGateway,
 )
-from marketing_agents.application.ports.repositories import AuditRepository
+from marketing_agents.application.ports.id_generator import IdGenerator
+from marketing_agents.application.ports.repositories import (
+    ReleaseAuthority,
+    ReleaseCallMode,
+)
 from marketing_agents.application.services import (
+    ApprovalDecisionService,
+    AuditedPlanPersistenceService,
     DispatchDisposition,
     ExternalActionDispatcher,
     ExternalActionRegistrationDisposition,
@@ -33,8 +42,19 @@ from marketing_agents.application.services import (
 )
 from marketing_agents.domain.action_hash import canonical_action_hash
 from marketing_agents.domain.entities import MAX_DELIVERY_ATTEMPTS, ExternalAction
-from marketing_agents.domain.enums import ExternalActionState
+from marketing_agents.domain.enums import (
+    ApprovalDecisionKind,
+    ApprovalStatus,
+    ExternalActionState,
+    RunState,
+    StepState,
+)
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
+from marketing_agents.domain.step_lifecycle import (
+    NoStepTransitionContext,
+    StepLifecycleCommand,
+    transition_step,
+)
 from marketing_agents.infrastructure.adapters.connectors.dispatch import (
     RegistryConnectorWriteGateway,
 )
@@ -49,10 +69,13 @@ from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
     ExternalActionPersistenceConflict,
+    SQLAlchemyApprovalRepository,
+    SQLAlchemyAuditRepository,
     SQLAlchemyConnectorReceiptRepository,
     SQLAlchemyExternalActionRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
+    SQLAlchemyRunStepRepository,
     SQLAlchemyUnitOfWorkFactory,
     create_database_runtime,
 )
@@ -65,8 +88,19 @@ from marketing_agents.infrastructure.db.models import (
 from marketing_agents.infrastructure.db.repositories import SQLAlchemyWorkRepository
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.integration.db.test_orch_08_approval_boundary import (
+    _complete_read_dependency,
+    _current,
+    _decision,
+    _principal,
+    _receive_and_validate,
+)
+from tests.integration.db.test_run_08_approval_persistence import (
+    APPROVAL_INTEGRITY_KEY,
+    IncrementingIds,
+    _context,
+)
 from tests.unit.application.test_run_02_effect_aware_planning import (
     COMMUNITY_BINDING,
     REGISTRY,
@@ -99,8 +133,8 @@ class UnusedIds:
         raise AssertionError(f"RUN-05 must not generate {namespace!r} during persistence")
 
 
-def _unused_audit_repository(_session: AsyncSession) -> AuditRepository:
-    return cast(AuditRepository, object())
+def _approval_repository(session):  # type: ignore[no-untyped-def]
+    return SQLAlchemyApprovalRepository(session, APPROVAL_INTEGRITY_KEY)
 
 
 def _sqlite_url(path: Path) -> str:
@@ -113,15 +147,22 @@ def _uow_factory(runtime: DatabaseRuntime) -> SQLAlchemyUnitOfWorkFactory:
         SQLAlchemyRepositoryFactories(
             works=SQLAlchemyWorkRepository,
             runs=SQLAlchemyRunRepository,
-            audits=_unused_audit_repository,
+            audits=SQLAlchemyAuditRepository,
+            approvals=_approval_repository,
+            run_steps=SQLAlchemyRunStepRepository,
             external_actions=SQLAlchemyExternalActionRepository,
             connector_receipts=SQLAlchemyConnectorReceiptRepository,
         ),
     )
 
 
-def _dependencies(runtime: DatabaseRuntime, clock: MutableClock) -> OrchestrationDependencies:
-    return OrchestrationDependencies(clock, UnusedIds(), _uow_factory(runtime))
+def _dependencies(
+    runtime: DatabaseRuntime,
+    clock: MutableClock,
+    *,
+    ids: IdGenerator | None = None,
+) -> OrchestrationDependencies:
+    return OrchestrationDependencies(clock, ids or UnusedIds(), _uow_factory(runtime))
 
 
 async def _runtime(path: Path) -> DatabaseRuntime:
@@ -208,28 +249,148 @@ def _multi_plan(*, seed: int, second_body: str = "second private body"):
     )
 
 
-async def _reserve(runtime: DatabaseRuntime, action: ExternalAction) -> None:
-    """Model the future RUN-08 atomic approval output, not a public RUN-05 bypass."""
+async def _released_action(
+    runtime: DatabaseRuntime,
+    clock: MutableClock,
+    *,
+    seed: int,
+    delivery_attempt_limit: int = 2,
+) -> ExternalAction:
+    """Create one real plan, approve its complete set, and release its WRITE step."""
 
-    async with runtime.session_factory() as session, session.begin():
-        await session.execute(
-            update(ExternalActionRecord)
-            .where(ExternalActionRecord.id == action.id)
-            .values(
-                state=ExternalActionState.DISPATCH_RESERVED.value,
-                reservation_id=f"reservation.{action.id}",
-                reservation_authorization_set_id=action.envelope.authorization_set_id,
-                approval_request_id=f"approval-request.persisted.{action.id}",
-                approval_decision_id=f"approval-decision.persisted.{action.id}",
-                reservation_action_hash=action.action_hash,
-                reservation_capability_id=action.envelope.capability_id,
-                reservation_binding_id=action.connector_binding_id,
-                reservation_idempotency_key=action.idempotency_key,
-                reserved_at=NOW,
-                updated_at=NOW,
-                version=2,
+    dependencies = _dependencies(
+        runtime,
+        clock,
+        ids=IncrementingIds(10_000 + seed * 100),
+    )
+    event_id = f"event.run-05.released.{seed}"
+    validated = await _receive_and_validate(dependencies, event_id=event_id)
+    request = _request(
+        include_write=True,
+        run_id=validated.run.id,
+        write_step=_write_step(runtime_step_id=f"runtime-step.welcome.{seed}"),
+    )
+    request = replace(
+        request,
+        steps=(
+            replace(
+                request.steps[0],
+                runtime_step_id=f"runtime-step.membership.{seed}",
+            ),
+            request.steps[1],
+        ),
+    )
+    planner, _, _ = _planner(ids=RecordingIds(seed=seed))
+    plan = planner.plan(request)
+    persisted = await AuditedPlanPersistenceService(dependencies).persist(
+        plan,
+        request.graph,
+        cast(RoutingResult, request.routing),
+        expected_run_version=validated.run.version,
+        audit_context=_context(f"{event_id}.persist"),
+    )
+    assert persisted.run.state is RunState.AWAITING_APPROVAL
+
+    _, _, _, requests, actions = await _current(dependencies, plan.run_id)
+    assert len(requests) == len(actions) == 1
+    action = actions[0]
+    assert action is not None
+    assert action.state is ExternalActionState.AWAITING_APPROVAL
+    if delivery_attempt_limit != action.delivery_attempt_limit:
+        # Plan persistence currently owns the default delivery policy. Apply the
+        # test-specific policy before approval; the real release still derives
+        # and persists every reservation/authority field atomically.
+        async with runtime.session_factory() as session, session.begin():
+            await session.execute(
+                update(ExternalActionRecord)
+                .where(ExternalActionRecord.id == action.id)
+                .values(delivery_attempt_limit=delivery_attempt_limit)
             )
+
+    clock.tick(1)
+    decided = await ApprovalDecisionService(dependencies).decide(
+        _decision(
+            requests[0].request,
+            ApprovalDecisionKind.APPROVE,
+            suffix=f"run-05.{seed}",
+        ),
+        principal=_principal(f"run-05.{seed}"),
+    )
+    # The decision result is the immutable approval mutation; the boundary
+    # service then consumes that same request in its atomic release transaction.
+    assert decided.request.status is ApprovalStatus.APPROVED
+    await _complete_read_dependency(dependencies, clock, plan.run_id)
+
+    run, steps, selected, requests, actions = await _current(dependencies, plan.run_id)
+    action = cast(ExternalAction, actions[0])
+    assert run.state is RunState.EXECUTING
+    assert selected.authorization_set.status.value == "released"
+    assert all(request.status is ApprovalStatus.CONSUMED for request in requests)
+    assert [step.state for step in steps] == [StepState.SUCCEEDED, StepState.READY]
+    assert action.state is ExternalActionState.DISPATCH_RESERVED
+    assert action.reservation is not None
+    assert action.delivery_attempt_limit == delivery_attempt_limit
+    clock.tick(1)
+    return action
+
+
+async def _release_authority(unit_of_work, action_id: str) -> ReleaseAuthority:  # type: ignore[no-untyped-def]
+    authority = await unit_of_work.approvals.get_release_authority(action_id)
+    assert authority is not None
+    return authority
+
+
+async def _claim_reserved(
+    unit_of_work,  # type: ignore[no-untyped-def]
+    action: ExternalAction,
+    clock: MutableClock,
+    *,
+    lease_owner: str,
+    lease_seconds: int,
+    authority: ReleaseAuthority | None = None,
+) -> ExternalAction | None:
+    trusted = authority or await _release_authority(unit_of_work, action.id)
+    return await unit_of_work.external_actions.claim_reserved(
+        action_id=action.id,
+        expected_version=action.version,
+        authority=trusted,
+        lease_owner=lease_owner,
+        claimed_at=clock.now(),
+        lease_expires_at=clock.now() + timedelta(seconds=lease_seconds),
+    )
+
+
+async def _mark_call_started(
+    unit_of_work,  # type: ignore[no-untyped-def]
+    action: ExternalAction,
+    clock: MutableClock,
+    *,
+    lease_owner: str,
+    authority: ReleaseAuthority | None = None,
+) -> ExternalAction | None:
+    trusted = authority or await _release_authority(unit_of_work, action.id)
+    step_transition = None
+    if trusted.call_mode is ReleaseCallMode.FIRST_CALL:
+        step = await unit_of_work.run_steps.get(trusted.step_id)
+        assert step is not None
+        step_transition = transition_step(
+            step,
+            StepLifecycleCommand.START_RESERVED_WRITE,
+            NoStepTransitionContext(),
+            clock.now(),
         )
+    else:
+        assert trusted.call_mode is ReleaseCallMode.PROVIDER_RETRY
+    result = await unit_of_work.external_actions.mark_call_started(
+        action_id=action.id,
+        expected_version=action.version,
+        authority=trusted,
+        lease_owner=lease_owner,
+        attempt_number=action.delivery_attempt_count,
+        started_at=clock.now(),
+        step_transition=step_transition,
+    )
+    return None if result is None else result.action
 
 
 def _authorize_action(action, idempotency_key: str):  # type: ignore[no-untyped-def]
@@ -408,12 +569,8 @@ async def test_run_05_three_phase_dispatch_commits_one_receipt_and_replays_after
 ) -> None:
     path = tmp_path / "dispatch-restart.db"
     runtime = await _runtime(path)
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=101)
     gateway, ledger = _gateway(runtime, clock)
     dispatcher = ExternalActionDispatcher(
         _dependencies(runtime, clock), gateway, WriteAuthorizationGuard()
@@ -513,6 +670,14 @@ class CompletionFaultUnitOfWork:
         return self.delegate.audits
 
     @property
+    def approvals(self):  # type: ignore[no-untyped-def]
+        return self.delegate.approvals
+
+    @property
+    def run_steps(self):  # type: ignore[no-untyped-def]
+        return self.delegate.run_steps
+
+    @property
     def external_actions(self):  # type: ignore[no-untyped-def]
         return CompletionFaultExternalActions(self.delegate.external_actions)
 
@@ -558,6 +723,14 @@ class TrackingUnitOfWork:
     @property
     def audits(self):  # type: ignore[no-untyped-def]
         return self.delegate.audits
+
+    @property
+    def approvals(self):  # type: ignore[no-untyped-def]
+        return self.delegate.approvals
+
+    @property
+    def run_steps(self):  # type: ignore[no-untyped-def]
+        return self.delegate.run_steps
 
     @property
     def external_actions(self):  # type: ignore[no-untyped-def]
@@ -628,12 +801,8 @@ async def test_run_05_two_dispatch_workers_make_exactly_one_connector_call(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "dispatch-race.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=102)
     gateway, ledger = _gateway(runtime, clock)
     counted = CountingGateway(gateway)
     first = ExternalActionDispatcher(
@@ -667,12 +836,8 @@ async def test_run_05_connector_await_has_no_dispatcher_transaction_open(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "transaction-lifetime.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=103)
     gateway, _ = _gateway(runtime, clock)
     tracker = TrackingUnitOfWorkFactory(_uow_factory(runtime))
     dependencies = OrchestrationDependencies(clock, UnusedIds(), tracker)
@@ -694,12 +859,8 @@ async def test_run_05_completion_uses_authoritative_receipt_metadata(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "authoritative-receipt.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=104)
     gateway, _ = _gateway(runtime, clock)
     dispatcher = ExternalActionDispatcher(
         _dependencies(runtime, clock),
@@ -734,17 +895,14 @@ async def test_run_05_gateway_suppresses_validation_and_provider_secret_causes(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "gateway-redaction.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    await _reserve(runtime, created.actions[0].action)
+    released = await _released_action(runtime, clock, seed=105)
     gateway, _ = _gateway(runtime, clock)
     try:
         async with _uow_factory(runtime)() as unit_of_work:
             action = cast(
                 ExternalAction,
-                await unit_of_work.external_actions.get(created.actions[0].action.id),
+                await unit_of_work.external_actions.get(released.id),
             )
         secret = "RUN05_SECRET_VALIDATION_CANARY"
         invalid_envelope = action.envelope.model_copy(
@@ -802,14 +960,13 @@ async def test_run_05_provider_secret_is_not_context_for_completion_fault(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "completion-fault-redaction.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(
-        _dependencies(runtime, clock), delivery_attempt_limit=1
+    action = await _released_action(
+        runtime,
+        clock,
+        seed=106,
+        delivery_attempt_limit=1,
     )
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
     gateway, _ = _gateway(runtime, clock)
     secret = "RUN05_SECRET_PROVIDER_CONTEXT"
     fault_factory = CompletionFaultUnitOfWorkFactory(_uow_factory(runtime))
@@ -984,13 +1141,8 @@ async def test_run_05_reservation_snapshot_blocks_action_hash_rewrite(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "reservation-tamper.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registered = await ExternalActionRegistrationService(
-        _dependencies(runtime, clock)
-    ).register_plan_actions(_plan(seed=1))
-    action = registered.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=107)
     _, ledger = _gateway(runtime, clock)
     try:
         with pytest.raises(IntegrityError):
@@ -1011,14 +1163,13 @@ async def test_run_05_final_attempt_lost_response_reconciles_durable_receipt(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "lost-response.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(
-        _dependencies(runtime, clock), delivery_attempt_limit=1
+    action = await _released_action(
+        runtime,
+        clock,
+        seed=108,
+        delivery_attempt_limit=1,
     )
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
     gateway, ledger = _gateway(runtime, clock)
     lost = LostResponseGateway(gateway)
     dispatcher = ExternalActionDispatcher(
@@ -1040,34 +1191,30 @@ async def test_run_05_stale_crash_after_receipt_reconciles_without_provider_call
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "receipt-before-crash.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(
-        _dependencies(runtime, clock), delivery_attempt_limit=1
+    action = await _released_action(
+        runtime,
+        clock,
+        seed=109,
+        delivery_attempt_limit=1,
     )
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
     gateway, ledger = _gateway(runtime, clock)
     try:
         async with _uow_factory(runtime)() as unit_of_work:
             current = cast(ExternalAction, await unit_of_work.external_actions.get(action.id))
-            claimed = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=5,
+            claimed = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.crashed-after-receipt",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=1),
+                lease_seconds=1,
             )
             assert claimed is not None
-            marked = await unit_of_work.external_actions.mark_call_started(
-                action_id=action.id,
-                expected_version=claimed.version,
-                expected_run_version=5,
+            marked = await _mark_call_started(
+                unit_of_work,
+                claimed,
+                clock,
                 lease_owner="worker.crashed-after-receipt",
-                attempt_number=claimed.delivery_attempt_count,
-                started_at=clock.now(),
             )
             assert marked is not None
             await unit_of_work.commit()
@@ -1097,14 +1244,13 @@ async def test_run_05_exhausted_pre_call_claim_fails_without_connector_call(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "pre-call-exhausted.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(
-        _dependencies(runtime, clock), delivery_attempt_limit=1
+    action = await _released_action(
+        runtime,
+        clock,
+        seed=110,
+        delivery_attempt_limit=1,
     )
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
     gateway, ledger = _gateway(runtime, clock)
     try:
         async with _uow_factory(runtime)() as unit_of_work:
@@ -1112,14 +1258,12 @@ async def test_run_05_exhausted_pre_call_claim_fails_without_connector_call(
                 ExternalAction,
                 await unit_of_work.external_actions.get(action.id),
             )
-            run = cast(object, await unit_of_work.runs.get(action.run_id))
-            claimed = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=run.version,  # type: ignore[attr-defined]
+            claimed = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.crashed-before-call",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=1),
+                lease_seconds=1,
             )
             assert claimed is not None
             assert claimed.state is ExternalActionState.DISPATCHING
@@ -1144,12 +1288,8 @@ async def test_run_05_unavailable_post_call_stale_never_blind_retries(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "unavailable-stale.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=111)
     async with runtime.session_factory() as session, session.begin():
         await session.execute(
             update(ExternalActionRecord)
@@ -1161,22 +1301,19 @@ async def test_run_05_unavailable_post_call_stale_never_blind_retries(
     try:
         async with _uow_factory(runtime)() as unit_of_work:
             current = cast(ExternalAction, await unit_of_work.external_actions.get(action.id))
-            claimed = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=5,
+            claimed = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.unavailable",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=1),
+                lease_seconds=1,
             )
             assert claimed is not None
-            marked = await unit_of_work.external_actions.mark_call_started(
-                action_id=action.id,
-                expected_version=claimed.version,
-                expected_run_version=5,
+            marked = await _mark_call_started(
+                unit_of_work,
+                claimed,
+                clock,
                 lease_owner="worker.unavailable",
-                attempt_number=claimed.delivery_attempt_count,
-                started_at=clock.now(),
             )
             assert marked is not None
             await unit_of_work.commit()
@@ -1209,31 +1346,24 @@ async def test_run_05_stale_attempt_cannot_overwrite_new_lease_generation(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "lease-generation.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=112)
     try:
         async with _uow_factory(runtime)() as unit_of_work:
             current = cast(ExternalAction, await unit_of_work.external_actions.get(action.id))
-            first = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=5,
+            first = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.generation.1",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=1),
+                lease_seconds=1,
             )
             assert first is not None
-            first_marked = await unit_of_work.external_actions.mark_call_started(
-                action_id=action.id,
-                expected_version=first.version,
-                expected_run_version=5,
+            first_marked = await _mark_call_started(
+                unit_of_work,
+                first,
+                clock,
                 lease_owner="worker.generation.1",
-                attempt_number=first.delivery_attempt_count,
-                started_at=clock.now(),
             )
             assert first_marked is not None
             await unit_of_work.commit()
@@ -1249,22 +1379,19 @@ async def test_run_05_stale_attempt_cannot_overwrite_new_lease_generation(
             assert released is not None
             await unit_of_work.commit()
         async with _uow_factory(runtime)() as unit_of_work:
-            second = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=cast(ExternalAction, released).version,
-                expected_run_version=5,
+            second = await _claim_reserved(
+                unit_of_work,
+                cast(ExternalAction, released),
+                clock,
                 lease_owner="worker.generation.2",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=10),
+                lease_seconds=10,
             )
             assert second is not None
-            second_marked = await unit_of_work.external_actions.mark_call_started(
-                action_id=action.id,
-                expected_version=second.version,
-                expected_run_version=5,
+            second_marked = await _mark_call_started(
+                unit_of_work,
+                second,
+                clock,
                 lease_owner="worker.generation.2",
-                attempt_number=second.delivery_attempt_count,
-                started_at=clock.now(),
             )
             assert second_marked is not None
             await unit_of_work.commit()
@@ -1292,33 +1419,31 @@ async def test_run_05_cancelled_parent_blocks_claim_and_pre_call_marker(
     tmp_path: Path,
 ) -> None:
     runtime = await _runtime(tmp_path / "cancel-fences.db")
-    await _seed_parent(runtime)
     clock = MutableClock()
-    registration = ExternalActionRegistrationService(_dependencies(runtime, clock))
-    created = await registration.register_plan_actions(_plan(seed=1))
-    action = created.actions[0].action
-    await _reserve(runtime, action)
+    action = await _released_action(runtime, clock, seed=113)
     try:
+        async with _uow_factory(runtime)() as unit_of_work:
+            authority = await _release_authority(unit_of_work, action.id)
         async with runtime.session_factory() as session, session.begin():
             await session.execute(
                 update(RunRecord)
-                .where(RunRecord.id == RUN_ID)
+                .where(RunRecord.id == action.run_id)
                 .values(
                     state="cancelled",
                     terminal_reason_code="operator_cancelled",
                     updated_at=clock.now(),
-                    version=6,
+                    version=authority.released_run_version + 1,
                 )
             )
         async with _uow_factory(runtime)() as unit_of_work:
             current = cast(ExternalAction, await unit_of_work.external_actions.get(action.id))
-            claimed = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=6,
+            claimed = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.cancelled",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=10),
+                lease_seconds=10,
+                authority=authority,
             )
             assert claimed is None
         async with runtime.session_factory() as session:
@@ -1326,50 +1451,47 @@ async def test_run_05_cancelled_parent_blocks_claim_and_pre_call_marker(
             assert row is not None
             assert row.state == ExternalActionState.DISPATCH_RESERVED.value
             assert row.delivery_attempt_count == 0
-        async with runtime.session_factory() as session, session.begin():
-            await session.execute(
-                update(RunRecord)
-                .where(RunRecord.id == RUN_ID)
-                .values(
-                    state="executing",
-                    terminal_reason_code=None,
-                    updated_at=clock.now(),
-                    version=7,
-                )
-            )
+
+        call_start_action = await _released_action(runtime, clock, seed=114)
         async with _uow_factory(runtime)() as unit_of_work:
-            current = cast(ExternalAction, await unit_of_work.external_actions.get(action.id))
-            claimed = await unit_of_work.external_actions.claim_reserved(
-                action_id=action.id,
-                expected_version=current.version,
-                expected_run_version=7,
+            current = cast(
+                ExternalAction,
+                await unit_of_work.external_actions.get(call_start_action.id),
+            )
+            claimed = await _claim_reserved(
+                unit_of_work,
+                current,
+                clock,
                 lease_owner="worker.claimed",
-                claimed_at=clock.now(),
-                lease_expires_at=clock.now() + timedelta(seconds=10),
+                lease_seconds=10,
             )
             assert claimed is not None
             await unit_of_work.commit()
+        async with _uow_factory(runtime)() as unit_of_work:
+            call_start_authority = await _release_authority(
+                unit_of_work,
+                call_start_action.id,
+            )
         async with runtime.session_factory() as session, session.begin():
             await session.execute(
                 update(RunRecord)
-                .where(RunRecord.id == RUN_ID)
+                .where(RunRecord.id == call_start_action.run_id)
                 .values(
                     state="cancelled",
                     terminal_reason_code="operator_cancelled_before_call",
                     updated_at=clock.now(),
-                    version=8,
+                    version=call_start_authority.released_run_version + 1,
                 )
             )
         async with _uow_factory(runtime)() as unit_of_work:
-            blocked = await unit_of_work.external_actions.mark_call_started(
-                action_id=action.id,
-                expected_version=cast(ExternalAction, claimed).version,
-                expected_run_version=8,
+            blocked = await _mark_call_started(
+                unit_of_work,
+                cast(ExternalAction, claimed),
+                clock,
                 lease_owner="worker.claimed",
-                attempt_number=cast(ExternalAction, claimed).delivery_attempt_count,
-                started_at=clock.now(),
+                authority=call_start_authority,
             )
             assert blocked is None
-        assert await _counts(runtime) == (1, 0)
+        assert await _counts(runtime) == (2, 0)
     finally:
         await runtime.dispose()

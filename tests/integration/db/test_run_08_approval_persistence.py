@@ -45,7 +45,6 @@ from marketing_agents.infrastructure.db import (
     AuditPersistenceInvariantError,
     Base,
     DatabaseRuntime,
-    ExternalActionPersistenceConflict,
     SQLAlchemyApprovalRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyExternalActionRepository,
@@ -498,48 +497,14 @@ async def test_run_08_two_write_set_replays_in_plan_order_and_never_heals_partia
         assert counts == (1, 6)
 
         missing_action = created.actions.actions[1].action.id
-        async with runtime.session_factory() as session, session.begin():
-            await session.execute(
-                delete(AuditEventRecord).where(AuditEventRecord.action_id == missing_action)
-            )
-            await session.execute(
-                delete(ExternalActionRecord).where(ExternalActionRecord.id == missing_action)
-            )
-        survivor = created.requests[0].request
-        decision = ApprovalDecision(
-            id="approval-decision.shrunken-set",
-            request_id=survivor.id,
-            action_id=survivor.action_id,
-            action_hash=survivor.action_hash,
-            authorization_set_id=survivor.authorization_set_id,
-            run_id=survivor.run_id,
-            plan_hash=survivor.plan_hash,
-            proposal_revision=survivor.proposal_revision,
-            step_id=survivor.step_id,
-            step_key=survivor.step_key,
-            actor_id="principal.approver.shrunken-set",
-            authentication_method="internal",
-            correlation_id="request.decision.shrunken-set",
-            decision=ApprovalDecisionKind.APPROVE,
-            authority_roles=survivor.policy.required_roles,
-            authority_scopes=survivor.policy.required_scopes,
-            reason_code="approval_granted",
-            decided_at=survivor.requested_at + timedelta(seconds=1),
-        )
-        async with dependencies.unit_of_work() as unit_of_work:
-            with pytest.raises(ApprovalPersistenceConflict) as direct:
-                await unit_of_work.approvals.record_decision(
-                    expected_version=1,
-                    expected_action_version=2,
-                    decision=decision,
+        with pytest.raises(IntegrityError):
+            async with runtime.session_factory() as session, session.begin():
+                await session.execute(
+                    delete(AuditEventRecord).where(AuditEventRecord.action_id == missing_action)
                 )
-            assert direct.value.code == "incomplete_action_set"
-        with pytest.raises(ExternalActionPersistenceConflict) as replay:
-            await service.register_plan(
-                _multi_plan(plan.run_id, seed=300)[0],
-                audit_context=_context("complete-set.missing-action"),
-            )
-        assert replay.value.code == "partial_action_set"
+                await session.execute(
+                    delete(ExternalActionRecord).where(ExternalActionRecord.id == missing_action)
+                )
         async with runtime.session_factory() as session:
             final_counts = (
                 int(
@@ -554,7 +519,7 @@ async def test_run_08_two_write_set_replays_in_plan_order_and_never_heals_partia
                 ),
                 int((await session.execute(select(func.count(AuditEventRecord.id)))).scalar_one()),
             )
-        assert final_counts == (1, 1, 4)
+        assert final_counts == (2, 1, 6)
     finally:
         await runtime.dispose()
 

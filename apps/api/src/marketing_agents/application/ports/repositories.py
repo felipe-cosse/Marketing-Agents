@@ -4,16 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 from marketing_agents.domain.approval import (
     ActionApprovalRequest,
     ApprovalDecision,
     ApprovalRenewal,
+    ApprovalUse,
+    AuthorizationSet,
+    AuthorizationSetHead,
+    AuthorizationSetStatus,
     StoredActionApprovalRequest,
+    authorization_set_release_hash,
 )
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.entities import (
+    ActionReservationSnapshot,
     ConnectorActionReceipt,
     ExternalAction,
     ExternalActionResultSnapshot,
@@ -24,9 +31,19 @@ from marketing_agents.domain.entities import (
     RunStep,
     WorkItem,
 )
-from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.enums import (
+    ApprovalStatus,
+    ExternalActionState,
+    RunState,
+    StepState,
+)
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
-from marketing_agents.domain.step_lifecycle import StepStateTransition, StepTransitionResult
+from marketing_agents.domain.step_lifecycle import (
+    StepLifecycleCommand,
+    StepStateTransition,
+    StepTransitionResult,
+)
+from marketing_agents.domain.validation import require_digest, require_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +112,92 @@ class ExternalActionSetInsertResult:
     inserted: bool
 
 
+class ReleaseCallMode(StrEnum):
+    FIRST_CALL = "first_call"
+    PROVIDER_RETRY = "provider_retry"
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseAuthority:
+    """Exact committed barrier snapshot required by every dispatch mutation."""
+
+    authorization_set_id: str
+    membership_hash: str
+    release_hash: str
+    authorization_set_version: int
+    head_version: int
+    run_id: str
+    released_run_version: int
+    action_id: str
+    action_hash: str
+    step_id: str
+    step_key: str
+    released_step_version: int
+    step_state: StepState
+    step_version: int
+    call_mode: ReleaseCallMode
+    prior_started_attempt_number: int | None
+    approval_request_id: str
+    approval_decision_id: str
+    approval_use_id: str
+    reservation_id: str
+
+    def __post_init__(self) -> None:
+        for identifier, name in (
+            (self.authorization_set_id, "release authorization set ID"),
+            (self.run_id, "release Run ID"),
+            (self.action_id, "release action ID"),
+            (self.step_id, "release step ID"),
+            (self.step_key, "release step key"),
+            (self.approval_request_id, "release approval request ID"),
+            (self.approval_decision_id, "release approval decision ID"),
+            (self.approval_use_id, "release approval use ID"),
+            (self.reservation_id, "release reservation ID"),
+        ):
+            require_id(identifier, name)
+        for digest, name in (
+            (self.membership_hash, "release membership hash"),
+            (self.release_hash, "release hash"),
+            (self.action_hash, "release action hash"),
+        ):
+            require_digest(digest, name)
+        for version in (
+            self.authorization_set_version,
+            self.head_version,
+            self.released_run_version,
+            self.released_step_version,
+            self.step_version,
+        ):
+            if type(version) is not int or version < 1:
+                raise ValueError("release authority versions must be positive integers")
+        if type(self.step_state) is not StepState or type(self.call_mode) is not ReleaseCallMode:
+            raise ValueError("release authority must use exact state and call-mode enums")
+        if self.call_mode is ReleaseCallMode.FIRST_CALL:
+            if (
+                self.step_state is not StepState.READY
+                or self.step_version != self.released_step_version
+                or self.prior_started_attempt_number is not None
+            ):
+                raise ValueError("first-call authority must retain the released READY step")
+        else:
+            prior_started_attempt_number = self.prior_started_attempt_number
+            if (
+                self.step_state is not StepState.EXECUTING
+                or self.step_version != self.released_step_version + 1
+                or type(prior_started_attempt_number) is not int
+                or prior_started_attempt_number < 1
+            ):
+                raise ValueError("provider-retry authority requires exact started-attempt lineage")
+
+
+@dataclass(frozen=True, slots=True)
+class ActionCallStartResult:
+    """Atomic action call marker plus reserved WRITE-step start."""
+
+    action: ExternalAction
+    step_transition: StepTransitionResult | None
+
+
 class ExternalActionRepositoryConflict(RuntimeError):
     """Stable action hydration/mutation conflict exposed through the application port."""
 
@@ -125,7 +228,7 @@ class ExternalActionRepository(Protocol):
         *,
         action_id: str,
         expected_version: int,
-        expected_run_version: int,
+        authority: ReleaseAuthority,
         lease_owner: str,
         claimed_at: datetime,
         lease_expires_at: datetime,
@@ -136,11 +239,12 @@ class ExternalActionRepository(Protocol):
         *,
         action_id: str,
         expected_version: int,
-        expected_run_version: int,
+        authority: ReleaseAuthority,
         lease_owner: str,
         attempt_number: int,
         started_at: datetime,
-    ) -> ExternalAction | None: ...
+        step_transition: StepTransitionResult | None,
+    ) -> ActionCallStartResult | None: ...
 
     async def complete_succeeded(
         self,
@@ -224,7 +328,239 @@ class ConnectorReceiptRepository(Protocol):
 @dataclass(frozen=True, slots=True)
 class ApprovalRequestSetInsertResult:
     requests: tuple[StoredActionApprovalRequest, ...]
+    authorization_set: AuthorizationSet
+    head: AuthorizationSetHead
     inserted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalSetReleaseMember:
+    """Every exact source/target fact for one all-or-none barrier member."""
+
+    request: StoredActionApprovalRequest
+    action: ExternalAction
+    step_transition: StepTransitionResult
+    use: ApprovalUse
+    reservation: ActionReservationSnapshot
+
+    def __post_init__(self) -> None:
+        request = self.request
+        decision = request.decision
+        transition = self.step_transition
+        if (
+            type(request) is not StoredActionApprovalRequest
+            or request.status is not ApprovalStatus.APPROVED
+            or decision is None
+            or type(self.action) is not ExternalAction
+            or self.action.state is not ExternalActionState.APPROVED
+            or type(transition) is not StepTransitionResult
+            or transition.transition.command is not StepLifecycleCommand.RELEASE_APPROVAL
+            or transition.transition.previous_state is not StepState.AWAITING_APPROVAL
+            or transition.step.state is not StepState.READY
+            or type(self.use) is not ApprovalUse
+            or type(self.reservation) is not ActionReservationSnapshot
+        ):
+            raise ValueError("approval release member requires approved exact source states")
+        approval_request = request.request
+        if (
+            decision.authority_roles
+            != approval_request.policy.required_roles | frozenset({"approver"})
+            or decision.authority_scopes
+            != approval_request.policy.required_scopes | frozenset({"approvals:decide"})
+            or (
+                not approval_request.policy.allow_self_approval
+                and decision.actor_id == approval_request.requested_by
+            )
+            or decision.decided_at >= approval_request.expires_at
+            or self.action.id != approval_request.action_id
+            or self.action.action_hash != approval_request.action_hash
+            or self.action.run_id != approval_request.run_id
+            or self.action.step_id != approval_request.step_id
+            or transition.step.id != approval_request.step_id
+            or transition.step.run_id != approval_request.run_id
+            or transition.step.key != approval_request.step_key
+            or self.use.request_id != approval_request.id
+            or self.use.decision_id != decision.id
+            or self.use.action_id != approval_request.action_id
+            or self.use.action_hash != approval_request.action_hash
+            or self.use.authorization_set_id != approval_request.authorization_set_id
+            or self.use.run_id != approval_request.run_id
+            or self.use.plan_hash != approval_request.plan_hash
+            or self.use.proposal_revision != approval_request.proposal_revision
+            or self.use.step_id != approval_request.step_id
+            or self.use.step_key != approval_request.step_key
+            or self.reservation.reservation_id != self.use.reservation_id
+            or self.reservation.authorization_set_id != approval_request.authorization_set_id
+            or self.reservation.approval_request_id != approval_request.id
+            or self.reservation.approval_decision_id != decision.id
+            or self.reservation.action_hash != approval_request.action_hash
+            or self.reservation.capability_id != self.action.envelope.capability_id
+            or self.reservation.binding_id != self.action.envelope.binding_id
+            or self.reservation.idempotency_key != self.action.idempotency_key
+            or self.use.used_at != self.reservation.reserved_at
+            or self.use.used_at != transition.transition.occurred_at
+            or self.use.used_at < decision.decided_at
+            or self.use.used_at >= approval_request.expires_at
+        ):
+            raise ValueError("approval release member does not bind one exact unexpired leaf")
+
+    def release_hash_material(self) -> dict[str, object]:
+        decision = self.request.decision
+        assert decision is not None  # guaranteed by __post_init__
+        return {
+            "action_id": self.action.id,
+            "action_hash": self.action.action_hash,
+            "action_source_version": self.action.version,
+            "request_id": self.request.request.id,
+            "request_source_version": self.request.version,
+            "decision_id": decision.id,
+            "approval_use_id": self.use.id,
+            "reservation_id": self.reservation.reservation_id,
+            "step_id": self.step_transition.step.id,
+            "released_step_version": self.step_transition.step.version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetReleaseCommand:
+    """One complete current-set barrier transition staged in a single UoW."""
+
+    authorization_set: AuthorizationSet
+    head: AuthorizationSetHead
+    run_transition: RunTransitionResult
+    members: tuple[ApprovalSetReleaseMember, ...]
+    released_at: datetime
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.authorization_set) is not AuthorizationSet
+            or self.authorization_set.status is not AuthorizationSetStatus.OPEN
+            or type(self.head) is not AuthorizationSetHead
+            or type(self.run_transition) is not RunTransitionResult
+            or type(self.members) is not tuple
+            or not self.members
+        ):
+            raise ValueError("authorization release requires exact immutable contracts")
+        self.head.assert_selects(self.authorization_set)
+        transition = self.run_transition.transition
+        if (
+            transition.command.value != "release_approved_plan"
+            or transition.previous_state is not RunState.AWAITING_APPROVAL
+            or self.run_transition.run.state is not RunState.EXECUTING
+            or self.run_transition.run.id != self.authorization_set.run_id
+            or transition.occurred_at != self.released_at
+        ):
+            raise ValueError("authorization release requires the exact parent Run transition")
+        expected = self.authorization_set.members
+        if len(expected) != len(self.members):
+            raise ValueError("authorization release must contain every set member")
+        for set_member, release_member in zip(expected, self.members, strict=True):
+            request = release_member.request.request
+            if (
+                set_member.action_id != release_member.action.id
+                or set_member.action_hash != release_member.action.action_hash
+                or set_member.step_id != release_member.step_transition.step.id
+                or set_member.step_key != release_member.step_transition.step.key
+                or set_member.authorization_set_id != request.authorization_set_id
+                or set_member.run_id != request.run_id
+                or set_member.plan_hash != request.plan_hash
+                or set_member.proposal_revision != request.proposal_revision
+            ):
+                raise ValueError("authorization release differs from exact set membership")
+
+    @property
+    def release_hash(self) -> str:
+        return authorization_set_release_hash(
+            authorization_set_id=self.authorization_set.id,
+            membership_hash=self.authorization_set.membership_hash,
+            released_run_version=self.run_transition.run.version,
+            released_at=self.released_at,
+            members=tuple(member.release_hash_material() for member in self.members),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetReleaseResult:
+    authorization_set: AuthorizationSet
+    head: AuthorizationSetHead
+    run: Run
+    steps: tuple[RunStep, ...]
+    actions: tuple[ExternalAction, ...]
+    requests: tuple[StoredActionApprovalRequest, ...]
+    inserted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentAuthorizationSet:
+    head: AuthorizationSetHead
+    authorization_set: AuthorizationSet
+
+    def __post_init__(self) -> None:
+        self.head.assert_selects(self.authorization_set)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetCloseCommand:
+    """Terminally close one unreleased current set with its parent/step results."""
+
+    authorization_set: AuthorizationSet
+    head: AuthorizationSetHead
+    status: AuthorizationSetStatus
+    run_transition: RunTransitionResult
+    actions: tuple[ExternalAction, ...]
+    requests: tuple[StoredActionApprovalRequest, ...]
+    step_transitions: tuple[StepTransitionResult, ...]
+    closed_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.authorization_set.status is not AuthorizationSetStatus.OPEN or self.status not in {
+            AuthorizationSetStatus.REJECTED,
+            AuthorizationSetStatus.CANCELLED,
+        }:
+            raise ValueError("only an open authorization set can be terminally closed")
+        self.head.assert_selects(self.authorization_set)
+        expected_run_state = (
+            RunState.REJECTED
+            if self.status is AuthorizationSetStatus.REJECTED
+            else RunState.CANCELLED
+        )
+        if (
+            self.run_transition.run.id != self.authorization_set.run_id
+            or self.run_transition.run.state is not expected_run_state
+            or self.run_transition.transition.occurred_at != self.closed_at
+            or type(self.actions) is not tuple
+            or type(self.requests) is not tuple
+            or type(self.step_transitions) is not tuple
+        ):
+            raise ValueError("authorization set closure has inconsistent parent state")
+        expected_members = self.authorization_set.members
+        if (
+            {action.id for action in self.actions}
+            != {member.action_id for member in expected_members}
+            or {stored.request.action_id for stored in self.requests}
+            != {member.action_id for member in expected_members}
+            or not {member.step_id for member in expected_members}.issubset(
+                {result.step.id for result in self.step_transitions}
+            )
+            or len({result.step.id for result in self.step_transitions})
+            != len(self.step_transitions)
+            or any(
+                result.step.run_id != self.authorization_set.run_id
+                or result.transition.occurred_at != self.closed_at
+                for result in self.step_transitions
+            )
+        ):
+            raise ValueError("authorization set closure must cover every exact set member")
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizationSetCloseResult:
+    authorization_set: AuthorizationSet
+    head: AuthorizationSetHead
+    run: Run
+    steps: tuple[RunStep, ...]
+    actions: tuple[ExternalAction, ...]
+    requests: tuple[StoredActionApprovalRequest, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +587,25 @@ class ApprovalRepository(Protocol):
         proposal_revision: int,
     ) -> tuple[StoredActionApprovalRequest, ...]: ...
 
+    async def list_set_history(
+        self,
+        run_id: str,
+        plan_hash: str,
+        proposal_revision: int,
+    ) -> tuple[StoredActionApprovalRequest, ...]: ...
+
+    async def get_current_authorization_set(
+        self,
+        run_id: str,
+    ) -> CurrentAuthorizationSet | None: ...
+
+    async def get_authorization_set_epoch(
+        self,
+        run_id: str,
+        plan_hash: str,
+        proposal_revision: int,
+    ) -> AuthorizationSet | None: ...
+
     async def add_initial_set_or_get(
         self,
         requests: tuple[ActionApprovalRequest, ...],
@@ -263,6 +618,21 @@ class ApprovalRepository(Protocol):
         expected_action_version: int,
         decision: ApprovalDecision,
     ) -> ApprovalDecisionInsertResult: ...
+
+    async def release_current_set(
+        self,
+        command: AuthorizationSetReleaseCommand,
+    ) -> AuthorizationSetReleaseResult: ...
+
+    async def close_current_set(
+        self,
+        command: AuthorizationSetCloseCommand,
+    ) -> AuthorizationSetCloseResult: ...
+
+    async def get_release_authority(
+        self,
+        action_id: str,
+    ) -> ReleaseAuthority | None: ...
 
     async def mark_expired(
         self,

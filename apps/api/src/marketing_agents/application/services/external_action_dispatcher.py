@@ -24,11 +24,21 @@ from marketing_agents.application.ports.external_writes import (
     ConnectorDeliveryFailure,
     ExternalWriteConnectorGateway,
 )
+from marketing_agents.application.ports.repositories import ReleaseAuthority, ReleaseCallMode
+from marketing_agents.application.ports.unit_of_work import UnitOfWork
+from marketing_agents.application.services.audit_events import AuditEventFactory
+from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import (
     ExternalAction,
     ExternalActionResultSnapshot,
 )
-from marketing_agents.domain.enums import ExternalActionState, RunState
+from marketing_agents.domain.enums import ExternalActionState, RunState, StepState
+from marketing_agents.domain.step_lifecycle import (
+    NoStepTransitionContext,
+    StepLifecycleCommand,
+    StepTransitionResult,
+    transition_step,
+)
 
 _SAFE_FAILURE_CODES = frozenset(
     {
@@ -174,11 +184,19 @@ class ExternalActionDispatcher:
                 )
             self._authorize(action)
             self._gateway.contract_for(action)
+            authority = await unit_of_work.approvals.get_release_authority(action.id)
+            if authority is None:
+                raise ExternalActionDispatchError(
+                    "release_authority_missing",
+                    "external action lacks its exact committed release authority",
+                )
+            self._require_authority(action, authority)
             run = await unit_of_work.runs.get(action.run_id)
             if (
                 run is None
                 or run.state is not RunState.EXECUTING
                 or run.approval_required is not True
+                or run.version != authority.released_run_version
             ):
                 raise ExternalActionDispatchError(
                     "run_not_executing", "parent Run does not permit external effects"
@@ -187,7 +205,7 @@ class ExternalActionDispatcher:
             claimed = await unit_of_work.external_actions.claim_reserved(
                 action_id=action.id,
                 expected_version=action.version,
-                expected_run_version=run.version,
+                authority=authority,
                 lease_owner=lease_owner,
                 claimed_at=claimed_at,
                 lease_expires_at=claimed_at + self._lease_duration,
@@ -196,6 +214,14 @@ class ExternalActionDispatcher:
                 raise ExternalActionDispatchError(
                     "claim_cas_lost", "external action dispatch claim was not acquired"
                 )
+            await unit_of_work.audits.append(
+                AuditEventFactory(
+                    self._dispatch_audit_context(
+                        lease_owner,
+                        claimed,
+                    )
+                ).action_dispatch_claimed(action, claimed)
+            )
             await unit_of_work.commit()
             return claimed
 
@@ -212,25 +238,142 @@ class ExternalActionDispatcher:
                 )
             authorization = self._authorize(action)
             self._gateway.contract_for(action)
+            authority = await unit_of_work.approvals.get_release_authority(action.id)
+            if authority is None:
+                return None, authorization
+            self._require_authority(action, authority)
             run = await unit_of_work.runs.get(action.run_id)
             if (
                 run is None
                 or run.state is not RunState.EXECUTING
                 or run.approval_required is not True
+                or run.version != authority.released_run_version
             ):
                 return None, authorization
             started_at = self._dependencies.utc_now()
-            marked = await unit_of_work.external_actions.mark_call_started(
+            step_transition = await self._call_start_step_transition(
+                unit_of_work,
+                authority,
+                started_at=started_at,
+            )
+            started = await unit_of_work.external_actions.mark_call_started(
                 action_id=action.id,
                 expected_version=action.version,
-                expected_run_version=run.version,
+                authority=authority,
                 lease_owner=lease_owner,
                 attempt_number=action.delivery_attempt_count,
                 started_at=started_at,
+                step_transition=step_transition,
             )
-            if marked is not None:
+            if started is not None:
+                factory = AuditEventFactory(
+                    self._dispatch_audit_context(
+                        lease_owner,
+                        started.action,
+                    )
+                )
+                await unit_of_work.audits.append_many(
+                    (
+                        factory.action_call_started(action, started.action),
+                        *(
+                            ()
+                            if started.step_transition is None
+                            else (
+                                factory.step_transition(
+                                    started.step_transition.step,
+                                    started.step_transition.transition,
+                                ),
+                            )
+                        ),
+                    )
+                )
                 await unit_of_work.commit()
-            return marked, authorization
+                return started.action, authorization
+            return None, authorization
+
+    async def _call_start_step_transition(
+        self,
+        unit_of_work: UnitOfWork,
+        authority: ReleaseAuthority,
+        *,
+        started_at: datetime,
+    ) -> StepTransitionResult | None:
+        if authority.call_mode is ReleaseCallMode.PROVIDER_RETRY:
+            if (
+                authority.step_state is not StepState.EXECUTING
+                or authority.step_version != authority.released_step_version + 1
+                or authority.prior_started_attempt_number is None
+            ):
+                raise ExternalActionDispatchError(
+                    "release_authority_mismatch",
+                    "provider retry lacks its exact prior call-start step witness",
+                )
+            return None
+        if authority.call_mode is not ReleaseCallMode.FIRST_CALL:
+            raise ExternalActionDispatchError(
+                "release_authority_mismatch",
+                "release authority selected an unsupported call mode",
+            )
+        if (
+            authority.step_state is not StepState.READY
+            or authority.step_version != authority.released_step_version
+            or authority.prior_started_attempt_number is not None
+        ):
+            raise ExternalActionDispatchError(
+                "release_authority_mismatch",
+                "first call lacks its exact released ready step",
+            )
+        step = await unit_of_work.run_steps.get(authority.step_id)
+        if (
+            step is None
+            or step.state is not authority.step_state
+            or step.version != authority.step_version
+            or step.run_id != authority.run_id
+            or step.key != authority.step_key
+        ):
+            raise ExternalActionDispatchError(
+                "release_authority_mismatch",
+                "released write step changed before connector call-start",
+            )
+        return transition_step(
+            step,
+            StepLifecycleCommand.START_RESERVED_WRITE,
+            NoStepTransitionContext(),
+            started_at,
+        )
+
+    @staticmethod
+    def _require_authority(action: ExternalAction, authority: ReleaseAuthority) -> None:
+        reservation = action.reservation
+        if (
+            reservation is None
+            or authority.action_id != action.id
+            or authority.action_hash != action.action_hash
+            or authority.run_id != action.run_id
+            or authority.step_id != action.step_id
+            or authority.step_key != action.envelope.step_key
+            or authority.authorization_set_id != reservation.authorization_set_id
+            or authority.reservation_id != reservation.reservation_id
+            or authority.approval_request_id != reservation.approval_request_id
+            or authority.approval_decision_id != reservation.approval_decision_id
+            or authority.action_hash != reservation.action_hash
+        ):
+            raise ExternalActionDispatchError(
+                "release_authority_mismatch",
+                "committed release authority differs from the action reservation",
+            )
+
+    @staticmethod
+    def _dispatch_audit_context(
+        lease_owner: str,
+        action: ExternalAction,
+    ) -> AuditContext:
+        return AuditContext.worker(
+            lease_owner,
+            correlation_id=(
+                f"dispatch-attempt.{action.delivery_attempt_count}.{action.action_hash[:32]}"
+            ),
+        )
 
     def _authorize(self, action: ExternalAction) -> AuthorizedExternalWrite:
         reservation = action.reservation

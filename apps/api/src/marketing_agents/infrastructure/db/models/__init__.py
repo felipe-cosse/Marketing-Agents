@@ -5,7 +5,14 @@ from .action import (
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
 )
-from .approval import ApprovalDecisionRecord, ApprovalRequestRecord, ApprovalUseRecord
+from .approval import (
+    ApprovalDecisionRecord,
+    ApprovalRequestRecord,
+    ApprovalUseRecord,
+    AuthorizationSetHeadRecord,
+    AuthorizationSetMemberRecord,
+    AuthorizationSetRecord,
+)
 from .audit import AuditEventRecord
 from .run import RunRecord, RunStateTransitionRecord
 from .step import (
@@ -23,6 +30,9 @@ __all__ = [
     "ApprovalRequestRecord",
     "ApprovalUseRecord",
     "AuditEventRecord",
+    "AuthorizationSetHeadRecord",
+    "AuthorizationSetMemberRecord",
+    "AuthorizationSetRecord",
     "ConnectorActionReceiptRecord",
     "ExternalActionDispatchAttemptRecord",
     "ExternalActionRecord",

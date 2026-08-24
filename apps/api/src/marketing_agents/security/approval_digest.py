@@ -13,6 +13,9 @@ from marketing_agents.security.digest_key import DigestKey
 _REQUEST_DOMAIN = b"marketing-agents:approval-request-record:hmac-sha256:v1\x00"
 _DECISION_DOMAIN = b"marketing-agents:approval-decision-record:hmac-sha256:v1\x00"
 _USE_DOMAIN = b"marketing-agents:approval-use-record:hmac-sha256:v1\x00"
+_SET_DOMAIN = b"marketing-agents:authorization-set-record:hmac-sha256:v1\x00"
+_SET_HEAD_DOMAIN = b"marketing-agents:authorization-set-head-record:hmac-sha256:v1\x00"
+_SET_MEMBER_DOMAIN = b"marketing-agents:authorization-set-member-record:hmac-sha256:v1\x00"
 
 
 def _record_digest(
@@ -52,3 +55,30 @@ def approval_use_record_digest(
     """Bind one reservation/use fact to the installed key."""
 
     return _record_digest(_USE_DOMAIN, material, key)
+
+
+def authorization_set_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind one authorization-set lifecycle and release snapshot."""
+
+    return _record_digest(_SET_DOMAIN, material, key)
+
+
+def authorization_set_head_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind the run-owned pointer selecting one current authorization epoch."""
+
+    return _record_digest(_SET_HEAD_DOMAIN, material, key)
+
+
+def authorization_set_member_record_digest(
+    material: Mapping[str, Any],
+    key: DigestKey,
+) -> str:
+    """Bind stable membership plus any atomic release-use projection."""
+
+    return _record_digest(_SET_MEMBER_DOMAIN, material, key)

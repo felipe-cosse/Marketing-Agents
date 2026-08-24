@@ -207,11 +207,24 @@ def test_run_08_lifecycle_allows_only_exact_expiry_renewal_and_single_use() -> N
         replace(approved, status=ApprovalStatus.EXPIRED, expired_at=expired_at)
 
 
-def test_run_08_full_set_supersession_is_a_new_epoch_not_a_leaf_revision() -> None:
-    with pytest.raises(ValueError, match="ORCH-08 authorization-set head"):
+def test_run_08_full_set_closure_supersession_requires_complete_terminal_fields() -> None:
+    request = _request()
+    closed_at = NOW + timedelta(minutes=1)
+    superseded = StoredActionApprovalRequest(
+        request=request,
+        status=ApprovalStatus.SUPERSEDED,
+        version=2,
+        updated_at=closed_at,
+        superseded_at=closed_at,
+        superseded_reason_code="approval_set_rejected",
+    )
+    assert superseded.status is ApprovalStatus.SUPERSEDED
+    assert superseded.superseded_reason_code == "approval_set_rejected"
+
+    with pytest.raises(ValueError, match="superseded approval state is incomplete"):
         StoredActionApprovalRequest(
-            request=_request(),
+            request=request,
             status=ApprovalStatus.SUPERSEDED,
             version=2,
-            updated_at=NOW + timedelta(minutes=1),
+            updated_at=closed_at,
         )

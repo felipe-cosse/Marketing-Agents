@@ -20,16 +20,22 @@ from marketing_agents.domain.entities import (
 from marketing_agents.domain.enums import RunState, StepState
 from marketing_agents.domain.graph import DependencyGraph
 from marketing_agents.domain.run_lifecycle import (
+    NoRunTransitionContext,
     RunLifecycleCommand,
     RunStateTransition,
     transition_run,
 )
 from marketing_agents.domain.step_lifecycle import (
+    NoStepTransitionContext,
+    StepLifecycleCommand,
     StepStateTransition,
     initial_pending_transition,
+    transition_step,
 )
 
+from .approval_records import ApprovalRecordService
 from .audit_events import AuditEventFactory
+from .external_action_registration import ExternalActionRegistrationDisposition
 
 
 class PlanPersistenceError(RuntimeError):
@@ -68,12 +74,6 @@ class AuditedPlanPersistenceService:
             or expected_run_version < 1
         ):
             raise ValueError("expected Run version must be positive")
-        if effect_plan.lifecycle_context.contains_write_actions:
-            raise PlanPersistenceError(
-                "write_plan_persistence_not_composed",
-                "write-bearing plans require atomic action and approval persistence",
-                run_id=effect_plan.run_id,
-            )
         async with self._dependencies.unit_of_work() as unit_of_work:
             current = await unit_of_work.runs.get(effect_plan.run_id)
             if current is None:
@@ -104,6 +104,42 @@ class AuditedPlanPersistenceService:
                     stored.plan,
                     stored.steps,
                 )
+                if effect_plan.lifecycle_context.contains_write_actions:
+                    registered = await ApprovalRecordService(
+                        self._dependencies
+                    ).register_plan_in_uow(
+                        unit_of_work,
+                        effect_plan,
+                        audit_context=audit_context,
+                    )
+                    if (
+                        registered.actions.disposition
+                        is not ExternalActionRegistrationDisposition.REPLAYED
+                    ):
+                        raise PlanPersistenceError(
+                            "write_plan_approval_epoch_missing",
+                            "existing write plan cannot recreate a missing approval epoch",
+                            run_id=current.id,
+                        )
+                    await _require_write_activation_replay(
+                        unit_of_work,
+                        current,
+                        stored.plan,
+                        stored.steps,
+                    )
+                    if current.state not in {
+                        RunState.AWAITING_APPROVAL,
+                        RunState.EXECUTING,
+                        RunState.COMPLETED,
+                        RunState.REJECTED,
+                        RunState.CANCELLED,
+                        RunState.FAILED,
+                    }:
+                        raise PlanPersistenceError(
+                            "write_plan_activation_missing",
+                            "persisted write plan lacks its atomic approval-boundary activation",
+                            run_id=current.id,
+                        )
                 await unit_of_work.commit()
                 return PersistedRunPlan(current, stored.plan, stored.steps, created=False)
             if current.state is not RunState.VALIDATED:
@@ -172,11 +208,79 @@ class AuditedPlanPersistenceService:
                 )
             )
             await unit_of_work.audits.append_many((plan_event, *step_events))
+            final_run = transition_result.run
+            final_steps = stored.steps
+            if effect_plan.lifecycle_context.contains_write_actions:
+                await ApprovalRecordService(self._dependencies).register_plan_in_uow(
+                    unit_of_work,
+                    effect_plan,
+                    audit_context=audit_context,
+                )
+                activated_at = self._dependencies.utc_now()
+                step_results = tuple(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.WAIT_FOR_APPROVAL,
+                        NoStepTransitionContext(),
+                        activated_at,
+                    )
+                    for step in stored.steps
+                    if step.effect.value == "write"
+                )
+                if not step_results:
+                    raise PlanPersistenceError(
+                        "write_plan_step_missing",
+                        "write plan activation lacks a persisted write step",
+                        run_id=current.id,
+                    )
+                updated_by_id = {result.step.id: result.step for result in step_results}
+                for result in step_results:
+                    applied_step = await unit_of_work.run_steps.apply_transition(
+                        expected_run_version=transition_result.run.version,
+                        expected_run_state=transition_result.run.state,
+                        expected_version=result.transition.expected_version,
+                        expected_state=StepState.PENDING,
+                        result=result,
+                    )
+                    if not applied_step:
+                        raise PlanPersistenceError(
+                            "write_plan_activation_conflict",
+                            "write step changed before approval-boundary activation",
+                            run_id=current.id,
+                        )
+                activation = transition_run(
+                    transition_result.run,
+                    RunLifecycleCommand.ACTIVATE_PLAN,
+                    NoRunTransitionContext(),
+                    activated_at,
+                )
+                applied_run = await unit_of_work.runs.apply_transition(
+                    expected_version=transition_result.run.version,
+                    expected_state=transition_result.run.state,
+                    result=activation,
+                )
+                if not applied_run:
+                    raise PlanPersistenceError(
+                        "write_plan_activation_conflict",
+                        "Run changed before approval-boundary activation",
+                        run_id=current.id,
+                    )
+                await unit_of_work.audits.append_many(
+                    (
+                        *(
+                            factory.step_transition(result.step, result.transition)
+                            for result in step_results
+                        ),
+                        factory.run_transition(activation.run, activation.transition),
+                    )
+                )
+                final_run = activation.run
+                final_steps = tuple(updated_by_id.get(step.id, step) for step in stored.steps)
             await unit_of_work.commit()
             return PersistedRunPlan(
-                transition_result.run,
+                final_run,
                 stored.plan,
-                stored.steps,
+                final_steps,
                 created=True,
             )
 
@@ -489,3 +593,138 @@ def _require_step_event(
             "persisted plan step audit witness is not authoritative",
             run_id=plan.run_id,
         )
+
+
+async def _require_write_activation_replay(
+    unit_of_work: UnitOfWork,
+    run: Run,
+    plan: RunPlanSnapshot,
+    steps: tuple[RunStep, ...],
+) -> None:
+    """Reject partial/missing write activation; replay must never heal its witnesses."""
+
+    history = await unit_of_work.runs.list_transitions(run.id)
+    activations = tuple(
+        transition
+        for transition in history
+        if transition.command is RunLifecycleCommand.ACTIVATE_PLAN
+    )
+    plan_records = tuple(
+        transition
+        for transition in history
+        if transition.command is RunLifecycleCommand.RECORD_PLAN
+    )
+    if len(activations) != 1 or len(plan_records) != 1:
+        raise PlanPersistenceError(
+            "write_plan_activation_missing",
+            "persisted write plan lacks one authoritative activation transition",
+            run_id=run.id,
+        )
+    activation = activations[0]
+    plan_record = plan_records[0]
+    if (
+        not plan.approval_required
+        or activation.previous_state is not RunState.PLANNED
+        or activation.new_state is not RunState.AWAITING_APPROVAL
+        or activation.reason_code != "write_plan_requires_approval"
+        or activation.expected_version != plan_record.resulting_version
+        or activation.resulting_version != plan_record.resulting_version + 1
+        or activation.occurred_at < plan.created_at
+    ):
+        raise PlanPersistenceError(
+            "write_plan_activation_mismatch",
+            "persisted write activation differs from its exact plan transition",
+            run_id=run.id,
+        )
+    run_event = await unit_of_work.audits.get_mutation_event(
+        "run",
+        run.id,
+        activation.resulting_version,
+    )
+    if run_event is None:
+        raise PlanPersistenceError(
+            "write_plan_activation_audit_missing",
+            "persisted write activation lacks its Run audit witness",
+            run_id=run.id,
+        )
+    run_draft = run_event.draft
+    if (
+        run_draft.event_type != "run.transitioned"
+        or run_draft.run_id != run.id
+        or run_draft.aggregate_id != run.id
+        or run_draft.mutation_version != activation.resulting_version
+        or run_draft.transition_sequence != activation.sequence
+        or run_draft.previous_state != RunState.PLANNED.value
+        or run_draft.new_state != RunState.AWAITING_APPROVAL.value
+        or run_draft.reason_code != "write_plan_requires_approval"
+        or run_draft.occurred_at != activation.occurred_at
+        or dict(run_draft.safe_metadata.values) != {"command": "activate_plan"}
+    ):
+        raise PlanPersistenceError(
+            "write_plan_activation_audit_mismatch",
+            "persisted write activation Run audit is not authoritative",
+            run_id=run.id,
+        )
+    write_steps = tuple(step for step in steps if step.effect.value == "write")
+    if not write_steps:
+        raise PlanPersistenceError(
+            "write_plan_step_missing",
+            "write plan lacks persisted write steps",
+            run_id=run.id,
+        )
+    for step in write_steps:
+        step_history = await unit_of_work.run_steps.list_transitions(step.id)
+        if len(step_history) < 2:
+            raise PlanPersistenceError(
+                "write_step_activation_missing",
+                "write step lacks its approval-wait transition",
+                run_id=run.id,
+            )
+        waiting = step_history[1]
+        if (
+            waiting.sequence != 2
+            or waiting.command is not StepLifecycleCommand.WAIT_FOR_APPROVAL
+            or waiting.previous_state is not StepState.PENDING
+            or waiting.new_state is not StepState.AWAITING_APPROVAL
+            or waiting.reason_code != "step_approval_required"
+            or waiting.occurred_at != activation.occurred_at
+        ):
+            raise PlanPersistenceError(
+                "write_step_activation_mismatch",
+                "write step approval-wait transition differs from atomic activation",
+                run_id=run.id,
+            )
+        step_event = await unit_of_work.audits.get_mutation_event("step", step.id, 2)
+        if step_event is None:
+            raise PlanPersistenceError(
+                "write_step_activation_audit_missing",
+                "write step approval-wait transition lacks its audit witness",
+                run_id=run.id,
+            )
+        step_draft = step_event.draft
+        if (
+            step_draft.event_type != "step.transitioned"
+            or step_draft.run_id != run.id
+            or step_draft.step_id != step.id
+            or step_draft.aggregate_id != step.id
+            or step_draft.mutation_version != 2
+            or step_draft.transition_sequence != 2
+            or step_draft.previous_state != StepState.PENDING.value
+            or step_draft.new_state != StepState.AWAITING_APPROVAL.value
+            or step_draft.reason_code != "step_approval_required"
+            or step_draft.occurred_at != activation.occurred_at
+            or dict(step_draft.safe_metadata.values)
+            != {
+                "command": "wait_for_approval",
+                "ordinal": step.ordinal,
+                "step_kind": step.kind,
+                "template_id": step.template_id,
+                "configuration_revision": step.configuration_revision,
+                "terminal_result": step.terminal_result,
+            }
+        ):
+            raise PlanPersistenceError(
+                "write_step_activation_audit_mismatch",
+                "write step approval-wait audit is not authoritative",
+                run_id=run.id,
+            )

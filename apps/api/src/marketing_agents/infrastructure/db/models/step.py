@@ -24,8 +24,8 @@ STEP_STATES_SQL = (
     "'rejected','cancelled','skipped'"
 )
 STEP_COMMANDS_SQL = (
-    "'initialize','mark_ready','wait_for_approval','start','succeed','fail',"
-    "'reject','cancel','skip'"
+    "'initialize','mark_ready','wait_for_approval','release_approval',"
+    "'start_reserved_write','start','succeed','fail','reject','cancel','skip'"
 )
 
 

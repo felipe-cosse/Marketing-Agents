@@ -57,7 +57,7 @@ Allowed status values:
 | ORCH-05 | Pass typed artifacts, not unbounded chat. | 03, 05 | Bindings/artifacts | Binding/provenance tests | verified |
 | ORCH-06 | Enforce budgets, timeouts, rate limits, retries, cancellation. | 03, 05 | Policies/executor | Boundary/failure tests | planned |
 | ORCH-07 | Deduplicate events and external actions. | 06, 07, 08 | Unique keys/receipts | Replay/crash/race tests | verified |
-| ORCH-08 | Pause at approval boundaries. | 06 | Approval/action service | Zero-call tests | planned |
+| ORCH-08 | Pause at approval boundaries. | 06 | Approval/action service | Zero-call tests | verified |
 | ORCH-09 | Persist auditable state for every step. | 04, 05, 13 | Transition/audit tables/services | Timeline completeness/fault tests | verified |
 | DOM-01 | Model all named core entities. | 03 | Domain entity modules | Entity/invariant tests | verified |
 | DOM-02 | Every template has ID/name/department/function/purpose/instructions. | 02 | Template schema/files | Completeness test | verified |

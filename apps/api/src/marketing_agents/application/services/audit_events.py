@@ -16,6 +16,7 @@ from marketing_agents.domain.approval import (
     ApprovalRenewal,
     StoredActionApprovalRequest,
     assert_request_binds_action,
+    assert_use_binds_request,
 )
 from marketing_agents.domain.audit import (
     AuditContext,
@@ -647,6 +648,418 @@ class AuditEventFactory:
             reason_code="approval_renewed",
         )
 
+    def action_dispatch_reserved(
+        self,
+        previous: ExternalAction,
+        reserved: ExternalAction,
+        consumed: StoredActionApprovalRequest,
+    ) -> AuditEventDraft:
+        """Witness one exact approved action becoming dispatch-reserved at set release."""
+
+        decision = consumed.decision
+        use = consumed.use
+        reservation = reserved.reservation
+        if (
+            type(previous) is not ExternalAction
+            or type(reserved) is not ExternalAction
+            or type(consumed) is not StoredActionApprovalRequest
+            or previous.state is not ExternalActionState.APPROVED
+            or reserved.state is not ExternalActionState.DISPATCH_RESERVED
+            or not _same_action_definition(previous, reserved)
+            or reserved.version != previous.version + 1
+            or reserved.updated_at < previous.updated_at
+            or previous.reservation is not None
+            or reservation is None
+            or previous.delivery_attempt_count != 0
+            or reserved.delivery_attempt_count != 0
+            or previous.lease is not None
+            or reserved.lease is not None
+            or previous.call_started_at is not None
+            or reserved.call_started_at is not None
+            or previous.result is not None
+            or reserved.result is not None
+            or previous.terminal_reason_code is not None
+            or reserved.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or reserved.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or reserved.superseded_at is not None
+            or consumed.status is not ApprovalStatus.CONSUMED
+            or consumed.version != 3
+            or decision is None
+            or use is None
+            or consumed.request.action_id != reserved.id
+            or consumed.request.action_hash != reserved.action_hash
+            or consumed.request.policy != reserved.approval_policy
+            or consumed.request.redacted_projection != reserved.proposal.redacted_projection
+            or consumed.updated_at != reserved.updated_at
+            or use.used_at != reserved.updated_at
+            or reservation.reserved_at != reserved.updated_at
+            or reservation.approval_request_id != consumed.request.id
+            or reservation.approval_decision_id != decision.id
+            or reservation.reservation_id != use.reservation_id
+            or not _has_exact_release_authority(consumed)
+        ):
+            raise ValueError("dispatch-reserved audit requires one exact consumed approval leaf")
+        try:
+            assert_request_binds_action(consumed.request, reserved.envelope)
+            assert_use_binds_request(use, consumed)
+        except ValueError as exc:
+            raise ValueError("dispatch-reserved audit lost its exact approval binding") from exc
+        return self._build(
+            run_id=reserved.run_id,
+            event_type="action.dispatch_reserved",
+            aggregate_type="external_action",
+            aggregate_id=reserved.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=reserved.updated_at,
+            metadata={
+                "approval_use_id": use.id,
+                "approval_set_id": reservation.authorization_set_id,
+                "idempotency_support": reserved.delivery_contract.idempotency_support,
+                "reservation_id": reservation.reservation_id,
+            },
+            step_id=reserved.step_id,
+            action_id=reserved.id,
+            approval_request_id=consumed.request.id,
+            approval_decision_id=decision.id,
+            mutation_version=reserved.version,
+            previous_state=previous.state.value,
+            new_state=reserved.state.value,
+            reason_code="approval_consumed",
+        )
+
+    def approval_consumed(
+        self,
+        previous: StoredActionApprovalRequest,
+        consumed: StoredActionApprovalRequest,
+        reserved: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness the single-use approval fact paired with one reserved action."""
+
+        decision = consumed.decision
+        use = consumed.use
+        reservation = reserved.reservation
+        if (
+            type(previous) is not StoredActionApprovalRequest
+            or type(consumed) is not StoredActionApprovalRequest
+            or type(reserved) is not ExternalAction
+            or previous.status is not ApprovalStatus.APPROVED
+            or previous.version != 2
+            or consumed.request != previous.request
+            or consumed.decision != previous.decision
+            or consumed.status is not ApprovalStatus.CONSUMED
+            or consumed.version != previous.version + 1
+            or decision is None
+            or use is None
+            or reserved.state is not ExternalActionState.DISPATCH_RESERVED
+            or reservation is None
+            or reserved.id != consumed.request.action_id
+            or reserved.action_hash != consumed.request.action_hash
+            or reserved.approval_policy != consumed.request.policy
+            or reserved.proposal.redacted_projection != consumed.request.redacted_projection
+            or consumed.updated_at != use.used_at
+            or consumed.updated_at != reserved.updated_at
+            or reservation.reserved_at != consumed.updated_at
+            or reservation.approval_request_id != consumed.request.id
+            or reservation.approval_decision_id != decision.id
+            or reservation.reservation_id != use.reservation_id
+            or not _has_exact_release_authority(consumed)
+        ):
+            raise ValueError("approval-consumed audit requires one exact release mutation")
+        try:
+            assert_request_binds_action(consumed.request, reserved.envelope)
+            assert_use_binds_request(use, consumed)
+        except ValueError as exc:
+            raise ValueError("approval-consumed audit lost its exact action binding") from exc
+        request = consumed.request
+        return self._build(
+            run_id=request.run_id,
+            event_type="approval.consumed",
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=consumed.updated_at,
+            metadata={
+                "action_state": reserved.state.value,
+                "action_version": reserved.version,
+                "approval_use_id": use.id,
+                "approval_set_id": request.authorization_set_id,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "reservation_id": reservation.reservation_id,
+                "status": consumed.status.value,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            approval_decision_id=decision.id,
+            mutation_version=consumed.version,
+            previous_state=previous.status.value,
+            new_state=consumed.status.value,
+            reason_code="approval_consumed",
+        )
+
+    def approval_superseded(
+        self,
+        previous: StoredActionApprovalRequest,
+        superseded: StoredActionApprovalRequest,
+        cancelled: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness one unconsumed sibling approval closed with its Run boundary."""
+
+        decision = superseded.decision
+        if (
+            type(previous) is not StoredActionApprovalRequest
+            or type(superseded) is not StoredActionApprovalRequest
+            or type(cancelled) is not ExternalAction
+            or previous.status not in {ApprovalStatus.PENDING, ApprovalStatus.APPROVED}
+            or superseded.request != previous.request
+            or superseded.decision != previous.decision
+            or superseded.status is not ApprovalStatus.SUPERSEDED
+            or superseded.version != previous.version + 1
+            or superseded.updated_at != superseded.superseded_at
+            or superseded.superseded_reason_code not in {"approval_set_rejected", "run_cancelled"}
+            or cancelled.state is not ExternalActionState.CANCELLED
+            or cancelled.id != superseded.request.action_id
+            or cancelled.action_hash != superseded.request.action_hash
+            or cancelled.approval_policy != superseded.request.policy
+            or cancelled.proposal.redacted_projection != superseded.request.redacted_projection
+            or cancelled.updated_at != superseded.updated_at
+            or (previous.status is ApprovalStatus.APPROVED) != (decision is not None)
+        ):
+            raise ValueError("approval-superseded audit requires one exact closed sibling")
+        try:
+            assert_request_binds_action(superseded.request, cancelled.envelope)
+        except ValueError as exc:
+            raise ValueError("approval-superseded audit lost its exact action binding") from exc
+        request = superseded.request
+        return self._build(
+            run_id=request.run_id,
+            event_type="approval.superseded",
+            aggregate_type="approval_request",
+            aggregate_id=request.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=superseded.updated_at,
+            metadata={
+                "action_state": cancelled.state.value,
+                "action_version": cancelled.version,
+                "approval_set_id": request.authorization_set_id,
+                "generation": request.generation,
+                "policy_id": request.policy.policy_id,
+                "proposal_revision": request.proposal_revision,
+                "status": superseded.status.value,
+                "supersession_reason": superseded.superseded_reason_code,
+            },
+            step_id=request.step_id,
+            action_id=request.action_id,
+            approval_request_id=request.id,
+            approval_decision_id=None if decision is None else decision.id,
+            mutation_version=superseded.version,
+            previous_state=previous.status.value,
+            new_state=superseded.status.value,
+            reason_code=superseded.superseded_reason_code,
+        )
+
+    def action_cancelled(
+        self,
+        previous: ExternalAction,
+        cancelled: ExternalAction,
+        terminal_approval: StoredActionApprovalRequest,
+    ) -> AuditEventDraft:
+        """Witness one non-dispatched action closed against its exact terminal approval."""
+
+        decision = terminal_approval.decision
+        is_superseded = terminal_approval.status is ApprovalStatus.SUPERSEDED
+        is_expired = terminal_approval.status is ApprovalStatus.EXPIRED
+        expected_previous_state = ExternalActionState.AWAITING_APPROVAL
+        if is_superseded and decision is not None:
+            expected_previous_state = ExternalActionState.APPROVED
+        supersession_reason = terminal_approval.superseded_reason_code
+        expected_cancel_reasons: frozenset[str | None] = frozenset({"operator_cancelled"})
+        if is_superseded:
+            expected_cancel_reasons = frozenset(
+                {
+                    None
+                    if supersession_reason is None
+                    else {
+                        "approval_set_rejected": "sibling_approval_rejected",
+                        "run_cancelled": "operator_cancelled",
+                    }.get(supersession_reason)
+                }
+            )
+        elif is_expired:
+            expected_cancel_reasons = frozenset({"operator_cancelled", "sibling_approval_rejected"})
+        if (
+            type(previous) is not ExternalAction
+            or type(cancelled) is not ExternalAction
+            or type(terminal_approval) is not StoredActionApprovalRequest
+            or not (is_superseded or is_expired)
+            or previous.state is not expected_previous_state
+            or cancelled.state is not ExternalActionState.CANCELLED
+            or not _same_action_definition(previous, cancelled)
+            or cancelled.version != previous.version + 1
+            or cancelled.updated_at < previous.updated_at
+            or cancelled.terminal_reason_code
+            not in {"operator_cancelled", "sibling_approval_rejected"}
+            or previous.reservation is not None
+            or cancelled.reservation is not None
+            or previous.delivery_attempt_count != 0
+            or cancelled.delivery_attempt_count != 0
+            or previous.lease is not None
+            or cancelled.lease is not None
+            or previous.call_started_at is not None
+            or cancelled.call_started_at is not None
+            or previous.result is not None
+            or cancelled.result is not None
+            or previous.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or cancelled.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or cancelled.superseded_at is not None
+            or terminal_approval.request.action_id != cancelled.id
+            or terminal_approval.request.action_hash != cancelled.action_hash
+            or terminal_approval.request.policy != cancelled.approval_policy
+            or terminal_approval.request.redacted_projection
+            != cancelled.proposal.redacted_projection
+            or (is_superseded and terminal_approval.updated_at != cancelled.updated_at)
+            or (
+                is_expired
+                and (
+                    terminal_approval.expired_at is None
+                    or terminal_approval.expired_at > cancelled.updated_at
+                )
+            )
+            or cancelled.terminal_reason_code not in expected_cancel_reasons
+        ):
+            raise ValueError("action-cancelled audit requires one exact terminal approval")
+        try:
+            assert_request_binds_action(terminal_approval.request, cancelled.envelope)
+        except ValueError as exc:
+            raise ValueError("action-cancelled audit lost its exact approval binding") from exc
+        return self._build(
+            run_id=cancelled.run_id,
+            event_type="action.cancelled",
+            aggregate_type="external_action",
+            aggregate_id=cancelled.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=cancelled.updated_at,
+            metadata={
+                "approval_set_id": terminal_approval.request.authorization_set_id,
+                "approval_status": terminal_approval.status.value,
+                "closure_reason": cancelled.terminal_reason_code,
+                "idempotency_support": cancelled.delivery_contract.idempotency_support,
+            },
+            step_id=cancelled.step_id,
+            action_id=cancelled.id,
+            approval_request_id=terminal_approval.request.id,
+            approval_decision_id=None if decision is None else decision.id,
+            mutation_version=cancelled.version,
+            previous_state=previous.state.value,
+            new_state=cancelled.state.value,
+            reason_code=cancelled.terminal_reason_code,
+        )
+
+    def action_dispatch_claimed(
+        self,
+        previous: ExternalAction,
+        claimed: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness one durable dispatch lease acquisition before call start."""
+
+        lease = claimed.lease
+        if (
+            type(previous) is not ExternalAction
+            or type(claimed) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCH_RESERVED
+            or claimed.state is not ExternalActionState.DISPATCHING
+            or not _same_action_definition(previous, claimed)
+            or claimed.version != previous.version + 1
+            or lease is None
+            or claimed.updated_at != lease.claimed_at
+            or previous.reservation is None
+            or claimed.reservation != previous.reservation
+            or previous.delivery_attempt_count + 1 != claimed.delivery_attempt_count
+            or claimed.delivery_attempt_count != lease.attempt_number
+            or previous.lease is not None
+            or previous.call_started_at is not None
+            or claimed.call_started_at is not None
+            or previous.result is not None
+            or claimed.result is not None
+            or previous.terminal_reason_code is not None
+            or claimed.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or claimed.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or claimed.superseded_at is not None
+        ):
+            raise ValueError("dispatch-claimed audit requires one exact lease acquisition")
+        return self._build(
+            run_id=claimed.run_id,
+            event_type="action.dispatch_claimed",
+            aggregate_type="external_action",
+            aggregate_id=claimed.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=lease.claimed_at,
+            metadata={"idempotency_support": claimed.delivery_contract.idempotency_support},
+            step_id=claimed.step_id,
+            action_id=claimed.id,
+            action_attempt_number=lease.attempt_number,
+            mutation_version=claimed.version,
+            previous_state=previous.state.value,
+            new_state=claimed.state.value,
+        )
+
+    def action_call_started(
+        self,
+        previous: ExternalAction,
+        marked: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness the committed pre-call marker for one exact claimed attempt."""
+
+        lease = marked.lease
+        if (
+            type(previous) is not ExternalAction
+            or type(marked) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCHING
+            or marked.state is not ExternalActionState.DISPATCHING
+            or not _same_action_definition(previous, marked)
+            or marked.version != previous.version + 1
+            or lease is None
+            or marked.lease != previous.lease
+            or marked.reservation != previous.reservation
+            or marked.delivery_attempt_count != previous.delivery_attempt_count
+            or previous.call_started_at is not None
+            or marked.call_started_at is None
+            or marked.updated_at != marked.call_started_at
+            or not lease.claimed_at <= marked.call_started_at < lease.expires_at
+            or previous.result is not None
+            or marked.result is not None
+            or previous.terminal_reason_code is not None
+            or marked.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or marked.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or marked.superseded_at is not None
+        ):
+            raise ValueError("call-started audit requires one exact open dispatch attempt")
+        return self._build(
+            run_id=marked.run_id,
+            event_type="action.call_started",
+            aggregate_type="external_action",
+            aggregate_id=marked.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=marked.call_started_at,
+            metadata={"idempotency_support": marked.delivery_contract.idempotency_support},
+            step_id=marked.step_id,
+            action_id=marked.id,
+            action_attempt_number=lease.attempt_number,
+            mutation_version=marked.version,
+            previous_state=previous.state.value,
+            new_state=marked.state.value,
+        )
+
     def run_attempt_id(self, run_id: str, command: RunLifecycleCommand) -> str:
         attempt_identity = {
             "actor_id": self._context.actor_id,
@@ -753,6 +1166,35 @@ class AuditEventFactory:
             new_state=new_state,
             reason_code=reason_code,
         )
+
+
+def _same_action_definition(left: ExternalAction, right: ExternalAction) -> bool:
+    """Compare every immutable action fact while excluding lifecycle delivery state."""
+
+    return (
+        left.id == right.id
+        and left.envelope == right.envelope
+        and left.proposal == right.proposal
+        and left.action_hash == right.action_hash
+        and left.approval_policy == right.approval_policy
+        and left.delivery_contract == right.delivery_contract
+        and left.idempotency_key == right.idempotency_key
+        and left.created_at == right.created_at
+        and left.delivery_attempt_limit == right.delivery_attempt_limit
+    )
+
+
+def _has_exact_release_authority(stored: StoredActionApprovalRequest) -> bool:
+    decision = stored.decision
+    request = stored.request
+    return (
+        decision is not None
+        and decision.authentication_method in {"local_fixed", "bearer"}
+        and decision.authority_roles == request.policy.required_roles | frozenset({APPROVER_ROLE})
+        and decision.authority_scopes
+        == request.policy.required_scopes | frozenset({APPROVAL_DECIDE_SCOPE})
+        and (request.policy.allow_self_approval or decision.actor_id != request.requested_by)
+    )
 
 
 def _catalog_hash(value: str) -> str:
