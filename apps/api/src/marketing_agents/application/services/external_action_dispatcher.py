@@ -41,6 +41,7 @@ from marketing_agents.domain.audit import (
 from marketing_agents.domain.entities import (
     ExternalAction,
     ExternalActionResultSnapshot,
+    Run,
     RunStep,
 )
 from marketing_agents.domain.enums import Effect, ExternalActionState, RunState, StepState
@@ -210,6 +211,10 @@ class ExternalActionDispatcher:
         del connector_result
 
         async with self._dependencies.unit_of_work() as unit_of_work:
+            changed = await self._changed_dispatch_result(unit_of_work, marked)
+            if changed is not None:
+                return changed
+            run, step = await self._write_completion_context(unit_of_work, marked)
             receipt = await unit_of_work.connector_receipts.get(
                 marked.connector_binding_id, marked.idempotency_key
             )
@@ -230,16 +235,22 @@ class ExternalActionDispatcher:
                 status=receipt.status,
                 safe_metadata=_bounded_output_projection(
                     receipt.safe_metadata,
-                    max_output_bytes,
+                    step.runtime_policy.budget.max_output_bytes,
                 ),
                 completed_at=self._dependencies.utc_now(),
             )
-            completed = await unit_of_work.external_actions.complete_succeeded(
-                action_id=marked.id,
-                expected_version=marked.version,
+            completed = await self._finalize_write_outcome_in_uow(
+                unit_of_work,
+                previous=marked,
+                run=run,
+                step=step,
                 lease_owner=lease_owner,
-                attempt_number=marked.delivery_attempt_count,
                 result=result,
+                occurred_at=result.completed_at,
+                receipt_reconciled=(
+                    marked.call_deadline_at is not None
+                    and result.completed_at >= marked.call_deadline_at
+                ),
             )
             if completed is None:
                 raise ExternalActionDispatchError(
@@ -247,7 +258,7 @@ class ExternalActionDispatcher:
                     "connector returned but the durable action completion was not accepted",
                 )
             await unit_of_work.commit()
-        return ExternalActionDispatchResult(completed, DispatchDisposition.SUCCEEDED)
+        return completed
 
     async def _record_runtime_control_denial(
         self,
@@ -626,6 +637,216 @@ class ExternalActionDispatcher:
                 exc.code, "durable action reservation failed exact authorization"
             ) from None
 
+    async def _write_completion_context(
+        self,
+        unit_of_work: UnitOfWork,
+        action: ExternalAction,
+        *,
+        allow_ready_step: bool = False,
+    ) -> tuple[Run, RunStep]:
+        run = await unit_of_work.runs.get(action.run_id)
+        step = await _sealed_write_step(unit_of_work, action)
+        allowed_step_states = (
+            {StepState.READY, StepState.EXECUTING} if allow_ready_step else {StepState.EXECUTING}
+        )
+        if (
+            run is None
+            or run.id != action.run_id
+            or run.state
+            not in {RunState.EXECUTING, RunState.CANCELLED, RunState.FAILED, RunState.REJECTED}
+            or step.state not in allowed_step_states
+        ):
+            raise ExternalActionDispatchError(
+                "write_completion_context_invalid",
+                "external action lacks its exact completable WRITE step and parent Run",
+            )
+        return run, step
+
+    async def _changed_dispatch_result(
+        self,
+        unit_of_work: UnitOfWork,
+        snapshot: ExternalAction,
+    ) -> ExternalActionDispatchResult | None:
+        current = await unit_of_work.external_actions.get(snapshot.id)
+        if current is None:
+            raise ExternalActionDispatchError(
+                "action_not_found",
+                "external action does not exist",
+            )
+        if current == snapshot:
+            return None
+        return _terminal_dispatch_result(current)
+
+    async def _finalize_write_outcome_in_uow(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        previous: ExternalAction,
+        run: Run,
+        step: RunStep,
+        lease_owner: str,
+        occurred_at: datetime,
+        result: ExternalActionResultSnapshot | None = None,
+        reason_code: str | None = None,
+        outcome_unknown: bool = False,
+        receipt_reconciled: bool = False,
+        pre_call_exhausted: bool = False,
+    ) -> ExternalActionDispatchResult | None:
+        """Atomically close one dispatch attempt and its exact active WRITE step."""
+
+        lease = previous.lease
+        is_success = result is not None
+        is_call_started = (
+            previous.call_started_at is not None and previous.call_deadline_at is not None
+        )
+        if (
+            type(previous) is not ExternalAction
+            or type(run) is not Run
+            or type(step) is not RunStep
+            or previous.state is not ExternalActionState.DISPATCHING
+            or lease is None
+            or lease.owner != lease_owner
+            or lease.attempt_number != previous.delivery_attempt_count
+            or run.id != previous.run_id
+            or run.state
+            not in {RunState.EXECUTING, RunState.CANCELLED, RunState.FAILED, RunState.REJECTED}
+            or step.id != previous.step_id
+            or step.run_id != previous.run_id
+            or step.plan_hash != previous.envelope.plan_hash
+            or step.effect is not Effect.WRITE
+            or (
+                step.state
+                not in (
+                    {StepState.READY, StepState.EXECUTING}
+                    if pre_call_exhausted
+                    else {StepState.EXECUTING}
+                )
+            )
+            or is_success == (reason_code is not None)
+            or (result is not None and result.completed_at != occurred_at)
+            or (is_success and outcome_unknown)
+            or (not is_success and receipt_reconciled)
+            or (
+                pre_call_exhausted
+                and (
+                    is_call_started
+                    or reason_code != "pre_call_attempts_exhausted"
+                    or outcome_unknown
+                    or receipt_reconciled
+                )
+            )
+            or (not pre_call_exhausted and not is_call_started)
+        ):
+            raise ExternalActionDispatchError(
+                "write_completion_context_invalid",
+                "external action completion differs from its exact WRITE authority",
+            )
+
+        if result is not None:
+            completed = await unit_of_work.external_actions.complete_succeeded(
+                action_id=previous.id,
+                expected_version=previous.version,
+                lease_owner=lease_owner,
+                attempt_number=lease.attempt_number,
+                result=result,
+            )
+            disposition = DispatchDisposition.SUCCEEDED
+            step_transition = transition_step(
+                step,
+                StepLifecycleCommand.SUCCEED,
+                NoStepTransitionContext(),
+                result.completed_at,
+            )
+        elif pre_call_exhausted:
+            assert reason_code is not None
+            completed = await unit_of_work.external_actions.fail_exhausted_stale_pre_call(
+                action_id=previous.id,
+                expected_version=previous.version,
+                attempt_number=lease.attempt_number,
+                occurred_at=occurred_at,
+                reason_code=reason_code,
+            )
+            disposition = DispatchDisposition.FAILED
+            step_transition = transition_step(
+                step,
+                StepLifecycleCommand.FAIL,
+                StepTerminalContext(reason_code),
+                occurred_at,
+            )
+        elif outcome_unknown:
+            assert reason_code is not None
+            completed = await unit_of_work.external_actions.mark_outcome_unknown(
+                action_id=previous.id,
+                expected_version=previous.version,
+                lease_owner=lease_owner,
+                attempt_number=lease.attempt_number,
+                reason_code=reason_code,
+                occurred_at=occurred_at,
+            )
+            disposition = DispatchDisposition.OUTCOME_UNKNOWN
+            step_transition = transition_step(
+                step,
+                StepLifecycleCommand.FAIL,
+                StepTerminalContext(reason_code),
+                occurred_at,
+            )
+        else:
+            assert reason_code is not None
+            completed = await unit_of_work.external_actions.complete_failed(
+                action_id=previous.id,
+                expected_version=previous.version,
+                lease_owner=lease_owner,
+                attempt_number=lease.attempt_number,
+                reason_code=reason_code,
+                occurred_at=occurred_at,
+            )
+            disposition = DispatchDisposition.FAILED
+            step_transition = transition_step(
+                step,
+                StepLifecycleCommand.FAIL,
+                StepTerminalContext(reason_code),
+                occurred_at,
+            )
+        if completed is None:
+            return None
+        if completed.updated_at != step_transition.step.updated_at:
+            raise ExternalActionDispatchError(
+                "write_completion_time_invalid",
+                "external action and WRITE step completion times diverged",
+            )
+        if not await unit_of_work.run_steps.apply_transition(
+            expected_run_version=run.version,
+            expected_run_state=run.state,
+            expected_version=step.version,
+            expected_state=step.state,
+            result=step_transition,
+        ):
+            raise ExternalActionDispatchError(
+                "write_completion_step_conflict",
+                "WRITE step changed before its external action outcome was committed",
+            )
+        factory = AuditEventFactory(self._dispatch_audit_context(lease_owner, previous))
+        if result is not None:
+            action_event = (
+                factory.action_receipt_reconciled(previous, completed)
+                if receipt_reconciled
+                else factory.action_succeeded(previous, completed)
+            )
+        elif outcome_unknown:
+            action_event = factory.action_outcome_unknown(previous, completed)
+        else:
+            action_event = factory.action_failed(previous, completed)
+        await unit_of_work.audits.append_many(
+            (
+                action_event,
+                factory.step_transition(
+                    step_transition.step,
+                    step_transition.transition,
+                ),
+            )
+        )
+        return ExternalActionDispatchResult(completed, disposition)
+
     async def _complete_failure(
         self,
         action: ExternalAction,
@@ -646,34 +867,27 @@ class ExternalActionDispatcher:
             # The call marker and lease remain durable. Only stale recovery may
             # replay this exact provider-idempotent key after the fence expires.
             return ExternalActionDispatchResult(action, DispatchDisposition.RECOVERY_PENDING)
-        occurred_at = self._dependencies.utc_now()
         async with self._dependencies.unit_of_work() as unit_of_work:
-            if outcome_unknown:
-                completed = await unit_of_work.external_actions.mark_outcome_unknown(
-                    action_id=action.id,
-                    expected_version=action.version,
-                    lease_owner=lease_owner,
-                    attempt_number=action.delivery_attempt_count,
-                    reason_code=reason_code,
-                    occurred_at=occurred_at,
-                )
-                disposition = DispatchDisposition.OUTCOME_UNKNOWN
-            else:
-                completed = await unit_of_work.external_actions.complete_failed(
-                    action_id=action.id,
-                    expected_version=action.version,
-                    lease_owner=lease_owner,
-                    attempt_number=action.delivery_attempt_count,
-                    reason_code=reason_code,
-                    occurred_at=occurred_at,
-                )
-                disposition = DispatchDisposition.FAILED
+            changed = await self._changed_dispatch_result(unit_of_work, action)
+            if changed is not None:
+                return changed
+            run, step = await self._write_completion_context(unit_of_work, action)
+            completed = await self._finalize_write_outcome_in_uow(
+                unit_of_work,
+                previous=action,
+                run=run,
+                step=step,
+                lease_owner=lease_owner,
+                reason_code=reason_code,
+                outcome_unknown=outcome_unknown,
+                occurred_at=self._dependencies.utc_now(),
+            )
             if completed is None:
                 raise ExternalActionDispatchError(
                     "completion_cas_lost", "external action failure was not persisted"
                 )
             await unit_of_work.commit()
-        return ExternalActionDispatchResult(completed, disposition)
+        return completed
 
     async def recover_stale(
         self,
@@ -718,36 +932,49 @@ class ExternalActionDispatcher:
             decision = classify_stale_action_recovery(snapshot, now=now)
             if decision is StaleActionRecoveryDecision.FAIL_PRE_CALL_EXHAUSTED:
                 async with self._dependencies.unit_of_work() as unit_of_work:
-                    failed = await unit_of_work.external_actions.fail_exhausted_stale_pre_call(
-                        action_id=snapshot.id,
-                        expected_version=snapshot.version,
-                        attempt_number=lease.attempt_number,
+                    changed = await self._changed_dispatch_result(unit_of_work, snapshot)
+                    if changed is not None:
+                        results.append(changed)
+                        continue
+                    run, step = await self._write_completion_context(
+                        unit_of_work,
+                        snapshot,
+                        allow_ready_step=True,
+                    )
+                    failed = await self._finalize_write_outcome_in_uow(
+                        unit_of_work,
+                        previous=snapshot,
+                        run=run,
+                        step=step,
+                        lease_owner=lease.owner,
                         occurred_at=now,
                         reason_code="pre_call_attempts_exhausted",
+                        pre_call_exhausted=True,
                     )
                     if failed is not None:
                         await unit_of_work.commit()
-                        results.append(
-                            ExternalActionDispatchResult(failed, DispatchDisposition.FAILED)
-                        )
+                        results.append(failed)
                 continue
             if decision is StaleActionRecoveryDecision.OUTCOME_UNKNOWN:
                 async with self._dependencies.unit_of_work() as unit_of_work:
-                    unknown = await unit_of_work.external_actions.mark_outcome_unknown(
-                        action_id=snapshot.id,
-                        expected_version=snapshot.version,
+                    changed = await self._changed_dispatch_result(unit_of_work, snapshot)
+                    if changed is not None:
+                        results.append(changed)
+                        continue
+                    run, step = await self._write_completion_context(unit_of_work, snapshot)
+                    unknown = await self._finalize_write_outcome_in_uow(
+                        unit_of_work,
+                        previous=snapshot,
+                        run=run,
+                        step=step,
                         lease_owner=lease.owner,
-                        attempt_number=lease.attempt_number,
-                        reason_code="stale_delivery_outcome_unknown",
                         occurred_at=now,
+                        reason_code="stale_delivery_outcome_unknown",
+                        outcome_unknown=True,
                     )
                     if unknown is not None:
                         await unit_of_work.commit()
-                        results.append(
-                            ExternalActionDispatchResult(
-                                unknown, DispatchDisposition.OUTCOME_UNKNOWN
-                            )
-                        )
+                        results.append(unknown)
                 continue
             if decision is StaleActionRecoveryDecision.RETRY_PRE_CALL:
                 conclusion = "pre_call_expired"
@@ -822,7 +1049,6 @@ class ExternalActionDispatcher:
                 current.connector_binding_id,
                 current.idempotency_key,
             )
-            factory = AuditEventFactory(self._dispatch_audit_context(lease.owner, current))
             if receipt is not None:
                 if (
                     receipt.external_action_id != current.id
@@ -844,86 +1070,33 @@ class ExternalActionDispatcher:
                     ),
                     completed_at=now,
                 )
-                completed = await unit_of_work.external_actions.complete_succeeded(
-                    action_id=current.id,
-                    expected_version=current.version,
+                completed = await self._finalize_write_outcome_in_uow(
+                    unit_of_work,
+                    previous=current,
+                    run=run,
+                    step=step,
                     lease_owner=lease.owner,
-                    attempt_number=lease.attempt_number,
                     result=result,
-                )
-                if completed is not None:
-                    step_transition = transition_step(
-                        step,
-                        StepLifecycleCommand.SUCCEED,
-                        NoStepTransitionContext(),
-                        now,
-                    )
-                    if not await unit_of_work.run_steps.apply_transition(
-                        expected_run_version=run.version,
-                        expected_run_state=run.state,
-                        expected_version=step.version,
-                        expected_state=step.state,
-                        result=step_transition,
-                    ):
-                        raise ExternalActionDispatchError(
-                            "terminal_call_step_conflict",
-                            "terminal WRITE step changed before receipt reconciliation",
-                        )
-                    await unit_of_work.audits.append_many(
-                        (
-                            factory.action_receipt_reconciled(current, completed),
-                            factory.step_transition(
-                                step_transition.step,
-                                step_transition.transition,
-                            ),
-                        )
-                    )
-                    await unit_of_work.commit()
-                    return ExternalActionDispatchResult(
-                        completed,
-                        DispatchDisposition.SUCCEEDED,
-                    )
-            else:
-                completed = await unit_of_work.external_actions.mark_outcome_unknown(
-                    action_id=current.id,
-                    expected_version=current.version,
-                    lease_owner=lease.owner,
-                    attempt_number=lease.attempt_number,
-                    reason_code=reason_code,
                     occurred_at=now,
+                    receipt_reconciled=True,
                 )
                 if completed is not None:
-                    step_transition = transition_step(
-                        step,
-                        StepLifecycleCommand.FAIL,
-                        StepTerminalContext(reason_code),
-                        now,
-                    )
-                    if not await unit_of_work.run_steps.apply_transition(
-                        expected_run_version=run.version,
-                        expected_run_state=run.state,
-                        expected_version=step.version,
-                        expected_state=step.state,
-                        result=step_transition,
-                    ):
-                        raise ExternalActionDispatchError(
-                            "terminal_call_step_conflict",
-                            "terminal WRITE step changed before outcome closure",
-                        )
-                    await unit_of_work.audits.append_many(
-                        (
-                            factory.action_outcome_unknown(current, completed),
-                            factory.step_transition(
-                                step_transition.step,
-                                step_transition.transition,
-                            ),
-                        )
-                    )
                     await unit_of_work.commit()
-                    return ExternalActionDispatchResult(
-                        completed,
-                        DispatchDisposition.OUTCOME_UNKNOWN,
-                    )
+                    return completed
+            else:
+                completed = await self._finalize_write_outcome_in_uow(
+                    unit_of_work,
+                    previous=current,
+                    run=run,
+                    step=step,
+                    lease_owner=lease.owner,
+                    occurred_at=now,
+                    reason_code=reason_code,
+                    outcome_unknown=True,
+                )
+                if completed is not None:
+                    await unit_of_work.commit()
+                    return completed
         latest = await self._load_required(snapshot.id)
         return _terminal_dispatch_result(latest)
 
@@ -936,7 +1109,10 @@ class ExternalActionDispatcher:
         """Complete from exact durable connector evidence without another provider call."""
 
         async with self._dependencies.unit_of_work() as unit_of_work:
-            step = await _sealed_write_step(unit_of_work, action)
+            changed = await self._changed_dispatch_result(unit_of_work, action)
+            if changed is not None:
+                return changed
+            run, step = await self._write_completion_context(unit_of_work, action)
             receipt = await unit_of_work.connector_receipts.get(
                 action.connector_binding_id, action.idempotency_key
             )
@@ -962,16 +1138,22 @@ class ExternalActionDispatcher:
                 ),
                 completed_at=self._dependencies.utc_now(),
             )
-            completed = await unit_of_work.external_actions.complete_succeeded(
-                action_id=action.id,
-                expected_version=action.version,
+            completed = await self._finalize_write_outcome_in_uow(
+                unit_of_work,
+                previous=action,
+                run=run,
+                step=step,
                 lease_owner=lease_owner,
-                attempt_number=action.delivery_attempt_count,
                 result=result,
+                occurred_at=result.completed_at,
+                receipt_reconciled=(
+                    action.call_deadline_at is not None
+                    and result.completed_at >= action.call_deadline_at
+                ),
             )
             if completed is not None:
                 await unit_of_work.commit()
-                return ExternalActionDispatchResult(completed, DispatchDisposition.SUCCEEDED)
+                return completed
         latest = await self._load_required(action.id)
         if latest.state is ExternalActionState.SUCCEEDED:
             return ExternalActionDispatchResult(latest, DispatchDisposition.ALREADY_SUCCEEDED)

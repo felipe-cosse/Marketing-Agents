@@ -6,17 +6,21 @@ import hashlib
 from dataclasses import dataclass
 
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
+from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.entities import Run, RunStep
-from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.enums import Effect, RunState, StepState
+from marketing_agents.domain.execution_control import AttemptOutcome
 from marketing_agents.domain.run_lifecycle import (
     CancellationContext,
     RunLifecycleCommand,
     transition_run,
 )
+from marketing_agents.domain.runtime_policy import AttemptKind
 from marketing_agents.domain.step_lifecycle import (
     StepLifecycleCommand,
     StepTerminalContext,
+    StepTransitionResult,
     transition_step,
 )
 
@@ -37,6 +41,81 @@ class RunCancellationResult:
     run: Run
     cancelled_steps: tuple[RunStep, ...]
     preserved_executing_step_ids: tuple[str, ...]
+
+
+async def _executing_read_disposition(
+    unit_of_work: UnitOfWork,
+    *,
+    run_id: str,
+    plan_hash: str,
+    control_version: int,
+    step: RunStep,
+) -> str:
+    """Distinguish an open READ call from durable retry backoff, fail closed otherwise."""
+
+    policy = step.runtime_policy
+    if (
+        step.run_id != run_id
+        or step.plan_hash != plan_hash
+        or step.effect is not Effect.READ
+        or step.state is not StepState.EXECUTING
+        or policy.attempt_kind not in {AttemptKind.MODEL, AttemptKind.TOOL}
+        or step.version < 2
+    ):
+        raise ValueError("executing READ step binding is invalid")
+    attempts = await unit_of_work.execution_control.list_attempts(
+        step.id,
+        policy.operation_key,
+    )
+    if not attempts or len(attempts) > policy.retry.max_attempts:
+        raise ValueError("executing READ step attempt lineage is incomplete")
+
+    previous_source_control_version = 0
+    previous_retry_not_before = None
+    for index, attempt in enumerate(attempts, start=1):
+        expected_source_step_version = step.version - 1 if index == 1 else step.version
+        if (
+            attempt.attempt_number != index
+            or attempt.run_id != run_id
+            or attempt.step_id != step.id
+            or attempt.operation_key != policy.operation_key
+            or attempt.policy_hash != plan_hash
+            or attempt.kind is not policy.attempt_kind
+            or attempt.source_step_version != expected_source_step_version
+            or attempt.source_control_version <= previous_source_control_version
+            or attempt.source_control_version >= control_version
+        ):
+            raise ValueError("executing READ step attempt lineage is contradictory")
+        if index == 1:
+            if attempt.eligible_at != attempt.reserved_at:
+                raise ValueError("first READ attempt has invalid eligibility")
+        elif (
+            previous_retry_not_before is None
+            or attempt.eligible_at != previous_retry_not_before
+            or attempt.reserved_at < previous_retry_not_before
+        ):
+            raise ValueError("retried READ attempt lacks exact prior authority")
+
+        previous_source_control_version = attempt.source_control_version
+        if index < len(attempts):
+            if (
+                attempt.outcome is not AttemptOutcome.TRANSIENT_FAILURE
+                or attempt.retry_not_before is None
+                or attempt.terminal_reason_code is not None
+            ):
+                raise ValueError("superseded READ attempt lacks retry authority")
+            previous_retry_not_before = attempt.retry_not_before
+
+    latest = attempts[-1]
+    if latest.outcome is None:
+        return "open"
+    if (
+        latest.outcome is AttemptOutcome.TRANSIENT_FAILURE
+        and latest.retry_not_before is not None
+        and latest.terminal_reason_code is None
+    ):
+        return "retry_backoff"
+    raise ValueError("executing READ step has no open call or retry authority")
 
 
 class RunCancellationService:
@@ -123,17 +202,51 @@ class RunCancellationService:
                     run_id=run_id,
                 ) from exc
 
+            preserved_executing_step_ids: list[str] = []
+            retry_backoff_results: list[StepTransitionResult] = []
+            for step in steps:
+                if step.state is not StepState.EXECUTING:
+                    continue
+                try:
+                    disposition = await _executing_read_disposition(
+                        unit_of_work,
+                        run_id=run_id,
+                        plan_hash=plan.plan_hash,
+                        control_version=control.version,
+                        step=step,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    raise RunCancellationServiceError(
+                        "execution_attempt_lineage_invalid",
+                        "executing READ step lacks exact attempt lineage",
+                        run_id=run_id,
+                    ) from exc
+                if disposition == "open":
+                    preserved_executing_step_ids.append(step.id)
+                    continue
+                retry_backoff_results.append(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.FAIL,
+                        StepTerminalContext("run_cancelled"),
+                        occurred_at,
+                    )
+                )
+
             cancellable = tuple(
                 step for step in steps if step.state in {StepState.PENDING, StepState.READY}
             )
-            step_results = tuple(
-                transition_step(
-                    step,
-                    StepLifecycleCommand.CANCEL,
-                    StepTerminalContext("run_cancelled"),
-                    occurred_at,
-                )
-                for step in cancellable
+            step_results = (
+                *retry_backoff_results,
+                *(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.CANCEL,
+                        StepTerminalContext("run_cancelled"),
+                        occurred_at,
+                    )
+                    for step in cancellable
+                ),
             )
             for result in step_results:
                 applied = await unit_of_work.run_steps.apply_transition(
@@ -179,10 +292,12 @@ class RunCancellationService:
             await unit_of_work.commit()
             return RunCancellationResult(
                 run=run_result.run,
-                cancelled_steps=tuple(result.step for result in step_results),
-                preserved_executing_step_ids=tuple(
-                    step.id for step in steps if step.state is StepState.EXECUTING
+                cancelled_steps=tuple(
+                    result.step
+                    for result in step_results
+                    if result.step.state is StepState.CANCELLED
                 ),
+                preserved_executing_step_ids=tuple(preserved_executing_step_ids),
             )
 
 

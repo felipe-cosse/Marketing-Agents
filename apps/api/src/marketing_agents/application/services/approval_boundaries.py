@@ -37,6 +37,7 @@ from marketing_agents.domain.entities import (
 )
 from marketing_agents.domain.enums import (
     ApprovalStatus,
+    Effect,
     ExternalActionState,
     RunState,
     StepState,
@@ -65,6 +66,7 @@ from .approval_records import (
     require_complete_member_history,
 )
 from .audit_events import AuditEventFactory
+from .run_cancellation import _executing_read_disposition
 
 _CANCEL_ACTOR_DOMAIN = b"marketing-agents:execution-cancel-actor:v1\x00"
 
@@ -463,20 +465,83 @@ class ApprovalBoundaryService:
                 )
             cancelled_actions.append((action, cancelled))
 
-        cancellable_steps = tuple(
-            step
-            for step in snapshot.plan_steps
-            if step.state in {StepState.PENDING, StepState.READY}
-        )
-        step_results = tuple(
-            transition_step(
-                step,
-                StepLifecycleCommand.CANCEL,
-                StepTerminalContext("run_cancelled"),
-                occurred_at,
+        action_by_step_id = {action.step_id: action for action in snapshot.actions}
+        if len(action_by_step_id) != len(snapshot.actions):
+            raise ApprovalBoundaryServiceError(
+                "released_action_step_binding_invalid",
+                "released actions do not bind unique plan steps",
+                run_id=snapshot.run.id,
             )
-            for step in cancellable_steps
-        )
+        cancelled_action_step_ids = {previous.step_id for previous, _cancelled in cancelled_actions}
+        step_results: list[StepTransitionResult] = []
+        for step in snapshot.plan_steps:
+            if step.state in {StepState.PENDING, StepState.READY}:
+                step_results.append(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.CANCEL,
+                        StepTerminalContext("run_cancelled"),
+                        occurred_at,
+                    )
+                )
+                continue
+            if step.state is not StepState.EXECUTING:
+                continue
+            if step.effect is Effect.READ:
+                try:
+                    disposition = await _executing_read_disposition(
+                        unit_of_work,
+                        run_id=snapshot.run.id,
+                        plan_hash=authorization_set.plan_hash,
+                        control_version=control.version,
+                        step=step,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    raise ApprovalBoundaryServiceError(
+                        "execution_attempt_lineage_invalid",
+                        "executing READ step lacks exact attempt lineage",
+                        run_id=snapshot.run.id,
+                    ) from exc
+                if disposition == "retry_backoff":
+                    step_results.append(
+                        transition_step(
+                            step,
+                            StepLifecycleCommand.FAIL,
+                            StepTerminalContext("run_cancelled"),
+                            occurred_at,
+                        )
+                    )
+                continue
+            bound_action = action_by_step_id.get(step.id)
+            if (
+                step.effect is not Effect.WRITE
+                or bound_action is None
+                or bound_action.run_id != snapshot.run.id
+                or bound_action.envelope.plan_hash != authorization_set.plan_hash
+            ):
+                raise ApprovalBoundaryServiceError(
+                    "released_action_step_binding_invalid",
+                    "executing WRITE step lacks its exact released action",
+                    run_id=snapshot.run.id,
+                )
+            if step.id in cancelled_action_step_ids:
+                step_results.append(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.FAIL,
+                        StepTerminalContext("run_cancelled"),
+                        occurred_at,
+                    )
+                )
+            elif not (
+                bound_action.state is ExternalActionState.DISPATCHING
+                and bound_action.call_started_at is not None
+            ):
+                raise ApprovalBoundaryServiceError(
+                    "released_action_step_binding_invalid",
+                    "executing WRITE step is neither pre-call cancelled nor call-started",
+                    run_id=snapshot.run.id,
+                )
         for result in step_results:
             applied_step = await unit_of_work.run_steps.apply_transition(
                 expected_run_version=snapshot.run.version,

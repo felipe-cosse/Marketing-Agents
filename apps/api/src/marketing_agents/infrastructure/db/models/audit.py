@@ -240,9 +240,9 @@ class AuditEventRecord(Base):
             "new_state = 'cancelled' AND ((action_attempt_number IS NULL AND "
             "mutation_version >= 3 AND previous_state IN ('awaiting_approval','approved')) OR "
             "(action_attempt_number IS NULL AND mutation_version >= 5 AND "
-            "(mutation_version % 2) = 1 AND previous_state = 'dispatch_reserved') OR "
+            "previous_state = 'dispatch_reserved') OR "
             "(action_attempt_number IS NOT NULL AND mutation_version >= 6 AND "
-            "(mutation_version % 2) = 0 AND previous_state = 'dispatching'))) OR "
+            "previous_state = 'dispatching'))) OR "
             "(event_type IN ('action.succeeded','action.receipt_reconciled') AND "
             "action_attempt_number IS NOT NULL AND receipt_id IS NOT NULL) OR "
             "aggregate_type <> 'external_action'",

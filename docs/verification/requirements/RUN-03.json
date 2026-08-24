@@ -1,0 +1,170 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "RUN-03",
+  "matrix_statement_sha256": "9e6640abfd2ebef4b84e25227541e45daa1c3244ed16e890e2dd96165dfac3b2",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/cancellation.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_cancellation.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "tests/integration/db/test_orch_06_runtime_composition.py",
+      "tests/integration/db/test_run_03_*.py",
+      "docs/verification/requirements/RUN-03.json",
+      "docs/verification/requirements/RUN-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/cancellation.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/run_cancellation.py",
+          "apps/api/src/marketing_agents/application/services/approval_boundaries.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+          "apps/api/src/marketing_agents/application/services/audit_events.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_run_03_cancellation_coordinator.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_run_03_retry_cleanup.py",
+          "tests/integration/db/test_run_03_write_completion.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "authoritative-all-state-cancellation-routing",
+      "type": "contract",
+      "statement": "One application coordinator derives the current Run state, version, plan effect, and authoritative cancellation service. It accepts every nonterminal phase, bounds only typed routing races, normalizes lower-layer failures, and records one stable audited rejection for terminal retries.",
+      "test_refs": [
+        "tests/integration/db/test_run_03_cancellation_coordinator.py::test_run_03_early_run_routes_through_audited_lifecycle",
+        "tests/integration/db/test_run_03_cancellation_coordinator.py::test_run_03_controlled_read_routes_planned_or_executing_run",
+        "tests/integration/db/test_run_03_cancellation_coordinator.py::test_run_03_write_routes_pre_or_post_release_approval_boundary",
+        "tests/integration/db/test_run_03_cancellation_coordinator.py::test_run_03_terminal_rejection_is_audited_and_stable"
+      ]
+    },
+    {
+      "id": "atomic-fence-and-zero-future-call",
+      "type": "negative_control",
+      "statement": "Cancellation commits its execution-control fence before closing queued work. Completed READ retry backoff and pre-call WRITE retry generations close atomically, while correlated Run and control predicates prevent stale recovery from re-arming an action after cancellation wins.",
+      "test_refs": [
+        "tests/integration/db/test_run_03_retry_cleanup.py::test_run_03_direct_cancel_closes_read_retry_backoff_before_restart",
+        "tests/integration/db/test_run_03_retry_cleanup.py::test_run_03_released_cancel_closes_provider_retry_write_step",
+        "tests/integration/db/test_run_03_retry_cleanup.py::test_run_03_cancellation_fence_prevents_stale_provider_retry_rearm"
+      ]
+    },
+    {
+      "id": "best-effort-inflight-outcome-honesty",
+      "type": "contract",
+      "statement": "A genuinely call-started WRITE remains bounded after Run cancellation. Its exact durable success, known failure, or outcome-unknown conclusion atomically terminalizes the WRITE step and appends the action outcome before the step event without rewriting the cancelled Run.",
+      "test_refs": [
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_post_cancel_timely_provider_success_closes_write_step",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_terminal_provider_failure_closes_write_step_atomically",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_completion_audit_fault_rolls_back_action_and_step_then_recovers_receipt"
+      ]
+    },
+    {
+      "id": "ordered-effect-aware-cancellation-timeline",
+      "type": "negative_control",
+      "statement": "Actions already succeeded or outcome-unknown before cancellation remain immutable and are never represented as cancelled. Their events retain order around the Run cancellation event, transition history records cancellation-time effect counts, and audit faults roll back action and step completion together.",
+      "test_refs": [
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_preexisting_success_remains_immutable_and_precedes_cancellation",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_terminal_provider_failure_closes_write_step_atomically",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_post_cancel_timely_provider_success_closes_write_step",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_completion_audit_fault_rolls_back_action_and_step_then_recovers_receipt"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "run-03-best-effort-cancellation",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/db/test_run_03_cancellation_coordinator.py",
+        "tests/integration/db/test_run_03_retry_cleanup.py",
+        "tests/integration/db/test_run_03_write_completion.py",
+        "tests/unit/domain/test_run_01_run_lifecycle.py",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py",
+        "tests/integration/db/test_orch_06_execution_control.py",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py",
+        "tests/integration/db/test_orch_06_runtime_composition.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/integration/db/test_orch_08_authorization_storage.py",
+        "tests/unit/application/test_orch_08_audit_events.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200,
+      "network_requirement": "deny",
+      "covers": [
+        "authoritative-all-state-cancellation-routing",
+        "atomic-fence-and-zero-future-call",
+        "best-effort-inflight-outcome-honesty",
+        "ordered-effect-aware-cancellation-timeline"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/cancellation.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_cancellation.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py"
+    ],
+    "gate_id": "run-03-best-effort-cancellation"
+  },
+  "limitations": [
+    "Database transactions cannot make an external provider effect atomic, recall an already-sent request, or supply a general compensation workflow. Post-call cancellation remains best effort.",
+    "Cancellation transition effect counts are an exact cancellation-time snapshot. Final effect truth comes from immutable action history because a bounded call may succeed or become outcome-unknown after the Run is cancelled.",
+    "Provider idempotency prevents authorized replay where supported but does not establish external exactly-once effects. A late provider receipt is not used to rewrite an already immutable outcome-unknown action.",
+    "AuditContext provides integrity-checked pseudonymous provenance but does not authenticate a cancellation caller. No public cancellation route, role enforcement, CSRF control, or HTTP error mapping is claimed here.",
+    "The ordered persistence timeline covers Run, Step, and ExternalAction facts. The complete operator timeline and UI projection remain RUN-06 and AC-14 scope.",
+    "Tests use deterministic adapters, injected clocks, and file-backed SQLite rather than a production worker fleet, live external provider, or distributed contention environment.",
+    "The audit constraint now represents cancellation after any provider-retry generation. No Alembic migration is added; PostgreSQL runtime locking and migration rollout remain unexecuted."
+  ]
+}

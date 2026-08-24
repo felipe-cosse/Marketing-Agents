@@ -18,6 +18,11 @@ from .approval_records import (
     RegisteredApprovalSet,
     RenewedApprovalRequest,
 )
+from .cancellation import (
+    RunCancellationCoordinator,
+    RunCancellationCoordinatorError,
+    RunCancellationOutcome,
+)
 from .controlled_read_executor import (
     ControlledReadCommand,
     ControlledReadExecutor,
@@ -137,6 +142,9 @@ __all__ = [
     "RenewedApprovalRequest",
     "RunAdvanceAttempt",
     "RunAdvanceDisposition",
+    "RunCancellationCoordinator",
+    "RunCancellationCoordinatorError",
+    "RunCancellationOutcome",
     "RunCancellationResult",
     "RunCancellationService",
     "RunCancellationServiceError",

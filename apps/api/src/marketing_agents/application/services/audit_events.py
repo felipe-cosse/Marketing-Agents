@@ -1184,6 +1184,128 @@ class AuditEventFactory:
             new_state=marked.state.value,
         )
 
+    def action_succeeded(
+        self,
+        previous: ExternalAction,
+        succeeded: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness one timely provider response backed by its exact durable receipt."""
+
+        lease = previous.lease
+        result = succeeded.result
+        if (
+            type(previous) is not ExternalAction
+            or type(succeeded) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCHING
+            or succeeded.state is not ExternalActionState.SUCCEEDED
+            or not _same_action_definition(previous, succeeded)
+            or succeeded.version != previous.version + 1
+            or lease is None
+            or previous.call_started_at is None
+            or previous.call_deadline_at is None
+            or result is None
+            or succeeded.updated_at != result.completed_at
+            or succeeded.updated_at < previous.call_started_at
+            or succeeded.updated_at >= previous.call_deadline_at
+            or succeeded.reservation != previous.reservation
+            or succeeded.delivery_attempt_count != previous.delivery_attempt_count
+            or succeeded.lease is not None
+            or succeeded.call_started_at is not None
+            or succeeded.call_deadline_at is not None
+            or previous.result is not None
+            or previous.terminal_reason_code is not None
+            or succeeded.terminal_reason_code is not None
+            or previous.superseded_by_action_id is not None
+            or succeeded.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or succeeded.superseded_at is not None
+        ):
+            raise ValueError("action-succeeded audit requires one exact timely conclusion")
+        return self._build(
+            run_id=succeeded.run_id,
+            event_type="action.succeeded",
+            aggregate_type="external_action",
+            aggregate_id=succeeded.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=succeeded.updated_at,
+            metadata={
+                "conclusion": "succeeded",
+                "connector_status": result.status,
+                "idempotency_support": succeeded.delivery_contract.idempotency_support,
+            },
+            step_id=succeeded.step_id,
+            action_id=succeeded.id,
+            action_attempt_number=lease.attempt_number,
+            receipt_id=result.receipt_id,
+            mutation_version=succeeded.version,
+            previous_state=previous.state.value,
+            new_state=succeeded.state.value,
+        )
+
+    def action_failed(
+        self,
+        previous: ExternalAction,
+        failed: ExternalAction,
+    ) -> AuditEventDraft:
+        """Witness one call-started action closed by a known provider failure."""
+
+        lease = previous.lease
+        call_started_failure = (
+            previous.call_started_at is not None
+            and previous.call_deadline_at is not None
+            and failed.updated_at >= previous.call_started_at
+        )
+        exhausted_pre_call_failure = (
+            previous.call_started_at is None
+            and previous.call_deadline_at is None
+            and failed.terminal_reason_code == "pre_call_attempts_exhausted"
+            and lease is not None
+            and failed.updated_at >= lease.expires_at
+        )
+        if (
+            type(previous) is not ExternalAction
+            or type(failed) is not ExternalAction
+            or previous.state is not ExternalActionState.DISPATCHING
+            or failed.state is not ExternalActionState.FAILED
+            or not _same_action_definition(previous, failed)
+            or failed.version != previous.version + 1
+            or lease is None
+            or not (call_started_failure or exhausted_pre_call_failure)
+            or failed.reservation != previous.reservation
+            or failed.delivery_attempt_count != previous.delivery_attempt_count
+            or failed.lease is not None
+            or failed.call_started_at is not None
+            or failed.call_deadline_at is not None
+            or previous.result is not None
+            or failed.result is not None
+            or previous.terminal_reason_code is not None
+            or failed.terminal_reason_code is None
+            or previous.superseded_by_action_id is not None
+            or failed.superseded_by_action_id is not None
+            or previous.superseded_at is not None
+            or failed.superseded_at is not None
+        ):
+            raise ValueError("action-failed audit requires one exact known conclusion")
+        return self._build(
+            run_id=failed.run_id,
+            event_type="action.failed",
+            aggregate_type="external_action",
+            aggregate_id=failed.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=failed.updated_at,
+            metadata={
+                "conclusion": "failed",
+                "idempotency_support": failed.delivery_contract.idempotency_support,
+            },
+            step_id=failed.step_id,
+            action_id=failed.id,
+            action_attempt_number=lease.attempt_number,
+            mutation_version=failed.version,
+            previous_state=previous.state.value,
+            new_state=failed.state.value,
+            reason_code=normalize_audit_reason_code(failed.terminal_reason_code),
+        )
+
     def action_outcome_unknown(
         self,
         previous: ExternalAction,
@@ -1202,7 +1324,7 @@ class AuditEventFactory:
             or lease is None
             or previous.call_started_at is None
             or previous.call_deadline_at is None
-            or unknown.updated_at < previous.call_deadline_at
+            or unknown.updated_at < previous.call_started_at
             or unknown.reservation != previous.reservation
             or unknown.delivery_attempt_count != previous.delivery_attempt_count
             or unknown.lease is not None
