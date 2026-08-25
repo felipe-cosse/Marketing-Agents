@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from marketing_agents.domain.audit import (
@@ -48,7 +48,34 @@ _STEP_FIELDS = frozenset(
 )
 _ACTION_FIELDS = frozenset({"conclusion", "connector_status", "idempotency_support"})
 _ATTEMPT_IDENTITY_FIELDS = frozenset({"attempt_kind", "attempt_number", "operation_key"})
+_SCHEDULE_OCCURRENCE_FIELDS = frozenset(
+    {
+        "next_run_at_utc",
+        "recurrence_version",
+        "scheduled_for_utc",
+        "work_admitted",
+    }
+)
+_SCHEDULE_MISFIRE_FIELDS = _SCHEDULE_OCCURRENCE_FIELDS | frozenset(
+    {
+        "first_missed_at_utc",
+        "last_missed_at_utc",
+        "missed_count",
+    }
+)
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
+    "schedule.occurrence_created": _SCHEDULE_OCCURRENCE_FIELDS,
+    "schedule.misfire_skipped": _SCHEDULE_MISFIRE_FIELDS,
+    "schedule.misfire_run_once": _SCHEDULE_MISFIRE_FIELDS,
+    "schedule.next_occurrence_persisted": frozenset(
+        {
+            "disposition",
+            "last_scheduled_at_utc",
+            "next_run_at_utc",
+            "occurrence_id",
+            "previous_next_run_at_utc",
+        }
+    ),
     "run.received": _RUN_FIELDS | frozenset({"catalog_content_hash"}),
     "run.transitioned": _RUN_FIELDS,
     "run.transition_rejected": _RUN_FIELDS,
@@ -177,6 +204,7 @@ _POSITIVE_INTEGER_FIELDS = frozenset(
         "attempt_number",
         "configuration_revision",
         "generation",
+        "missed_count",
         "ordinal",
         "proposal_revision",
         "retry_after_seconds",
@@ -184,7 +212,18 @@ _POSITIVE_INTEGER_FIELDS = frozenset(
         "workflow_version",
     }
 )
-_BOOLEAN_FIELDS = frozenset({"terminal_result"})
+_BOOLEAN_FIELDS = frozenset({"terminal_result", "work_admitted"})
+_UTC_TIMESTAMP_FIELDS = frozenset(
+    {
+        "first_missed_at_utc",
+        "last_missed_at_utc",
+        "last_scheduled_at_utc",
+        "next_run_at_utc",
+        "previous_next_run_at_utc",
+        "scheduled_for_utc",
+    }
+)
+_SCHEDULE_DISPOSITIONS = frozenset({"on_time", "skip", "run_once"})
 _CONNECTOR_STATUSES = frozenset(
     {"accepted", "completed", "mock_committed", "mock_succeeded", "succeeded"}
 )
@@ -298,6 +337,18 @@ def _validate_positive_integer(value: Any, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a positive integer")
 
 
+def _validate_canonical_utc(value: Any, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a canonical UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value)
+        require_utc(parsed, field_name)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a canonical UTC timestamp") from exc
+    if parsed.astimezone(UTC).isoformat(timespec="microseconds") != value:
+        raise ValueError(f"{field_name} must be a canonical UTC timestamp")
+
+
 def _validate_typed_value(field_name: str, value: Any) -> None:
     validator: Callable[[Any, str], None]
     if field_name in _DIGEST_FIELDS:
@@ -308,6 +359,8 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
         validator = _validate_schema_hash
     elif field_name in _POSITIVE_INTEGER_FIELDS:
         validator = _validate_positive_integer
+    elif field_name in _UTC_TIMESTAMP_FIELDS:
+        validator = _validate_canonical_utc
     elif field_name in _BOOLEAN_FIELDS:
         if not isinstance(value, bool):
             raise AuditMetadataError(
@@ -368,6 +421,16 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
         raise AuditMetadataError(
             "metadata_value_invalid",
             "runtime-control retry-after exceeds its safe bound",
+        )
+    if field_name == "missed_count" and value > 10_000:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "schedule missed count exceeds its safe bound",
+        )
+    if field_name == "disposition" and value not in _SCHEDULE_DISPOSITIONS:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "schedule disposition is not an allowlisted value",
         )
     if field_name == "status" and value not in _APPROVAL_STATUSES:
         raise AuditMetadataError(

@@ -90,6 +90,8 @@ def test_orch_09_audit_repository_has_no_event_update_or_delete_surface() -> Non
     }
     assert public_methods == {
         "append",
+        "append_global",
+        "append_global_many",
         "append_many",
         "get",
         "get_attempt_event",

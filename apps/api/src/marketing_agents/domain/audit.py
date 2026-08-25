@@ -107,6 +107,10 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     }
 )
 _EVENT_AGGREGATES = {
+    "schedule.occurrence_created": "schedule_occurrence",
+    "schedule.misfire_skipped": "schedule_occurrence",
+    "schedule.misfire_run_once": "schedule_occurrence",
+    "schedule.next_occurrence_persisted": "schedule",
     "run.received": "run",
     "run.transitioned": "run",
     "run.transition_rejected": "run_attempt",
@@ -146,6 +150,45 @@ _EVENT_OUTCOMES = {
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
+    "schedule.occurrence_created": frozenset(
+        {
+            "next_run_at_utc",
+            "recurrence_version",
+            "scheduled_for_utc",
+            "work_admitted",
+        }
+    ),
+    "schedule.misfire_skipped": frozenset(
+        {
+            "first_missed_at_utc",
+            "last_missed_at_utc",
+            "missed_count",
+            "next_run_at_utc",
+            "recurrence_version",
+            "scheduled_for_utc",
+            "work_admitted",
+        }
+    ),
+    "schedule.misfire_run_once": frozenset(
+        {
+            "first_missed_at_utc",
+            "last_missed_at_utc",
+            "missed_count",
+            "next_run_at_utc",
+            "recurrence_version",
+            "scheduled_for_utc",
+            "work_admitted",
+        }
+    ),
+    "schedule.next_occurrence_persisted": frozenset(
+        {
+            "disposition",
+            "last_scheduled_at_utc",
+            "next_run_at_utc",
+            "occurrence_id",
+            "previous_next_run_at_utc",
+        }
+    ),
     "run.received": frozenset({"command", "catalog_content_hash"}),
     "run.transitioned": frozenset({"command"}),
     "run.transition_rejected": frozenset({"command"}),
@@ -716,7 +759,9 @@ class AuditEventDraft:
 
     id: str
     schema_version: int
-    run_id: str
+    run_id: str | None
+    schedule_id: str | None
+    occurrence_id: str | None
     event_type: str
     aggregate_type: str
     aggregate_id: str
@@ -751,7 +796,7 @@ class AuditEventDraft:
         self,
         *,
         id: str,
-        run_id: str,
+        run_id: str | None,
         event_type: str,
         aggregate_type: str,
         aggregate_id: str,
@@ -762,6 +807,8 @@ class AuditEventDraft:
         correlation_id: str,
         safe_metadata: SealedAuditMetadata,
         occurred_at: datetime,
+        schedule_id: str | None = None,
+        occurrence_id: str | None = None,
         step_id: str | None = None,
         action_id: str | None = None,
         action_attempt_number: int | None = None,
@@ -788,6 +835,8 @@ class AuditEventDraft:
             "id": id,
             "schema_version": 1,
             "run_id": run_id,
+            "schedule_id": schedule_id,
+            "occurrence_id": occurrence_id,
             "event_type": event_type,
             "aggregate_type": aggregate_type,
             "aggregate_id": aggregate_id,
@@ -825,7 +874,6 @@ class AuditEventDraft:
     def _validate(self) -> None:
         identifiers = (
             (self.id, "audit event ID"),
-            (self.run_id, "audit run ID"),
             (self.aggregate_id, "audit aggregate ID"),
             (self.actor_id, "audit actor ID"),
             (self.auth_method, "audit authentication method"),
@@ -833,6 +881,14 @@ class AuditEventDraft:
         )
         for required_identifier, name in identifiers:
             require_id(required_identifier, name)
+        scheduler_aggregate = self.aggregate_type in {"schedule", "schedule_occurrence"}
+        if scheduler_aggregate:
+            if self.run_id is not None:
+                raise ValueError("scheduler audit events must use the global timeline")
+        elif self.run_id is None:
+            raise ValueError("non-scheduler audit events require one Run timeline")
+        else:
+            require_id(self.run_id, "audit run ID")
         if self.schema_version != 1:
             raise ValueError("audit event schema version is unsupported")
         require_text(self.event_type, "audit event type", maximum=120)
@@ -845,6 +901,12 @@ class AuditEventDraft:
             raise ValueError("audit event type does not match its outcome")
         if self.aggregate_type == "run" and self.aggregate_id != self.run_id:
             raise ValueError("run audit aggregate does not match its timeline")
+        if self.aggregate_type == "schedule" and self.aggregate_id != self.schedule_id:
+            raise ValueError("schedule audit aggregate does not match its schedule link")
+        if self.aggregate_type == "schedule_occurrence" and (
+            self.aggregate_id != self.occurrence_id or self.schedule_id is None
+        ):
+            raise ValueError("schedule occurrence audit requires its occurrence and schedule links")
         if self.aggregate_type == "step" and self.aggregate_id != self.step_id:
             raise ValueError("step audit aggregate does not match its step link")
         if self.aggregate_type == "external_action" and self.aggregate_id != self.action_id:
@@ -908,6 +970,46 @@ class AuditEventDraft:
                 or self.transition_sequence is None
             ):
                 raise ValueError("run audit event has invalid subject links")
+        elif self.aggregate_type == "schedule_occurrence":
+            if (
+                self.schedule_id is None
+                or self.occurrence_id is None
+                or self.step_id is not None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.artifact_id is not None
+                or self.attempt_id is not None
+                or self.transition_sequence is not None
+                or self.previous_state is not None
+                or self.new_state is not None
+                or self.reason_code is not None
+                or self.mutation_version != 1
+                or self.outcome is not AuditOutcome.ACCEPTED
+            ):
+                raise ValueError("schedule occurrence audit has invalid subject links")
+        elif self.aggregate_type == "schedule":
+            if (
+                self.event_type != "schedule.next_occurrence_persisted"
+                or self.schedule_id is None
+                or self.occurrence_id is None
+                or self.step_id is not None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.artifact_id is not None
+                or self.attempt_id is not None
+                or self.transition_sequence is not None
+                or self.previous_state is not None
+                or self.new_state is not None
+                or self.reason_code is not None
+                or self.outcome is not AuditOutcome.ACCEPTED
+            ):
+                raise ValueError("schedule audit has invalid subject links")
         elif self.aggregate_type == "step":
             if (
                 self.step_id is None
@@ -1016,6 +1118,10 @@ class AuditEventDraft:
             or self.outcome is not AuditOutcome.REJECTED
         ):
             raise ValueError("runtime-control denial has an invalid nonmutation shape")
+        if not scheduler_aggregate and (
+            self.schedule_id is not None or self.occurrence_id is not None
+        ):
+            raise ValueError("only scheduler audit events may retain scheduler links")
         if type(self.actor_source) is not AuditActorSource:
             raise ValueError("audit actor source is invalid")
         _require_pseudonym(self.actor_id, "audit-actor-v1", "audit actor ID")
@@ -1040,6 +1146,8 @@ class AuditEventDraft:
         if self.safe_metadata.expires_at <= self.occurred_at:
             raise ValueError("audit metadata must expire after the event time")
         optional_identifiers = (
+            (self.schedule_id, "audit schedule ID"),
+            (self.occurrence_id, "audit occurrence ID"),
             (self.step_id, "audit step ID"),
             (self.action_id, "audit action ID"),
             (self.receipt_id, "audit receipt ID"),
@@ -1118,7 +1226,7 @@ class AuditEventDraft:
 
 
 def _draft_fingerprint_payload(draft: AuditEventDraft) -> Mapping[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "action_attempt_number": draft.action_attempt_number,
         "action_id": draft.action_id,
         "actor_id": draft.actor_id,
@@ -1153,6 +1261,11 @@ def _draft_fingerprint_payload(draft: AuditEventDraft) -> Mapping[str, Any]:
         "step_id": draft.step_id,
         "transition_sequence": draft.transition_sequence,
     }
+    if draft.schedule_id is not None:
+        payload["schedule_id"] = draft.schedule_id
+    if draft.occurrence_id is not None:
+        payload["occurrence_id"] = draft.occurrence_id
+    return payload
 
 
 def _validate_event_semantics(draft: AuditEventDraft) -> None:
@@ -1196,7 +1309,53 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
+    if draft.event_type in {
+        "schedule.occurrence_created",
+        "schedule.misfire_skipped",
+        "schedule.misfire_run_once",
+    }:
+        scheduled_for_utc = datetime.fromisoformat(metadata["scheduled_for_utc"])
+        next_run_at_utc = datetime.fromisoformat(metadata["next_run_at_utc"])
+        if next_run_at_utc <= scheduled_for_utc:
+            raise ValueError("schedule occurrence audit next run must follow its due time")
+        expected_work_admitted = draft.event_type != "schedule.misfire_skipped"
+        if metadata["work_admitted"] is not expected_work_admitted:
+            raise ValueError("schedule occurrence audit work admission is inconsistent")
+        if draft.event_type == "schedule.occurrence_created" and any(
+            field_name in metadata
+            for field_name in (
+                "first_missed_at_utc",
+                "last_missed_at_utc",
+                "missed_count",
+            )
+        ):
+            raise ValueError("on-time schedule audit must not retain missed-range facts")
+        if draft.event_type != "schedule.occurrence_created":
+            first_missed_at_utc = datetime.fromisoformat(metadata["first_missed_at_utc"])
+            last_missed_at_utc = datetime.fromisoformat(metadata["last_missed_at_utc"])
+            if (
+                first_missed_at_utc != scheduled_for_utc
+                or last_missed_at_utc < first_missed_at_utc
+                or last_missed_at_utc >= next_run_at_utc
+                or (metadata["missed_count"] == 1) != (last_missed_at_utc == first_missed_at_utc)
+            ):
+                raise ValueError("schedule misfire audit range is inconsistent")
+    elif draft.event_type == "schedule.next_occurrence_persisted":
+        if metadata["occurrence_id"] != draft.occurrence_id:
+            raise ValueError("schedule advancement audit occurrence identity does not match")
+        if metadata["disposition"] not in {"on_time", "skip", "run_once"}:
+            raise ValueError("schedule advancement audit disposition is unsupported")
+        previous_next_run_at_utc = datetime.fromisoformat(metadata["previous_next_run_at_utc"])
+        last_scheduled_at_utc = datetime.fromisoformat(metadata["last_scheduled_at_utc"])
+        next_run_at_utc = datetime.fromisoformat(metadata["next_run_at_utc"])
+        if (
+            previous_next_run_at_utc != last_scheduled_at_utc
+            or next_run_at_utc <= last_scheduled_at_utc
+        ):
+            raise ValueError("schedule advancement audit projection is inconsistent")
     if draft.event_type == "runtime.control_denied":
+        if draft.run_id is None:  # pragma: no cover - rejected by the draft shape
+            raise AssertionError("runtime-control audit Run identity disappeared")
         expected_aggregate_id = _runtime_control_denial_aggregate_id(
             actor_id=draft.actor_id,
             actor_source=draft.actor_source.value,
@@ -1672,22 +1831,30 @@ def _issue_audit_event_draft(**values: Any) -> AuditEventDraft:
 
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
-    """Persisted event with an internal row identity and stable per-Run order."""
+    """Persisted event with a global identity and optional stable per-Run order."""
 
     draft: AuditEventDraft
     global_sequence: int
-    run_sequence: int
+    run_sequence: int | None
 
     def __post_init__(self) -> None:
         if type(self.draft) is not AuditEventDraft:
             raise ValueError("persisted audit event requires the exact draft contract")
         self.draft.verify_integrity()
-        for number, name in (
-            (self.global_sequence, "internal audit row identity"),
-            (self.run_sequence, "run audit sequence"),
+        if (
+            not isinstance(self.global_sequence, int)
+            or isinstance(self.global_sequence, bool)
+            or self.global_sequence < 1
         ):
-            if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-                raise ValueError(f"{name} must be positive")
+            raise ValueError("internal audit row identity must be positive")
+        if (self.draft.run_id is None) != (self.run_sequence is None):
+            raise ValueError("audit Run identity and sequence must be present together")
+        if self.run_sequence is not None and (
+            not isinstance(self.run_sequence, int)
+            or isinstance(self.run_sequence, bool)
+            or self.run_sequence < 1
+        ):
+            raise ValueError("run audit sequence must be positive")
 
     def __getattr__(self, name: str) -> Any:
         """Expose immutable draft fields without duplicating the persisted contract."""

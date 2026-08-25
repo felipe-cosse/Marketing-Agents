@@ -171,6 +171,14 @@ class ScheduleRepository(Protocol):
         run_id: str,
     ) -> ScheduleOccurrenceLinkResult: ...
 
+    async def advance_and_release_claim(
+        self,
+        *,
+        claim: ScheduleClaim,
+        next_run_at_utc: datetime,
+        completed_at_utc: datetime,
+    ) -> Schedule | None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class ArtifactInsertResult:
@@ -973,6 +981,13 @@ class AuditRepository(Protocol):
     async def append(self, event: AuditEventDraft) -> AuditEvent: ...
 
     async def append_many(self, events: tuple[AuditEventDraft, ...]) -> tuple[AuditEvent, ...]: ...
+
+    async def append_global(self, event: AuditEventDraft) -> AuditEvent: ...
+
+    async def append_global_many(
+        self,
+        events: tuple[AuditEventDraft, ...],
+    ) -> tuple[AuditEvent, ...]: ...
 
     async def get(self, event_id: str) -> AuditEvent | None: ...
 

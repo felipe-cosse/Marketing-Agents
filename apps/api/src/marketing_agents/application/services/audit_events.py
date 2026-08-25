@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from marketing_agents.application.policies.approval_authorization import (
@@ -29,22 +29,36 @@ from marketing_agents.domain.audit import (
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
-from marketing_agents.domain.entities import ExternalAction, Run, RunPlanSnapshot, RunStep
+from marketing_agents.domain.entities import (
+    ExternalAction,
+    Run,
+    RunPlanSnapshot,
+    RunStep,
+    Schedule,
+    ScheduleOccurrence,
+)
 from marketing_agents.domain.enums import (
     ApprovalDecisionKind,
     ApprovalStatus,
     ExternalActionState,
+    MisfirePolicy,
+    OccurrenceState,
     RunState,
 )
 from marketing_agents.domain.execution_control import AttemptOutcome, ExecutionAttempt
 from marketing_agents.domain.provenance import ArtifactEnvelope
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
+from marketing_agents.domain.schedule_misfire import (
+    ScheduleDisposition,
+    ScheduleOccurrencePlan,
+)
 from marketing_agents.domain.step_lifecycle import (
     StepStateTransition,
     StepTransitionResult,
     initial_pending_transition,
 )
+from marketing_agents.domain.validation import require_utc
 from marketing_agents.security.audit_metadata import seal_audit_metadata
 
 _AUDIT_EVENT_ID_DOMAIN = b"marketing-agents:audit-event-id:v1\x00"
@@ -65,6 +79,186 @@ class AuditEventFactory:
         context.verify_integrity()
         self._context = context
         self._retention_policy = retention_policy
+
+    def schedule_occurrence(
+        self,
+        occurrence: ScheduleOccurrence,
+        plan: ScheduleOccurrencePlan,
+        *,
+        next_run_at_utc: datetime,
+        work_admitted: bool,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one exact on-time, skipped, or coalesced occurrence outcome."""
+
+        if type(occurrence) is not ScheduleOccurrence or type(plan) is not ScheduleOccurrencePlan:
+            raise ValueError("schedule occurrence audit requires exact persisted contracts")
+        replace(occurrence)
+        replace(plan)
+        if type(work_admitted) is not bool:
+            raise ValueError("schedule occurrence audit work admission must be boolean")
+        if (
+            occurrence.schedule_id != plan.schedule_id
+            or occurrence.scheduled_for_utc != plan.scheduled_for_utc
+            or occurrence.recurrence_version != plan.recurrence_version
+            or next_run_at_utc != plan.next_run_at_utc
+            or work_admitted is not plan.admits_work
+            or (occurrence.work_item_id is not None) is not work_admitted
+            or (occurrence.run_id is not None) is not work_admitted
+        ):
+            raise ValueError("schedule occurrence audit does not match its policy plan")
+        _canonical_utc(next_run_at_utc, "schedule audit next run time")
+        _canonical_utc(occurred_at, "schedule occurrence audit time")
+        if occurred_at < occurrence.scheduled_for_utc:
+            raise ValueError("schedule occurrence audit cannot precede its scheduled time")
+
+        metadata: dict[str, Any] = {
+            "scheduled_for_utc": _canonical_utc(
+                occurrence.scheduled_for_utc,
+                "schedule audit scheduled time",
+            ),
+            "next_run_at_utc": _canonical_utc(
+                next_run_at_utc,
+                "schedule audit next run time",
+            ),
+            "recurrence_version": occurrence.recurrence_version,
+            "work_admitted": work_admitted,
+        }
+        if plan.disposition is ScheduleDisposition.ON_TIME:
+            if (
+                occurrence.state is not OccurrenceState.ENQUEUED
+                or occurrence.misfire_policy_applied is not None
+                or occurrence.first_missed_at_utc is not None
+                or occurrence.last_missed_at_utc is not None
+                or occurrence.missed_count is not None
+            ):
+                raise ValueError("on-time occurrence audit requires one exact enqueued occurrence")
+            event_type = "schedule.occurrence_created"
+        else:
+            expected_state = (
+                OccurrenceState.SKIPPED
+                if plan.disposition is ScheduleDisposition.SKIP
+                else OccurrenceState.ENQUEUED
+            )
+            expected_policy = (
+                MisfirePolicy.SKIP
+                if plan.disposition is ScheduleDisposition.SKIP
+                else MisfirePolicy.RUN_ONCE
+            )
+            if (
+                occurrence.state is not expected_state
+                or occurrence.misfire_policy_applied is not expected_policy
+                or occurrence.first_missed_at_utc != plan.first_missed_at_utc
+                or occurrence.last_missed_at_utc != plan.last_missed_at_utc
+                or occurrence.missed_count != plan.missed_count
+                or occurrence.misfire_evaluated_at_utc is None
+                or occurrence.misfire_evaluated_at_utc > occurred_at
+            ):
+                raise ValueError("misfire occurrence audit does not match its policy plan")
+            assert plan.first_missed_at_utc is not None
+            assert plan.last_missed_at_utc is not None
+            assert plan.missed_count is not None
+            metadata.update(
+                {
+                    "first_missed_at_utc": _canonical_utc(
+                        plan.first_missed_at_utc,
+                        "schedule audit first missed time",
+                    ),
+                    "last_missed_at_utc": _canonical_utc(
+                        plan.last_missed_at_utc,
+                        "schedule audit last missed time",
+                    ),
+                    "missed_count": plan.missed_count,
+                }
+            )
+            event_type = (
+                "schedule.misfire_skipped"
+                if plan.disposition is ScheduleDisposition.SKIP
+                else "schedule.misfire_run_once"
+            )
+        return self._build(
+            run_id=None,
+            schedule_id=occurrence.schedule_id,
+            occurrence_id=occurrence.id,
+            event_type=event_type,
+            aggregate_type="schedule_occurrence",
+            aggregate_id=occurrence.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=1,
+        )
+
+    def schedule_next_occurrence_persisted(
+        self,
+        previous_schedule: Schedule,
+        resulting_schedule: Schedule,
+        occurrence: ScheduleOccurrence,
+        plan: ScheduleOccurrencePlan,
+        *,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness the exact versioned Schedule projection written after one due instant."""
+
+        if (
+            type(previous_schedule) is not Schedule
+            or type(resulting_schedule) is not Schedule
+            or type(occurrence) is not ScheduleOccurrence
+            or type(plan) is not ScheduleOccurrencePlan
+        ):
+            raise ValueError("schedule advancement audit requires exact persisted contracts")
+        replace(previous_schedule)
+        replace(resulting_schedule)
+        replace(occurrence)
+        replace(plan)
+        if (
+            previous_schedule.id != resulting_schedule.id
+            or previous_schedule.id != occurrence.schedule_id
+            or previous_schedule.id != plan.schedule_id
+            or previous_schedule.next_run_at_utc != occurrence.scheduled_for_utc
+            or previous_schedule.next_run_at_utc != plan.scheduled_for_utc
+            or resulting_schedule.last_scheduled_at_utc != occurrence.scheduled_for_utc
+            or resulting_schedule.next_run_at_utc != plan.next_run_at_utc
+            or resulting_schedule.version != previous_schedule.version + 1
+            or replace(
+                resulting_schedule,
+                next_run_at_utc=previous_schedule.next_run_at_utc,
+                last_scheduled_at_utc=previous_schedule.last_scheduled_at_utc,
+                version=previous_schedule.version,
+            )
+            != previous_schedule
+        ):
+            raise ValueError("schedule advancement audit does not match its versioned mutation")
+        _canonical_utc(occurred_at, "schedule advancement audit time")
+        if occurred_at < occurrence.scheduled_for_utc:
+            raise ValueError("schedule advancement audit cannot precede its scheduled time")
+        return self._build(
+            run_id=None,
+            schedule_id=resulting_schedule.id,
+            occurrence_id=occurrence.id,
+            event_type="schedule.next_occurrence_persisted",
+            aggregate_type="schedule",
+            aggregate_id=resulting_schedule.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata={
+                "previous_next_run_at_utc": _canonical_utc(
+                    previous_schedule.next_run_at_utc,
+                    "schedule audit previous next run time",
+                ),
+                "last_scheduled_at_utc": _canonical_utc(
+                    resulting_schedule.last_scheduled_at_utc,
+                    "schedule audit last scheduled time",
+                ),
+                "next_run_at_utc": _canonical_utc(
+                    resulting_schedule.next_run_at_utc,
+                    "schedule audit next run time",
+                ),
+                "disposition": plan.disposition.value,
+                "occurrence_id": occurrence.id,
+            },
+            mutation_version=resulting_schedule.version,
+        )
 
     def run_transition(
         self,
@@ -1558,7 +1752,7 @@ class AuditEventFactory:
     def _build(
         self,
         *,
-        run_id: str,
+        run_id: str | None,
         event_type: str,
         aggregate_type: str,
         aggregate_id: str,
@@ -1566,6 +1760,8 @@ class AuditEventFactory:
         occurred_at: datetime,
         metadata: Mapping[str, Any],
         classification: DataClassification = DataClassification.INTERNAL,
+        schedule_id: str | None = None,
+        occurrence_id: str | None = None,
         step_id: str | None = None,
         action_id: str | None = None,
         action_attempt_number: int | None = None,
@@ -1593,7 +1789,7 @@ class AuditEventFactory:
             classification=classification,
             retention_policy=self._retention_policy,
         )
-        identity = {
+        identity: dict[str, Any] = {
             "schema_version": 1,
             "action_attempt_number": action_attempt_number,
             "aggregate_id": aggregate_id,
@@ -1610,6 +1806,10 @@ class AuditEventFactory:
             "step_id": step_id,
             "transition_sequence": transition_sequence,
         }
+        if schedule_id is not None:
+            identity["schedule_id"] = schedule_id
+        if occurrence_id is not None:
+            identity["occurrence_id"] = occurrence_id
         event_id = (
             "audit."
             + hashlib.sha256(_AUDIT_EVENT_ID_DOMAIN + canonical_json_bytes(identity)).hexdigest()
@@ -1617,6 +1817,8 @@ class AuditEventFactory:
         return _issue_audit_event_draft(
             id=event_id,
             run_id=run_id,
+            schedule_id=schedule_id,
+            occurrence_id=occurrence_id,
             event_type=event_type,
             aggregate_type=aggregate_type,
             aggregate_id=aggregate_id,
@@ -1646,6 +1848,13 @@ class AuditEventFactory:
             new_state=new_state,
             reason_code=reason_code,
         )
+
+
+def _canonical_utc(value: datetime, field_name: str) -> str:
+    """Return the one metadata spelling accepted for a UTC instant."""
+
+    require_utc(value, field_name)
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _same_action_definition(left: ExternalAction, right: ExternalAction) -> bool:
