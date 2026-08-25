@@ -12,14 +12,17 @@ from marketing_agents.api.errors import safe_request_validation_error
 from marketing_agents.api.routes.approvals import router as approvals_router
 from marketing_agents.api.routes.health import router as health_router
 from marketing_agents.application.ports.identity import IdentityProvider
+from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
 from marketing_agents.infrastructure.adapters.identity import LocalIdentityProvider
+from marketing_agents.infrastructure.readiness import LocalReadinessProbe
 
 
 def create_app(
     settings: Settings | None = None,
     identity_provider: IdentityProvider | None = None,
     approval_decision_service: ApprovalDecisionExecutor | None = None,
+    readiness_probe: ReadinessProbe | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -35,6 +38,9 @@ def create_app(
         else LocalIdentityProvider(active_settings)
     )
     application.state.approval_decision_service = approval_decision_service
+    application.state.readiness_probe = (
+        readiness_probe if readiness_probe is not None else LocalReadinessProbe(active_settings)
+    )
     application.add_exception_handler(
         RequestValidationError,
         safe_request_validation_error,
