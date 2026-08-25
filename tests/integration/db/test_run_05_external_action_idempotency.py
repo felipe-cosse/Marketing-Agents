@@ -37,6 +37,7 @@ from marketing_agents.application.ports.repositories import (
     ReleaseAuthority,
     ReleaseCallMode,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.application.services import (
     ApprovalBoundaryDisposition,
     ApprovalBoundaryService,
@@ -71,6 +72,7 @@ from marketing_agents.domain.execution_control import (
     AttemptReservationCommand,
     DeliveryCallPermit,
     DeliveryCallReservationCommand,
+    OperationExecutionPolicy,
     fixed_window_start,
 )
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
@@ -95,6 +97,7 @@ from marketing_agents.infrastructure.db import (
     DatabaseRuntime,
     ExternalActionPersistenceConflict,
     SQLAlchemyApprovalRepository,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyConnectorReceiptRepository,
     SQLAlchemyExecutionControlRepository,
@@ -187,6 +190,7 @@ def _uow_factory(runtime: DatabaseRuntime) -> SQLAlchemyUnitOfWorkFactory:
             works=SQLAlchemyWorkRepository,
             runs=SQLAlchemyRunRepository,
             audits=SQLAlchemyAuditRepository,
+            artifacts=SQLAlchemyArtifactRepository,
             approvals=_approval_repository,
             run_steps=SQLAlchemyRunStepRepository,
             external_actions=SQLAlchemyExternalActionRepository,
@@ -227,6 +231,13 @@ async def _seed_parent(runtime: DatabaseRuntime, run_id: str = RUN_ID) -> None:
                 campaign_brief_revision=None,
                 configuration_revision=1,
                 admitted_payload={"safe": True},
+                redacted_input_projection={"safe": True},
+                input_schema_id="schema.test.seed.v1",
+                input_schema_hash="schema-sha256-v1:" + "e" * 64,
+                input_classification="internal",
+                input_projection_created_at=NOW,
+                input_projection_expires_at=NOW + timedelta(days=90),
+                input_projection_integrity_digest="f" * 64,
                 input_digest="a" * 64,
                 admission_digest="b" * 64,
                 digest_key_version="admission-hmac-sha256-v1:" + "c" * 64,
@@ -297,9 +308,27 @@ def _multi_plan(*, seed: int, second_body: str = "second private body"):
 
 
 class _SuccessfulReadAdapter(ExactReadContractAdapter):
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        if operation.result_schema_id is None:
+            raise ValueError("callable test operation requires a result schema")
+        result_type = REGISTRY.resolve(operation.capability_id).result_type
+        return RuntimeOutputContract(
+            schema_id=operation.result_schema_id,
+            schema_version="v1",
+            schema=result_type.model_json_schema(),  # type: ignore[union-attr]
+            classification=operation.data_classification,
+            provider_kind="connector",
+            provider_mode="mock",
+            provider_name=operation.connector_family,
+            provider_version=result_type.__name__,
+        )
+
     async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
         assert request.input_payload == {"query": "release-write-dependency"}
-        return observation_for(request, {"membership": "confirmed"})
+        return observation_for(request, {"records": []})
 
 
 async def _complete_controlled_read_dependency(
@@ -1012,6 +1041,7 @@ def _permit_recording_dependencies(
             works=SQLAlchemyWorkRepository,
             runs=SQLAlchemyRunRepository,
             audits=SQLAlchemyAuditRepository,
+            artifacts=SQLAlchemyArtifactRepository,
             approvals=_approval_repository,
             run_steps=SQLAlchemyRunStepRepository,
             external_actions=SQLAlchemyExternalActionRepository,

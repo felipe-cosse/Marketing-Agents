@@ -13,6 +13,7 @@ from .approval import (
     AuthorizationSetMemberRecord,
     AuthorizationSetRecord,
 )
+from .artifact import ArtifactParentRecord, ArtifactRecord
 from .audit import AuditEventRecord
 from .execution_control import (
     ExecutionAttemptRecord,
@@ -35,6 +36,8 @@ __all__ = [
     "ApprovalDecisionRecord",
     "ApprovalRequestRecord",
     "ApprovalUseRecord",
+    "ArtifactParentRecord",
+    "ArtifactRecord",
     "AuditEventRecord",
     "AuthorizationSetHeadRecord",
     "AuthorizationSetMemberRecord",

@@ -277,6 +277,7 @@ class SQLAlchemyAuditRepository:
                 select(AuditEventRecord).where(
                     AuditEventRecord.run_id == run_id,
                     AuditEventRecord.attempt_id == attempt_id,
+                    AuditEventRecord.event_type == "run.transition_rejected",
                 )
             )
         ).scalar_one_or_none()

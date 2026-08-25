@@ -49,6 +49,7 @@ from marketing_agents.domain.execution_control import (
     RunExecutionControl,
     RunExecutionPolicy,
 )
+from marketing_agents.domain.provenance import ArtifactEnvelope
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
 from marketing_agents.domain.runtime_policy import RateLimitScope
 from marketing_agents.domain.step_lifecycle import (
@@ -77,6 +78,30 @@ class WorkRepository(Protocol):
     async def add(self, work_item: WorkItem) -> None: ...
 
     async def add_or_get(self, work_item: WorkItem) -> WorkInsertResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactInsertResult:
+    """Outcome of one immutable artifact insert-or-exact-replay operation."""
+
+    artifact: ArtifactEnvelope
+    inserted: bool
+
+
+class ArtifactRepositoryConflict(RuntimeError):
+    """Stable fail-closed artifact persistence or hydration conflict."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ArtifactRepository(Protocol):
+    async def get(self, artifact_id: str) -> ArtifactEnvelope | None: ...
+
+    async def list_for_run(self, run_id: str) -> tuple[ArtifactEnvelope, ...]: ...
+
+    async def add_or_get(self, artifact: ArtifactEnvelope) -> ArtifactInsertResult: ...
 
 
 @dataclass(frozen=True, slots=True)

@@ -52,6 +52,7 @@ from marketing_agents.domain.action_hash import (
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.runtime_policy import AttemptKind, RateLimitScope, RetryBackoff
+from marketing_agents.domain.schema_hash import canonical_schema_hash
 from marketing_agents.infrastructure.adapters.connectors import (
     RegistryConnectorReadAdapter,
     mock,
@@ -152,7 +153,8 @@ def _read_operation(
     *,
     revision: int = 7,
 ) -> OperationExecutionPolicy:
-    metadata = operation_registry.resolve("cap.social.read-posts").metadata
+    registration = operation_registry.resolve("cap.social.read-posts")
+    metadata = registration.metadata
     return OperationExecutionPolicy(
         run_id="run:arch-07-read-adapter",
         step_id="step:arch-07-read-adapter",
@@ -166,6 +168,7 @@ def _read_operation(
         binding_configuration_revision=revision,
         request_schema_id=metadata.request_schema_id,
         result_schema_id=metadata.result_schema_id,
+        result_schema_hash=canonical_schema_hash(registration.result_type.model_json_schema()),  # type: ignore[union-attr]
         request_redaction_fields=metadata.request_redaction_fields,
         result_redaction_fields=metadata.result_redaction_fields,
         data_classification=metadata.data_classification,

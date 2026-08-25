@@ -10,6 +10,7 @@ from marketing_agents.application.ports.read_adapter import (
     ReadAdapterRequest,
     ReadAdapterResult,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.runtime_policy import AttemptKind
 
@@ -19,6 +20,23 @@ class ExactReadContractAdapter:
 
     def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
         return ReadAdapterContract.from_operation(operation)
+
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        if operation.result_schema_id is None:
+            raise ValueError("callable test operation requires a result schema")
+        return RuntimeOutputContract(
+            schema_id=operation.result_schema_id,
+            schema_version="v1",
+            schema={"type": "object"},
+            classification=operation.data_classification,
+            provider_kind="llm" if operation.kind is AttemptKind.MODEL else "connector",
+            provider_mode="mock",
+            provider_name=operation.connector_family,
+            provider_version="v1",
+        )
 
 
 def observation_for(

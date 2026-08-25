@@ -13,6 +13,7 @@ from marketing_agents.domain.audit import (
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
+from marketing_agents.domain.execution_control import SAFE_ATTEMPT_ERROR_CODES
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
 from marketing_agents.domain.validation import require_digest, require_id, require_utc
 
@@ -46,6 +47,7 @@ _STEP_FIELDS = frozenset(
     }
 )
 _ACTION_FIELDS = frozenset({"conclusion", "connector_status", "idempotency_support"})
+_ATTEMPT_IDENTITY_FIELDS = frozenset({"attempt_kind", "attempt_number", "operation_key"})
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "run.received": _RUN_FIELDS | frozenset({"catalog_content_hash"}),
     "run.transitioned": _RUN_FIELDS,
@@ -53,6 +55,18 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "run.plan_recorded": _RUN_FIELDS | _PLAN_FIELDS,
     "step.recorded": _STEP_FIELDS | _PLAN_FIELDS,
     "step.transitioned": _RUN_FIELDS | _STEP_FIELDS,
+    "attempt.reserved": _ATTEMPT_IDENTITY_FIELDS
+    | frozenset({"input_classification", "input_schema_id"}),
+    "attempt.completed": _ATTEMPT_IDENTITY_FIELDS
+    | frozenset({"attempt_outcome", "safe_error_code"}),
+    "artifact.persisted": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
+        }
+    ),
     "action.proposed": frozenset({"idempotency_support"}),
     "action.awaiting_approval": frozenset({"idempotency_support"}),
     "action.approved": frozenset({"idempotency_support"}),
@@ -160,6 +174,7 @@ _DIGEST_FIELDS = frozenset({"graph_hash", "plan_hash", "routing_hash", "workflow
 _POSITIVE_INTEGER_FIELDS = frozenset(
     {
         "action_version",
+        "attempt_number",
         "configuration_revision",
         "generation",
         "ordinal",
@@ -219,6 +234,9 @@ _CONCLUSIONS = frozenset(
         "succeeded",
     }
 )
+_ATTEMPT_KINDS = frozenset({"model", "tool"})
+_ATTEMPT_OUTCOMES = frozenset({"succeeded", "transient_failure", "permanent_failure", "cancelled"})
+_DATA_CLASSIFICATIONS = frozenset(item.value for item in DataClassification)
 
 
 class AuditMetadataError(ValueError):
@@ -269,6 +287,12 @@ def _validate_catalog_hash(value: Any, field_name: str) -> None:
     require_digest(value.removeprefix("catalog-sha256-v1:"), field_name)
 
 
+def _validate_schema_hash(value: Any, field_name: str) -> None:
+    if not isinstance(value, str) or not value.startswith("schema-sha256-v1:"):
+        raise ValueError(f"{field_name} must use the schema hash version")
+    require_digest(value.removeprefix("schema-sha256-v1:"), field_name)
+
+
 def _validate_positive_integer(value: Any, field_name: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ValueError(f"{field_name} must be a positive integer")
@@ -280,6 +304,8 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
         validator = require_digest
     elif field_name == "catalog_content_hash":
         validator = _validate_catalog_hash
+    elif field_name == "output_schema_hash":
+        validator = _validate_schema_hash
     elif field_name in _POSITIVE_INTEGER_FIELDS:
         validator = _validate_positive_integer
     elif field_name in _BOOLEAN_FIELDS:
@@ -317,6 +343,26 @@ def _validate_typed_value(field_name: str, value: Any) -> None:
         raise AuditMetadataError(
             "metadata_value_invalid",
             "runtime-control denial is not an allowlisted safe code",
+        )
+    if field_name == "safe_error_code" and value not in SAFE_ATTEMPT_ERROR_CODES:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "attempt error is not an allowlisted safe code",
+        )
+    if field_name == "attempt_kind" and value not in _ATTEMPT_KINDS:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "attempt kind is not an allowlisted safe code"
+        )
+    if field_name == "attempt_outcome" and value not in _ATTEMPT_OUTCOMES:
+        raise AuditMetadataError(
+            "metadata_value_invalid", "attempt outcome is not an allowlisted safe code"
+        )
+    if field_name in {"input_classification", "data_classification"} and (
+        value not in _DATA_CLASSIFICATIONS
+    ):
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "data classification is not an allowlisted safe code",
         )
     if field_name == "retry_after_seconds" and value > 3_600:
         raise AuditMetadataError(

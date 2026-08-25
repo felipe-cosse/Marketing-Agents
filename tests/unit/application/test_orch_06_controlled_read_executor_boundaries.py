@@ -155,6 +155,9 @@ def _step(*, effect: Effect, kind: AttemptKind) -> RunStep:
         result_schema_id=(
             "schema.unit.read.result" if write or kind is AttemptKind.MODEL else None
         ),
+        result_schema_hash=(
+            "schema-sha256-v1:" + "e" * 64 if write or kind is AttemptKind.MODEL else None
+        ),
         request_redaction_fields=("/secret",) if write else (),
         result_redaction_fields=("/secret",) if write else (),
         data_classification=(DataClassification.PERSONAL if write else DataClassification.INTERNAL),
@@ -223,6 +226,7 @@ def test_orch_06_adapter_contract_deep_freezes_canonical_payloads() -> None:
         binding_configuration_revision=None,
         request_schema_id="schema.unit.read.request",
         result_schema_id="schema.unit.read.result",
+        result_schema_hash="schema-sha256-v1:" + "e" * 64,
         request_redaction_fields=(),
         result_redaction_fields=(),
         data_classification=DataClassification.INTERNAL,

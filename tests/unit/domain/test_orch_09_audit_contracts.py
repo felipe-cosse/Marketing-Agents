@@ -96,6 +96,7 @@ def _step(effect: Effect, state: StepState, *, version: int = 1) -> RunStep:
         result_schema_id=(
             "schema.newsletter.write.result.v1" if write else "schema.model.read.result.v1"
         ),
+        result_schema_hash="schema-sha256-v1:" + "e" * 64,
         request_redaction_fields=("/body",) if write else (),
         result_redaction_fields=("/receipt",) if write else (),
         data_classification=(DataClassification.PERSONAL if write else DataClassification.INTERNAL),

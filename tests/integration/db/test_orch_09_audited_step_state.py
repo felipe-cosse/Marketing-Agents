@@ -53,6 +53,7 @@ from marketing_agents.infrastructure.db import (
     AuditPersistenceInvariantError,
     Base,
     DatabaseRuntime,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
@@ -187,6 +188,7 @@ def _uow_factory(
             works=SQLAlchemyWorkRepository,
             runs=run_factory,
             audits=audit_factory,
+            artifacts=SQLAlchemyArtifactRepository,
             run_steps=SQLAlchemyRunStepRepository,
             execution_control=execution_control_repository,
         ),
@@ -302,7 +304,7 @@ async def test_orch_09_restart_stable_complete_plan_step_timeline(tmp_path: Path
     assert completed.run.state is RunState.COMPLETED
     assert step.state is StepState.SUCCEEDED
     timeline = await _timeline(dependencies, run.id)
-    assert tuple(item.run_sequence for item in timeline) == tuple(range(1, 10))
+    assert tuple(item.run_sequence for item in timeline) == tuple(range(1, 13))
     assert tuple(item.event_type for item in timeline) == (
         "run.received",
         "run.transitioned",
@@ -311,6 +313,9 @@ async def test_orch_09_restart_stable_complete_plan_step_timeline(tmp_path: Path
         "run.transitioned",
         "step.transitioned",
         "step.transitioned",
+        "attempt.reserved",
+        "attempt.completed",
+        "artifact.persisted",
         "step.transitioned",
         "run.transitioned",
     )
@@ -323,7 +328,7 @@ async def test_orch_09_restart_stable_complete_plan_step_timeline(tmp_path: Path
             first = await unit_of_work.audits.list_run(run.id, limit=4)
             second = await unit_of_work.audits.list_run(run.id, after_sequence=4, limit=4)
             third = await unit_of_work.audits.list_run(run.id, after_sequence=8, limit=4)
-        assert tuple(item.run_sequence for item in (*first, *second, *third)) == tuple(range(1, 10))
+        assert tuple(item.run_sequence for item in (*first, *second, *third)) == tuple(range(1, 13))
         replayed = await AuditedPlanPersistenceService(restarted_dependencies).persist(
             plan,
             graph,
@@ -333,7 +338,7 @@ async def test_orch_09_restart_stable_complete_plan_step_timeline(tmp_path: Path
         )
         assert replayed.created is False
         assert replayed.run.state is RunState.COMPLETED
-        assert len(await _timeline(restarted_dependencies, run.id)) == 9
+        assert len(await _timeline(restarted_dependencies, run.id)) == 12
     finally:
         await restarted.dispose()
 

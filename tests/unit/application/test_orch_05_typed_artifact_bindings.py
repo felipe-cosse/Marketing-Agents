@@ -131,6 +131,7 @@ def _artifact(
         ),
         output_schema_id=ARTIFACT_SCHEMA_ID,
         output_schema_version="v1",
+        output_schema_hash="schema-sha256-v1:" + ("e" * 64),
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         classification=classification,
     )

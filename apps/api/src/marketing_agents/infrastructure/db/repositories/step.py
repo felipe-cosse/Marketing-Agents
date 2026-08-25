@@ -150,6 +150,7 @@ def _step_hash_material(step: RunStep) -> EffectPlanStepHashMaterial:
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
         result_schema_id=step.result_schema_id,
+        result_schema_hash=step.result_schema_hash,
         request_redaction_fields=step.request_redaction_fields,
         result_redaction_fields=step.result_redaction_fields,
         data_classification=step.data_classification,
@@ -186,6 +187,7 @@ def _step_to_record(step: RunStep) -> RunStepRecord:
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
         result_schema_id=step.result_schema_id,
+        result_schema_hash=step.result_schema_hash,
         request_redaction_fields=list(step.request_redaction_fields),
         result_redaction_fields=list(step.result_redaction_fields),
         data_classification=step.data_classification.value,
@@ -298,6 +300,7 @@ def _step_to_domain_unchecked(record: RunStepRecord, dependencies: tuple[str, ..
         binding_configuration_revision=record.binding_configuration_revision,
         request_schema_id=record.request_schema_id,
         result_schema_id=record.result_schema_id,
+        result_schema_hash=record.result_schema_hash,
         request_redaction_fields=_json_id_tuple(
             record.request_redaction_fields,
             "request redaction fields",

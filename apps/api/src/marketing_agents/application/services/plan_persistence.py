@@ -413,6 +413,7 @@ def _materialize_plan(
                 binding_configuration_revision=planned.binding_configuration_revision,
                 request_schema_id=planned.request_schema_id,
                 result_schema_id=planned.result_schema_id,
+                result_schema_hash=planned.result_schema_hash,
                 request_redaction_fields=planned.request_redaction_fields,
                 result_redaction_fields=planned.result_redaction_fields,
                 data_classification=planned.data_classification,
@@ -454,6 +455,7 @@ def _execution_policy_for_plan(
             binding_configuration_revision=step.binding_configuration_revision,
             request_schema_id=step.request_schema_id,
             result_schema_id=step.result_schema_id,
+            result_schema_hash=_required_result_schema_hash(step),
             request_redaction_fields=step.request_redaction_fields,
             result_redaction_fields=step.result_redaction_fields,
             data_classification=step.data_classification,
@@ -487,6 +489,12 @@ def _execution_policy_for_plan(
         operations=operations,
         created_at=plan.created_at,
     )
+
+
+def _required_result_schema_hash(step: RunStep) -> str:
+    if step.result_schema_hash is None:
+        raise ValueError("callable READ step requires a sealed result schema hash")
+    return step.result_schema_hash
 
 
 async def _initialize_execution_control(

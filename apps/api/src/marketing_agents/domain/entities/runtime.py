@@ -15,6 +15,7 @@ from marketing_agents.domain.runtime_policy import (
     attempt_kind_for_connector,
     runtime_rate_limit_key,
 )
+from marketing_agents.domain.schema_hash import require_schema_hash
 
 from ._validation import (
     frozen_mapping,
@@ -230,6 +231,7 @@ class RunStep:
     binding_configuration_revision: int | None = field(kw_only=True)
     request_schema_id: str | None = field(kw_only=True)
     result_schema_id: str | None = field(kw_only=True)
+    result_schema_hash: str | None = field(kw_only=True)
     request_redaction_fields: tuple[str, ...] = field(kw_only=True)
     result_redaction_fields: tuple[str, ...] = field(kw_only=True)
     data_classification: DataClassification = field(kw_only=True)
@@ -274,6 +276,10 @@ class RunStep:
             require_id(self.request_schema_id, "step request schema ID")
         if self.result_schema_id is not None:
             require_id(self.result_schema_id, "step result schema ID")
+        if self.result_schema_hash is not None:
+            require_schema_hash(self.result_schema_hash, "step result schema hash")
+        if (self.result_schema_id is None) != (self.result_schema_hash is None):
+            raise ValueError("step result schema ID and hash must be present together")
         if type(self.data_classification) is not DataClassification:
             raise ValueError("step data classification must use the exact enum")
         if not isinstance(self.ordinal, int) or isinstance(self.ordinal, bool) or self.ordinal < 1:

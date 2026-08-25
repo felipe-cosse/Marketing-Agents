@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import WorkMode
 
 from ._validation import (
@@ -19,6 +20,9 @@ from ._validation import (
     require_unique,
     require_utc,
 )
+
+_UNSET_PROJECTION_TIME = datetime.min.replace(tzinfo=UTC)
+_LEGACY_SCHEMA_HASH = "schema-sha256-v1:" + ("0" * 64)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,30 @@ class WorkItem:
     brief_revision: int | None = field(kw_only=True)
     digest_key_version: str = field(kw_only=True)
     admitted_payload: Mapping[str, Any] = field(kw_only=True, repr=False)
+    redacted_input_projection: Mapping[str, Any] = field(
+        kw_only=True,
+        default_factory=dict,
+        repr=False,
+    )
+    input_schema_id: str = field(kw_only=True, default="schema.legacy.unknown")
+    input_schema_hash: str = field(kw_only=True, default=_LEGACY_SCHEMA_HASH)
+    input_classification: DataClassification = field(
+        kw_only=True,
+        default=DataClassification.INTERNAL,
+    )
+    input_projection_created_at: datetime = field(
+        kw_only=True,
+        default=_UNSET_PROJECTION_TIME,
+    )
+    input_projection_expires_at: datetime = field(
+        kw_only=True,
+        default=_UNSET_PROJECTION_TIME,
+    )
+    input_projection_integrity_digest: str = field(
+        kw_only=True,
+        default="0" * 64,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -84,6 +112,41 @@ class WorkItem:
             self,
             "admitted_payload",
             frozen_json_mapping(self.admitted_payload, "admitted payload"),
+        )
+        object.__setattr__(
+            self,
+            "redacted_input_projection",
+            frozen_json_mapping(
+                self.redacted_input_projection,
+                "redacted input projection",
+            ),
+        )
+        require_id(self.input_schema_id, "input schema ID")
+        if not self.input_schema_hash.startswith("schema-sha256-v1:"):
+            raise ValueError("input schema hash version is invalid")
+        require_digest(
+            self.input_schema_hash.removeprefix("schema-sha256-v1:"),
+            "input schema hash",
+        )
+        if not isinstance(self.input_classification, DataClassification):
+            raise ValueError("input classification is invalid")
+        if self.input_projection_created_at == _UNSET_PROJECTION_TIME:
+            object.__setattr__(self, "input_projection_created_at", self.created_at)
+        if self.input_projection_expires_at == _UNSET_PROJECTION_TIME:
+            object.__setattr__(
+                self,
+                "input_projection_expires_at",
+                self.created_at + timedelta(days=7),
+            )
+        require_utc(self.input_projection_created_at, "input projection creation time")
+        require_utc(self.input_projection_expires_at, "input projection expiry time")
+        if self.input_projection_created_at != self.created_at:
+            raise ValueError("input projection creation time must match work creation time")
+        if self.input_projection_expires_at <= self.input_projection_created_at:
+            raise ValueError("input projection expiry must follow its creation time")
+        require_digest(
+            self.input_projection_integrity_digest,
+            "input projection integrity digest",
         )
 
     @property

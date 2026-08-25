@@ -26,7 +26,12 @@ class AuditEventRecord(Base):
     __table_args__ = (
         UniqueConstraint("id", name="uq_audit_events_id"),
         UniqueConstraint("run_id", "run_sequence", name="uq_audit_events_run_sequence"),
-        UniqueConstraint("run_id", "attempt_id", name="uq_audit_events_run_attempt"),
+        UniqueConstraint(
+            "run_id",
+            "event_type",
+            "attempt_id",
+            name="uq_audit_events_run_event_attempt",
+        ),
         UniqueConstraint(
             "aggregate_type",
             "aggregate_id",
@@ -50,6 +55,16 @@ class AuditEventRecord(Base):
                 "run_step_state_transitions.run_id",
                 "run_step_state_transitions.sequence",
             ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["attempt_id", "run_id", "step_id"],
+            ["execution_attempts.id", "execution_attempts.run_id", "execution_attempts.step_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["artifact_id", "run_id", "step_id"],
+            ["artifacts.id", "artifacts.run_id", "artifacts.step_id"],
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -126,6 +141,19 @@ class AuditEventRecord(Base):
             "aggregate_id = step_id AND outcome = 'accepted' AND mutation_version IS NOT NULL "
             "AND step_transition_sequence IS NOT NULL AND action_id IS NULL "
             "AND action_attempt_number IS NULL AND receipt_id IS NULL AND attempt_id IS NULL) OR "
+            "(aggregate_type = 'execution_attempt' AND event_type IN "
+            "('attempt.reserved','attempt.completed') AND step_id IS NOT NULL AND "
+            "attempt_id IS NOT NULL AND aggregate_id = attempt_id AND outcome = 'accepted' AND "
+            "mutation_version IS NOT NULL AND run_transition_sequence IS NULL AND "
+            "step_transition_sequence IS NULL AND action_id IS NULL AND "
+            "action_attempt_number IS NULL AND receipt_id IS NULL AND "
+            "approval_request_id IS NULL AND approval_decision_id IS NULL) OR "
+            "(aggregate_type = 'artifact' AND event_type = 'artifact.persisted' AND "
+            "step_id IS NOT NULL AND attempt_id IS NOT NULL AND artifact_id IS NOT NULL AND "
+            "aggregate_id = artifact_id AND outcome = 'accepted' AND mutation_version = 1 AND "
+            "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
+            "action_id IS NULL AND action_attempt_number IS NULL AND receipt_id IS NULL AND "
+            "approval_request_id IS NULL AND approval_decision_id IS NULL) OR "
             "(aggregate_type = 'external_action' AND event_type IN "
             "('action.proposed','action.awaiting_approval','action.approved','action.rejected',"
             "'action.dispatch_reserved','action.cancelled',"
@@ -194,7 +222,7 @@ class AuditEventRecord(Base):
             "'action.dispatch_reserved','action.cancelled','approval.approved',"
             "'approval.rejected','approval.consumed','approval.superseded') OR "
             "approval_decision_id IS NULL) AND "
-            "artifact_id IS NULL",
+            "(event_type IN ('attempt.completed','artifact.persisted') OR artifact_id IS NULL)",
             name="ck_audit_events_future_links_null",
         ),
         CheckConstraint(
@@ -215,6 +243,24 @@ class AuditEventRecord(Base):
             "aggregate_type IN ('run','step') AND mutation_version > 1 AND "
             "previous_state IS NOT NULL AND new_state IS NOT NULL)",
             name="ck_audit_events_lifecycle_shape",
+        ),
+        CheckConstraint(
+            "(event_type = 'attempt.reserved' AND mutation_version = 1 AND "
+            "previous_state IS NULL AND new_state = 'reserved' AND artifact_id IS NULL AND "
+            "reason_code IS NULL) OR "
+            "(event_type = 'attempt.completed' AND mutation_version = 2 AND "
+            "previous_state = 'reserved' AND new_state IN "
+            "('succeeded','transient_failure','permanent_failure','cancelled') AND "
+            "((new_state = 'succeeded' AND artifact_id IS NOT NULL) OR "
+            "(new_state <> 'succeeded' AND artifact_id IS NULL)) AND reason_code IS NULL) OR "
+            "aggregate_type <> 'execution_attempt'",
+            name="ck_audit_events_attempt_shape",
+        ),
+        CheckConstraint(
+            "(event_type = 'artifact.persisted' AND mutation_version = 1 AND "
+            "previous_state IS NULL AND new_state = 'persisted' AND artifact_id IS NOT NULL AND "
+            "reason_code IS NULL) OR aggregate_type <> 'artifact'",
+            name="ck_audit_events_artifact_shape",
         ),
         CheckConstraint(
             "(event_type = 'action.proposed' AND action_attempt_number IS NULL AND "

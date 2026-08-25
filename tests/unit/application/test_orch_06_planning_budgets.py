@@ -173,6 +173,7 @@ def _planner(
             _Capability("cap.artifact.load", "artifact"),
         ),
         templates=(template or _template(),),  # type: ignore[arg-type]
+        template_output_schemas={TEMPLATE_ID: {"type": "object"}},
         approval_policies=(_ApprovalPolicy(),),
         operations=(operation or _Operation(),),  # type: ignore[arg-type]
         bindings=(_Binding(),),

@@ -6,6 +6,7 @@ from .action import (
     SQLAlchemyExternalActionRepository,
 )
 from .approval import ApprovalPersistenceConflict, SQLAlchemyApprovalRepository
+from .artifact import ArtifactPersistenceConflict, SQLAlchemyArtifactRepository
 from .audit import AuditPersistenceInvariantError, SQLAlchemyAuditRepository
 from .execution_control import (
     ExecutionControlPersistenceConflict,
@@ -17,11 +18,13 @@ from .work import SQLAlchemyWorkRepository
 
 __all__ = [
     "ApprovalPersistenceConflict",
+    "ArtifactPersistenceConflict",
     "AuditPersistenceInvariantError",
     "ExecutionControlPersistenceConflict",
     "ExternalActionPersistenceConflict",
     "RunPersistenceInvariantError",
     "SQLAlchemyApprovalRepository",
+    "SQLAlchemyArtifactRepository",
     "SQLAlchemyAuditRepository",
     "SQLAlchemyConnectorReceiptRepository",
     "SQLAlchemyExecutionControlRepository",

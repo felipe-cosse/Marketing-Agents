@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from marketing_agents.application.orchestration.router import RoutingResult
 from marketing_agents.application.ports.clock import Clock
@@ -64,6 +64,7 @@ from marketing_agents.domain.runtime_policy import (
     runtime_rate_limit_key,
     validate_runtime_plan_budget,
 )
+from marketing_agents.domain.schema_hash import canonical_schema_hash, require_schema_hash
 
 EFFECT_PLAN_HASH_DOMAIN = _DOMAIN_EFFECT_PLAN_HASH
 _DESTINATION_HASH_DOMAIN = b"marketing-agents:external-action-destination:v1\x00"
@@ -346,6 +347,7 @@ class EffectPlannedStep:
     binding_configuration_revision: int | None
     request_schema_id: str | None
     result_schema_id: str | None
+    result_schema_hash: str | None
     request_redaction_fields: tuple[str, ...]
     result_redaction_fields: tuple[str, ...]
     data_classification: DataClassification
@@ -396,6 +398,10 @@ class EffectPlannedStep:
         ):
             if schema_id is not None:
                 require_id(schema_id, f"planned step {name}")
+        if self.result_schema_hash is not None:
+            require_schema_hash(self.result_schema_hash, "planned step result schema hash")
+        if (self.result_schema_id is None) != (self.result_schema_hash is None):
+            raise ValueError("planned step result schema ID and hash must be present together")
         if type(self.runtime_policy) is not StepRuntimePolicy:
             raise ValueError("planned step runtime policy must use the exact immutable snapshot")
         if self.runtime_policy.attempt_kind is not attempt_kind_for_connector(
@@ -615,6 +621,7 @@ class _TemplateSnapshot:
     approval_policy_id: str
     input_schema_id: str
     output_schema_id: str
+    output_schema_hash: str
     retry_policy: RetryPolicySnapshot
     timeout_policy: TimeoutPolicySnapshot
     budget_policy: BudgetPolicySnapshot
@@ -637,6 +644,7 @@ class _OperationSnapshot:
     effect: Effect
     request_schema_id: str
     result_schema_id: str
+    result_schema_hash: str
     request_redaction_fields: tuple[str, ...]
     result_redaction_fields: tuple[str, ...]
     data_classification: DataClassification
@@ -668,6 +676,7 @@ class EffectAwarePlanner:
         ids: IdGenerator,
         capabilities: Sequence[PlanningCapabilitySource],
         templates: Sequence[PlanningTemplateSource],
+        template_output_schemas: Mapping[str, Mapping[str, Any]],
         approval_policies: Sequence[PlanningApprovalPolicySource],
         operations: Sequence[PlanningOperationSource],
         bindings: Sequence[PlanningBindingSource],
@@ -687,7 +696,7 @@ class EffectAwarePlanner:
             )
         self._run_policy = run_policy
         self._capabilities = self._snapshot_capabilities(capabilities)
-        self._templates = self._snapshot_templates(templates)
+        self._templates = self._snapshot_templates(templates, template_output_schemas)
         self._policies = self._snapshot_policies(approval_policies)
         self._operations = self._snapshot_operations(operations)
         self._bindings = self._snapshot_bindings(bindings)
@@ -764,6 +773,13 @@ class EffectAwarePlanner:
                     operation.result_schema_id
                     if operation
                     else template.output_schema_id
+                    if capability.connector_family == "model"
+                    else None
+                ),
+                result_schema_hash=(
+                    operation.result_schema_hash
+                    if operation
+                    else template.output_schema_hash
                     if capability.connector_family == "model"
                     else None
                 ),
@@ -1201,7 +1217,13 @@ class EffectAwarePlanner:
     @staticmethod
     def _snapshot_templates(
         sources: Sequence[PlanningTemplateSource],
+        output_schemas: Mapping[str, Mapping[str, Any]],
     ) -> Mapping[str, _TemplateSnapshot]:
+        if set(output_schemas) != {source.id for source in sources}:
+            raise EffectPlanningError(
+                "template_schema_set_drift",
+                "template output schema bodies must exactly match the template snapshot",
+            )
         result: dict[str, _TemplateSnapshot] = {}
         for source in sources:
             try:
@@ -1265,6 +1287,7 @@ class EffectAwarePlanner:
                 approval_policy_id=source.approval_policy_id,
                 input_schema_id=source.input_schema_id,
                 output_schema_id=source.output_schema_id,
+                output_schema_hash=canonical_schema_hash(output_schemas[source.id]),
                 retry_policy=retry_policy,
                 timeout_policy=timeout_policy,
                 budget_policy=budget_policy,
@@ -1376,12 +1399,22 @@ class EffectAwarePlanner:
                 raise EffectPlanningError(
                     "invalid_operation", "operation request type must be a Pydantic model"
                 )
+            if isinstance(source.result_type, type) and issubclass(source.result_type, BaseModel):
+                result_schema = source.result_type.model_json_schema()
+            elif source.result_type is ConnectorWriteResult:
+                result_schema = TypeAdapter(ConnectorWriteResult).json_schema()
+            else:
+                raise EffectPlanningError(
+                    "invalid_operation",
+                    "operation result type cannot expose a JSON Schema",
+                )
             result[metadata.capability_id] = _OperationSnapshot(
                 capability_id=metadata.capability_id,
                 connector_family=metadata.connector_family,
                 effect=metadata.effect,
                 request_schema_id=metadata.request_schema_id,
                 result_schema_id=metadata.result_schema_id,
+                result_schema_hash=canonical_schema_hash(result_schema),
                 request_redaction_fields=redaction_fields,
                 result_redaction_fields=result_redaction_fields,
                 data_classification=metadata.data_classification,
@@ -1465,6 +1498,7 @@ def _effect_plan_hash(
                 binding_configuration_revision=step.binding_configuration_revision,
                 request_schema_id=step.request_schema_id,
                 result_schema_id=step.result_schema_id,
+                result_schema_hash=step.result_schema_hash,
                 request_redaction_fields=step.request_redaction_fields,
                 result_redaction_fields=step.result_redaction_fields,
                 data_classification=step.data_classification,

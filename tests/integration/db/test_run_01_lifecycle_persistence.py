@@ -46,6 +46,7 @@ from marketing_agents.domain.run_lifecycle import (
 from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
@@ -253,6 +254,7 @@ def _unit_of_work_factory(
             works=SQLAlchemyWorkRepository,
             runs=run_factory,
             audits=SQLAlchemyAuditRepository,
+            artifacts=SQLAlchemyArtifactRepository,
             run_steps=SQLAlchemyRunStepRepository,
             execution_control=execution_control_repository,
         ),

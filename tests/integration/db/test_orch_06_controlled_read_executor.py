@@ -25,6 +25,7 @@ from marketing_agents.application.ports.read_adapter import (
 from marketing_agents.application.ports.repositories import (
     ExecutionControlRepositoryConflict,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.application.ports.unit_of_work import UnitOfWorkFactory
 from marketing_agents.application.services import (
     AuditedPlanPersistenceService,
@@ -39,6 +40,7 @@ from marketing_agents.application.services import (
 )
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.execution_control import (
     AttemptOutcome,
@@ -54,6 +56,7 @@ from marketing_agents.domain.run_lifecycle import (
     RunLifecycleCommand,
 )
 from marketing_agents.domain.runtime_policy import (
+    AttemptKind,
     RateLimitPolicySnapshot,
     RetryBackoff,
     RetryPolicySnapshot,
@@ -64,6 +67,7 @@ from marketing_agents.domain.runtime_policy import (
 from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
@@ -71,8 +75,10 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyUnitOfWorkFactory,
     create_database_runtime,
 )
+from marketing_agents.infrastructure.db.models import ExecutionAttemptRecord
 from marketing_agents.infrastructure.db.repositories import SQLAlchemyWorkRepository
 from marketing_agents.security.digest_key import DigestKey
+from sqlalchemy import select
 
 from tests.support.execution_control import execution_control_repository
 from tests.support.incoming_work import TEST_CATALOG_HASH, validate_incoming_for_test
@@ -114,6 +120,7 @@ def _uow_factory(runtime: DatabaseRuntime) -> SQLAlchemyUnitOfWorkFactory:
             works=SQLAlchemyWorkRepository,
             runs=SQLAlchemyRunRepository,
             audits=SQLAlchemyAuditRepository,
+            artifacts=SQLAlchemyArtifactRepository,
             run_steps=SQLAlchemyRunStepRepository,
             execution_control=execution_control_repository,
         ),
@@ -157,6 +164,7 @@ def _step_hash_material(step) -> EffectPlanStepHashMaterial:  # type: ignore[no-
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
         result_schema_id=step.result_schema_id,
+        result_schema_hash=step.result_schema_hash,
         request_redaction_fields=step.request_redaction_fields,
         result_redaction_fields=step.result_redaction_fields,
         data_classification=step.data_classification,
@@ -181,12 +189,30 @@ def _with_attempt_policy(
     max_input_field_bytes: int | None = None,
     max_output_bytes: int | None = None,
     max_model_output_tokens: int | None = None,
+    data_classification: DataClassification | None = None,
 ) -> EffectPlan:
     steps = tuple(
         replace(
             step,
+            kind=("connector.read" if data_classification is not None else step.kind),
+            connector_family=("crm" if data_classification is not None else step.connector_family),
+            binding_id=("binding.test.run-06.crm" if data_classification is not None else None),
+            binding_configuration_revision=(
+                step.configuration_revision if data_classification is not None else None
+            ),
+            connector_timeout_seconds=(
+                step_timeout_seconds if data_classification is not None else None
+            ),
+            data_classification=(
+                step.data_classification if data_classification is None else data_classification
+            ),
             runtime_policy=replace(
                 step.runtime_policy,
+                attempt_kind=(
+                    AttemptKind.TOOL
+                    if data_classification is not None
+                    else step.runtime_policy.attempt_kind
+                ),
                 retry=RetryPolicySnapshot(
                     max_attempts,
                     RetryBackoff.BOUNDED_EXPONENTIAL if max_attempts > 1 else RetryBackoff.NONE,
@@ -265,6 +291,8 @@ async def _prepare(
     max_input_field_bytes: int | None = None,
     max_output_bytes: int | None = None,
     max_model_output_tokens: int | None = None,
+    data_classification: DataClassification | None = None,
+    output_schema: Mapping[str, object] | None = None,
 ) -> PreparedRead:
     runtime = await _runtime(path)
     clock = MutableClock()
@@ -291,6 +319,7 @@ async def _prepare(
         target_instance_id=envelope.instance_id,
         configuration_revision=envelope.configuration_revision,
         catalog_hash=validated.run.catalog_hash,
+        output_schema=output_schema,
     )
     plan = _with_attempt_policy(
         plan,
@@ -301,6 +330,7 @@ async def _prepare(
         max_input_field_bytes=max_input_field_bytes,
         max_output_bytes=max_output_bytes,
         max_model_output_tokens=max_model_output_tokens,
+        data_classification=data_classification,
     )
     persisted = await AuditedPlanPersistenceService(dependencies).persist(
         plan,
@@ -338,8 +368,12 @@ class DurableObservationAdapter(ExactReadContractAdapter):
             timeline = await unit_of_work.audits.list_run(request.run_id)
         assert attempt is not None and attempt.outcome is None
         assert step is not None and step.state is StepState.EXECUTING
-        assert timeline[-1].event_type == "step.transitioned"
-        assert timeline[-1].safe_metadata.values["command"] == "start"
+        assert tuple(event.event_type for event in timeline[-2:]) == (
+            "step.transitioned",
+            "attempt.reserved",
+        )
+        assert timeline[-2].safe_metadata.values["command"] == "start"
+        assert timeline[-1].attempt_id == request.attempt_id
         return observation_for(request, {"observation": "committed"})
 
 
@@ -355,6 +389,30 @@ class SequenceAdapter(ExactReadContractAdapter):
             raise outcome
         assert isinstance(outcome, Mapping)
         return observation_for(request, outcome)
+
+
+class StrictResultSchemaAdapter(SequenceAdapter):
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        if operation.result_schema_id is None:
+            raise ValueError("strict test operation requires a result schema")
+        return RuntimeOutputContract(
+            schema_id=operation.result_schema_id,
+            schema_version="v1",
+            schema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["accepted"],
+                "properties": {"accepted": {"type": "boolean"}},
+            },
+            classification=operation.data_classification,
+            provider_kind="llm",
+            provider_mode="mock",
+            provider_name="strict-run-06-test",
+            provider_version="v1",
+        )
 
 
 class BudgetResultAdapter(ExactReadContractAdapter):
@@ -382,11 +440,20 @@ class BudgetResultAdapter(ExactReadContractAdapter):
         return result
 
 
-class DriftingContractAdapter(SequenceAdapter):
-    def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
-        return replace(
-            ReadAdapterContract.from_operation(operation),
-            result_schema_id="schema.adapter.drifted.result",
+class DriftingOutputSchemaAdapter(SequenceAdapter):
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        return RuntimeOutputContract(
+            schema_id=operation.result_schema_id,
+            schema_version="v1",
+            schema={"type": "object", "additionalProperties": False},
+            classification=operation.data_classification,
+            provider_kind="llm",
+            provider_mode="mock",
+            provider_name="drifted-schema-test",
+            provider_version="v1",
         )
 
 
@@ -511,16 +578,16 @@ class ParentTerminalizingAdapter(ExactReadContractAdapter):
 
 
 @pytest.mark.asyncio
-async def test_orch_06_adapter_contract_drift_precedes_attempt_and_budget_mutation(
+async def test_run_06_same_schema_id_changed_body_precedes_attempt_and_budget_mutation(
     tmp_path: Path,
 ) -> None:
-    prepared = await _prepare(tmp_path / "adapter-contract-drift.db")
-    adapter = DriftingContractAdapter([{"must": "not-call"}])
+    prepared = await _prepare(tmp_path / "result-schema-content-drift.db")
+    adapter = DriftingOutputSchemaAdapter([{"must": "not-call"}])
     try:
         with pytest.raises(ControlledReadExecutorError) as captured:
             await ControlledReadExecutor(prepared.dependencies, adapter).execute(
                 ControlledReadCommand(prepared.step_id, {"query": "safe"}),
-                audit_context=_audit_context("adapter-contract-drift"),
+                audit_context=_audit_context("result-schema-content-drift"),
             )
         assert captured.value.code == "adapter_contract_drift"
         assert adapter.calls == []
@@ -549,8 +616,12 @@ async def test_orch_06_first_start_commits_before_adapter_and_success_completes_
     prepared = await _prepare(tmp_path / "commit-before-call.db")
     adapter = DurableObservationAdapter(prepared)
     try:
+        secret_canary = "run06-attempt-secret-canary"
         result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
-            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            ControlledReadCommand(
+                prepared.step_id,
+                {"query": "safe", "api_token": secret_canary},
+            ),
             audit_context=_audit_context("execute-success"),
         )
 
@@ -562,13 +633,111 @@ async def test_orch_06_first_start_commits_before_adapter_and_success_completes_
         async with prepared.dependencies.unit_of_work() as unit_of_work:
             attempt = await unit_of_work.execution_control.get_attempt(result.attempt.id)
             step = await unit_of_work.run_steps.get(prepared.step_id)
+            operation = await unit_of_work.execution_control.get_operation(
+                prepared.step_id,
+                prepared.operation_key,
+            )
+            artifact = await unit_of_work.artifacts.get(result.attempt.output_artifact_id or "")
             timeline = await unit_of_work.audits.list_run(prepared.run_id)
         assert attempt == result.attempt and attempt.outcome is AttemptOutcome.SUCCEEDED
+        assert attempt.redacted_input == {"query": "safe", "api_token": "[REDACTED]"}
+        assert attempt.output_artifact_id is not None
+        assert artifact == result.artifact and artifact is not None
+        assert operation is not None
+        assert artifact.provenance.output_schema_id == result.step.result_schema_id
+        assert (
+            artifact.provenance.output_schema_hash
+            == adapter.output_contract_for(operation).schema_hash
+        )
         assert step == result.step
-        assert [event.safe_metadata.values["command"] for event in timeline[-2:]] == [
+        assert secret_canary not in str([event.safe_metadata.values for event in timeline])
+        step_events = [event for event in timeline if event.event_type == "step.transitioned"]
+        assert [event.safe_metadata.values["command"] for event in step_events[-2:]] == [
             "start",
             "succeed",
         ]
+        assert tuple(event.event_type for event in timeline[-3:]) == (
+            "attempt.completed",
+            "artifact.persisted",
+            "step.transitioned",
+        )
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_06_personal_attempt_input_is_fully_masked_with_incomplete_pointers(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(
+        tmp_path / "personal-input-mask.db",
+        data_classification=DataClassification.PERSONAL,
+    )
+    adapter = DurableObservationAdapter(prepared)
+    neutral_canary = "customer-reference-run06-canary"
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(
+                prepared.step_id,
+                {"query": "safe", "opaque_ref": neutral_canary},
+            ),
+            audit_context=_audit_context("personal-input-mask"),
+        )
+
+        assert result.attempt.redacted_input == {"$redacted": "[REDACTED]"}
+        async with prepared.runtime.session_factory() as session:
+            record = await session.scalar(
+                select(ExecutionAttemptRecord).where(ExecutionAttemptRecord.id == result.attempt.id)
+            )
+        assert record is not None
+        assert neutral_canary not in str(record.redacted_input)
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        assert neutral_canary not in str([event.safe_metadata.values for event in timeline])
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_06_schema_invalid_output_is_safe_and_has_no_artifact(
+    tmp_path: Path,
+) -> None:
+    strict_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["accepted"],
+        "properties": {"accepted": {"type": "boolean"}},
+    }
+    prepared = await _prepare(
+        tmp_path / "run-06-schema-invalid.db",
+        output_schema=strict_schema,
+    )
+    output_canary = "run06-provider-output-secret-canary"
+    adapter = StrictResultSchemaAdapter(
+        [{"accepted": "not-a-boolean", "provider_detail": output_canary}]
+    )
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context("run-06-schema-invalid"),
+        )
+
+        assert result.classification is ReadExecutionClassification.PERMANENT_FAILURE
+        assert result.output is None and result.artifact is None
+        assert result.attempt.safe_error_code == "output_schema_invalid"
+        assert result.attempt.output_artifact_id is None
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            artifacts = await unit_of_work.artifacts.list_for_run(prepared.run_id)
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        completion = next(event for event in timeline if event.event_type == "attempt.completed")
+        assert artifacts == ()
+        assert completion.safe_metadata.values["safe_error_code"] == "output_schema_invalid"
+        assert output_canary not in str([event.safe_metadata.values for event in timeline])
+        assert any(
+            event.event_type == "runtime.control_denied"
+            and event.safe_metadata.values["denial_code"] == "output_schema_invalid"
+            for event in timeline
+        )
     finally:
         await prepared.runtime.dispose()
 
@@ -1512,9 +1681,14 @@ async def test_orch_06_output_denial_completion_rollback_retains_open_attempt_on
                 prepared.operation_key,
             )
             timeline = await unit_of_work.audits.list_run(prepared.run_id)
+            artifacts = await unit_of_work.artifacts.list_for_run(prepared.run_id)
         assert run is not None and run.state is RunState.EXECUTING
         assert step is not None and step.state is StepState.EXECUTING
         assert len(attempts) == 1 and attempts[0].outcome is None
+        assert artifacts == ()
+        assert not any(
+            event.event_type in {"attempt.completed", "artifact.persisted"} for event in timeline
+        )
         assert not any(
             event.event_type == "runtime.control_denied"
             and event.safe_metadata.values.get("denial_code") == "output_payload_too_large"

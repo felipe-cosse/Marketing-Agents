@@ -29,11 +29,13 @@ from marketing_agents.application.ports.read_adapter import (
     ReadAdapterResult,
     ReadAdapterTransientError,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import ExternalAction
 from marketing_agents.domain.enums import Effect
 from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.runtime_policy import AttemptKind
+from marketing_agents.domain.schema_hash import canonical_schema_hash
 
 from .mock.families import MockConnectorBundle
 from .registry import (
@@ -115,11 +117,18 @@ class RegistryConnectorReadAdapter:
                 "adapter_contract_unavailable",
                 "connector READ contract is unavailable",
             ) from None
+
         metadata = registration.metadata
         if metadata.effect is not Effect.READ:
             raise ReadAdapterPermanentError(
                 "adapter_contract_invalid",
                 "write connector operations cannot execute as controlled READs",
+            )
+        result_type = registration.result_type
+        if not isinstance(result_type, type) or not issubclass(result_type, BaseModel):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registered connector output schema is unavailable",
             )
         try:
             return ReadAdapterContract(
@@ -135,6 +144,7 @@ class RegistryConnectorReadAdapter:
                 binding_configuration_revision=revision,
                 request_schema_id=metadata.request_schema_id,
                 result_schema_id=metadata.result_schema_id,
+                result_schema_hash=canonical_schema_hash(result_type.model_json_schema()),
                 request_redaction_fields=metadata.request_redaction_fields,
                 result_redaction_fields=metadata.result_redaction_fields,
                 data_classification=metadata.data_classification,
@@ -152,6 +162,35 @@ class RegistryConnectorReadAdapter:
             raise ReadAdapterPermanentError(
                 "adapter_contract_drift",
                 "current connector READ contract is incompatible with the sealed operation",
+            ) from None
+
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        """Expose the registered Pydantic result schema independently of call output."""
+
+        contract = self.contract_for(operation)
+        try:
+            registration = self._registry.resolve(operation.capability_id)
+            result_type = registration.result_type
+            if not isinstance(result_type, type) or not issubclass(result_type, BaseModel):
+                raise TypeError("registered READ result type is not a model")
+            schema = result_type.model_json_schema()
+            return RuntimeOutputContract(
+                schema_id=contract.result_schema_id,
+                schema_version="v1",
+                schema=schema,
+                classification=contract.data_classification,
+                provider_kind="connector",
+                provider_mode="mock",
+                provider_name=contract.connector_family,
+                provider_version=result_type.__name__,
+            )
+        except (ConnectorBundleConfigurationError, TypeError, ValueError):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registered connector output schema is unavailable",
             ) from None
 
     async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:

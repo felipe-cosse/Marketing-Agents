@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import WorkInsertResult
 from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import WorkItem
 from marketing_agents.domain.enums import WorkMode
 from marketing_agents.infrastructure.db.models.work import WorkItemRecord
@@ -18,6 +19,11 @@ from marketing_agents.infrastructure.db.models.work import WorkItemRecord
 
 def _plain_payload(work_item: WorkItem) -> dict[str, Any]:
     value = json.loads(canonical_json_bytes(work_item.admitted_payload))
+    return cast(dict[str, Any], value)
+
+
+def _plain_projection(work_item: WorkItem) -> dict[str, Any]:
+    value = json.loads(canonical_json_bytes(work_item.redacted_input_projection))
     return cast(dict[str, Any], value)
 
 
@@ -34,6 +40,13 @@ def _to_record(work_item: WorkItem) -> WorkItemRecord:
         campaign_brief_revision=work_item.brief_revision,
         configuration_revision=work_item.configuration_revision,
         admitted_payload=_plain_payload(work_item),
+        redacted_input_projection=_plain_projection(work_item),
+        input_schema_id=work_item.input_schema_id,
+        input_schema_hash=work_item.input_schema_hash,
+        input_classification=work_item.input_classification.value,
+        input_projection_created_at=work_item.input_projection_created_at,
+        input_projection_expires_at=work_item.input_projection_expires_at,
+        input_projection_integrity_digest=work_item.input_projection_integrity_digest,
         input_digest=work_item.input_digest,
         admission_digest=work_item.admission_digest,
         digest_key_version=work_item.digest_key_version,
@@ -58,6 +71,13 @@ def _to_domain(record: WorkItemRecord) -> WorkItem:
         brief_revision=record.campaign_brief_revision,
         digest_key_version=record.digest_key_version,
         admitted_payload=record.admitted_payload,
+        redacted_input_projection=record.redacted_input_projection,
+        input_schema_id=record.input_schema_id,
+        input_schema_hash=record.input_schema_hash,
+        input_classification=DataClassification(record.input_classification),
+        input_projection_created_at=record.input_projection_created_at,
+        input_projection_expires_at=record.input_projection_expires_at,
+        input_projection_integrity_digest=record.input_projection_integrity_digest,
     )
 
 

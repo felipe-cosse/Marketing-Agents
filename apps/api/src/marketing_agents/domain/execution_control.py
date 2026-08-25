@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.runtime_policy import AttemptKind, RateLimitScope, RetryBackoff
+from marketing_agents.domain.schema_hash import require_schema_hash
 from marketing_agents.domain.validation import (
+    frozen_json_mapping,
     require_digest,
     require_id,
     require_json_pointers,
@@ -21,6 +25,45 @@ class AttemptOutcome(StrEnum):
     TRANSIENT_FAILURE = "transient_failure"
     PERMANENT_FAILURE = "permanent_failure"
     CANCELLED = "cancelled"
+
+
+SAFE_ATTEMPT_ERROR_CODES = frozenset(
+    {
+        "adapter_cancelled",
+        "adapter_contract_drift",
+        "adapter_contract_invalid",
+        "adapter_contract_unavailable",
+        "adapter_response_mismatch",
+        "binding_mismatch",
+        "capability_mismatch",
+        "connector_read_unavailable",
+        "connector_request_rejected",
+        "connector_result_mismatch",
+        "connector_result_rejected",
+        "connector_timeout",
+        "input_schema_invalid",
+        "invalid_request",
+        "model_output_tokens_exceeded",
+        "model_output_tokens_invalid",
+        "operation_disabled",
+        "output_payload_too_large",
+        "output_schema_invalid",
+        "parent_run_terminal",
+        "run_cancelled",
+        "schema_mismatch",
+        "temporary_failure",
+        "unclassified_failure",
+        "upstream_unavailable",
+    }
+)
+
+
+def normalize_attempt_error_code(value: str | None, *, fallback: str) -> str:
+    """Collapse provider-controlled failure detail into one bounded durable code."""
+
+    if fallback not in SAFE_ATTEMPT_ERROR_CODES:
+        raise ValueError("attempt error fallback is not allowlisted")
+    return value if value in SAFE_ATTEMPT_ERROR_CODES else fallback
 
 
 def _bounded_int(value: int, name: str, minimum: int, maximum: int) -> None:
@@ -44,6 +87,7 @@ class OperationExecutionPolicy:
     binding_configuration_revision: int | None
     request_schema_id: str | None
     result_schema_id: str | None
+    result_schema_hash: str
     request_redaction_fields: tuple[str, ...]
     result_redaction_fields: tuple[str, ...]
     data_classification: DataClassification
@@ -73,6 +117,7 @@ class OperationExecutionPolicy:
         ):
             require_id(identifier, name)
         require_digest(self.policy_hash, "operation policy hash")
+        require_schema_hash(self.result_schema_hash, "operation result schema hash")
         if type(self.kind) is not AttemptKind:
             raise ValueError("operation kind must use the exact AttemptKind enum")
         if self.kind not in {AttemptKind.MODEL, AttemptKind.TOOL}:
@@ -242,6 +287,9 @@ class AttemptReservationCommand:
     expected_control_version: int
     expected_step_version: int
     reserved_at: datetime
+    redacted_input: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    input_schema_id: str | None = None
+    input_classification: DataClassification = DataClassification.INTERNAL
 
     def __post_init__(self) -> None:
         for identifier, name in (
@@ -258,6 +306,15 @@ class AttemptReservationCommand:
             if type(version) is not int or version < 1:
                 raise ValueError(f"{name} must be positive")
         require_utc(self.reserved_at, "attempt reservation time")
+        if self.input_schema_id is not None:
+            require_id(self.input_schema_id, "attempt input schema ID")
+        if type(self.input_classification) is not DataClassification:
+            raise ValueError("attempt input classification must use the exact enum")
+        object.__setattr__(
+            self,
+            "redacted_input",
+            frozen_json_mapping(self.redacted_input, "attempt redacted input"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +323,8 @@ class AttemptCompletionCommand:
     outcome: AttemptOutcome
     expected_control_version: int
     completed_at: datetime
+    safe_error_code: str | None = None
+    output_artifact_id: str | None = None
 
     def __post_init__(self) -> None:
         require_id(self.attempt_id, "attempt ID")
@@ -274,6 +333,20 @@ class AttemptCompletionCommand:
         if type(self.expected_control_version) is not int or self.expected_control_version < 1:
             raise ValueError("expected execution-control version must be positive")
         require_utc(self.completed_at, "attempt completion time")
+        if (
+            self.safe_error_code is not None
+            and self.safe_error_code not in SAFE_ATTEMPT_ERROR_CODES
+        ):
+            raise ValueError("attempt safe error code is not allowlisted")
+        if self.output_artifact_id is not None:
+            require_id(self.output_artifact_id, "attempt output artifact ID")
+        if self.outcome is AttemptOutcome.SUCCEEDED:
+            if self.safe_error_code is not None:
+                raise ValueError("successful attempt cannot retain a safe error code")
+            if self.output_artifact_id is None:
+                raise ValueError("successful attempt requires a durable output artifact")
+        elif self.output_artifact_id is not None:
+            raise ValueError("failed attempt cannot retain an output artifact")
 
 
 @dataclass(frozen=True, slots=True)
@@ -391,10 +464,15 @@ class ExecutionAttempt:
     eligible_at: datetime
     reserved_at: datetime
     call_deadline_at: datetime
+    input_schema_id: str
+    redacted_input: Mapping[str, Any] = field(repr=False)
+    input_classification: DataClassification
     outcome: AttemptOutcome | None
     completed_at: datetime | None
     retry_not_before: datetime | None
     terminal_reason_code: str | None
+    safe_error_code: str | None
+    output_artifact_id: str | None
     version: int
 
     def __post_init__(self) -> None:
@@ -406,6 +484,14 @@ class ExecutionAttempt:
         ):
             require_id(identifier, name)
         require_digest(self.policy_hash, "attempt policy hash")
+        require_id(self.input_schema_id, "attempt input schema ID")
+        if type(self.input_classification) is not DataClassification:
+            raise ValueError("attempt input classification must use the exact enum")
+        object.__setattr__(
+            self,
+            "redacted_input",
+            frozen_json_mapping(self.redacted_input, "attempt redacted input"),
+        )
         if type(self.kind) is not AttemptKind:
             raise ValueError("attempt kind must use the exact AttemptKind enum")
         if type(self.attempt_number) is not int or self.attempt_number < 1:
@@ -429,6 +515,8 @@ class ExecutionAttempt:
                 self.completed_at is not None
                 or self.retry_not_before is not None
                 or self.terminal_reason_code is not None
+                or self.safe_error_code is not None
+                or self.output_artifact_id is not None
                 or self.version != 1
             ):
                 raise ValueError("open attempts cannot retain completion state")
@@ -437,6 +525,13 @@ class ExecutionAttempt:
             raise ValueError("attempt outcome must use the exact AttemptOutcome enum")
         if self.completed_at is None or self.version != 2:
             raise ValueError("completed attempts require an exact completion version")
+        if (
+            self.safe_error_code is not None
+            and self.safe_error_code not in SAFE_ATTEMPT_ERROR_CODES
+        ):
+            raise ValueError("attempt safe error code is not allowlisted")
+        if self.output_artifact_id is not None:
+            require_id(self.output_artifact_id, "attempt output artifact ID")
         require_utc(self.completed_at, "attempt completion time")
         if self.completed_at < self.reserved_at:
             raise ValueError("attempt completion cannot precede reservation")
@@ -455,13 +550,19 @@ class ExecutionAttempt:
             }:
                 raise ValueError("terminal transient attempt reason is invalid")
         elif self.outcome is AttemptOutcome.SUCCEEDED:
-            if self.terminal_reason_code is not None:
-                raise ValueError("successful attempts cannot retain a terminal reason")
+            if (
+                self.terminal_reason_code is not None
+                or self.safe_error_code is not None
+                or self.output_artifact_id is None
+            ):
+                raise ValueError("successful attempts cannot retain failure detail")
         elif self.outcome is AttemptOutcome.PERMANENT_FAILURE:
             if self.terminal_reason_code != "permanent_failure":
                 raise ValueError("permanent attempt failure requires its exact reason")
         elif self.terminal_reason_code not in {"cancelled", "run_cancelled"}:
             raise ValueError("cancelled attempt requires an exact cancellation reason")
+        if self.outcome is not AttemptOutcome.SUCCEEDED and self.output_artifact_id is not None:
+            raise ValueError("failed attempt cannot retain an output artifact")
 
     @property
     def effective_timeout(self) -> timedelta:

@@ -21,6 +21,7 @@ from marketing_agents.application.services import (
     AuditedPlanPersistenceService,
     ExecutionActivationService,
 )
+from marketing_agents.domain.data_classification import highest_classification
 from marketing_agents.domain.execution_control import (
     AttemptCompletionCommand,
     AttemptOutcome,
@@ -29,6 +30,11 @@ from marketing_agents.domain.execution_control import (
     RunExecutionPolicy,
 )
 from marketing_agents.domain.plan_hash import EffectPlanStepHashMaterial, effect_plan_hash
+from marketing_agents.domain.provenance import (
+    ArtifactEnvelope,
+    ProvenanceSource,
+    ProviderVersion,
+)
 from marketing_agents.domain.runtime_policy import (
     BudgetPolicySnapshot,
     RateLimitPolicySnapshot,
@@ -41,6 +47,7 @@ from marketing_agents.domain.runtime_policy import (
 from marketing_agents.infrastructure.db import (
     Base,
     DatabaseRuntime,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyExecutionControlRepository,
     SQLAlchemyRepositoryFactories,
@@ -86,6 +93,7 @@ def _uow_factory(runtime: DatabaseRuntime) -> SQLAlchemyUnitOfWorkFactory:
             audits=SQLAlchemyAuditRepository,
             run_steps=SQLAlchemyRunStepRepository,
             execution_control=_execution_repository,
+            artifacts=SQLAlchemyArtifactRepository,
         ),
     )
 
@@ -105,6 +113,7 @@ def _step_hash_material(step) -> EffectPlanStepHashMaterial:  # type: ignore[no-
         binding_configuration_revision=step.binding_configuration_revision,
         request_schema_id=step.request_schema_id,
         result_schema_id=step.result_schema_id,
+        result_schema_hash=step.result_schema_hash,
         request_redaction_fields=step.request_redaction_fields,
         result_redaction_fields=step.result_redaction_fields,
         data_classification=step.data_classification,
@@ -242,6 +251,7 @@ async def _prepare(
             binding_configuration_revision=step.binding_configuration_revision,
             request_schema_id=step.request_schema_id,
             result_schema_id=step.result_schema_id,
+            result_schema_hash=step.result_schema_hash,
             request_redaction_fields=step.request_redaction_fields,
             result_redaction_fields=step.result_redaction_fields,
             data_classification=step.data_classification,
@@ -329,6 +339,67 @@ async def _complete(
     async with prepared.uow_factory() as unit_of_work:
         control = await unit_of_work.execution_control.get(prepared.policy.run_id)
         assert control is not None
+        output_artifact_id: str | None = None
+        if outcome is AttemptOutcome.SUCCEEDED:
+            attempt = await unit_of_work.execution_control.get_attempt(attempt_id)
+            run = await unit_of_work.runs.get(prepared.policy.run_id)
+            plan = await unit_of_work.run_steps.get_plan(prepared.policy.run_id)
+            assert attempt is not None and run is not None and plan is not None
+            step = await unit_of_work.run_steps.get(attempt.step_id)
+            work = await unit_of_work.works.get(run.work_item_id)
+            assert (
+                step is not None
+                and work is not None
+                and step.result_schema_id is not None
+                and step.result_schema_hash is not None
+            )
+            output_artifact_id = f"artifact.{attempt_id}"
+            artifact = ArtifactEnvelope.create(
+                payload={"ok": True},
+                artifact_id=output_artifact_id,
+                work_item_id=work.id,
+                run_id=run.id,
+                step_id=step.id,
+                workflow_id=plan.workflow_id,
+                workflow_version=str(plan.workflow_version),
+                template_id=step.template_id,
+                instance_id=step.selected_instance_id,
+                admitted_input_digest=work.input_digest,
+                catalog_hash=plan.catalog_content_hash,
+                instance_config_revision=step.configuration_revision,
+                sources=(
+                    ProvenanceSource(
+                        kind="work_input",
+                        source_id=work.id,
+                        integrity_digest=work.input_digest,
+                        classification=work.input_classification,
+                    ),
+                    ProvenanceSource(
+                        kind="external_observation",
+                        source_id=f"observation.{attempt_id}",
+                        integrity_digest=None,
+                        classification=step.data_classification,
+                    ),
+                ),
+                parent_artifact_ids=(),
+                providers=(
+                    ProviderVersion(
+                        provider_kind=("llm" if attempt.kind.value == "model" else "connector"),
+                        mode="mock",
+                        name="orch-06-test-provider",
+                        version="v1",
+                    ),
+                ),
+                output_schema_id=step.result_schema_id,
+                output_schema_version="v1",
+                output_schema_hash=step.result_schema_hash,
+                created_at=completed_at,
+                classification=highest_classification(
+                    work.input_classification,
+                    step.data_classification,
+                ),
+            )
+            await unit_of_work.artifacts.add_or_get(artifact)
         result = await unit_of_work.execution_control.complete_attempt(
             AttemptCompletionCommand(
                 attempt_id=attempt_id,
@@ -339,6 +410,7 @@ async def _complete(
                     else expected_control_version
                 ),
                 completed_at=completed_at,
+                output_artifact_id=output_artifact_id,
             )
         )
         await unit_of_work.commit()
@@ -371,7 +443,16 @@ def test_orch_06_schema_compiles_with_portable_attempt_and_capacity_fences() -> 
     assert "max_output_bytes" in operation and "max_model_output_tokens" in operation
     assert "constraint uq_execution_attempts_operation_number" in attempt
     assert "foreign key(rate_limit_scope, rate_limit_key, rate_window_started_at)" in attempt
+    assert "outcome = 'succeeded'" in attempt and "output_artifact_id is not null" in attempt
     assert "constraint ck_rate_windows_usage check (used >= 1 and used <= capacity)" in window
+
+    with pytest.raises(ValueError, match="durable output artifact"):
+        AttemptCompletionCommand(
+            attempt_id="attempt.missing-artifact",
+            outcome=AttemptOutcome.SUCCEEDED,
+            expected_control_version=1,
+            completed_at=datetime.fromisoformat("2026-08-25T12:00:00+00:00"),
+        )
 
 
 @pytest.mark.asyncio
@@ -393,6 +474,13 @@ async def test_orch_06_reservation_commits_before_call_and_completion_is_separat
             control = await observing_uow.execution_control.get(prepared.policy.run_id)
         assert durable is not None and durable.outcome is None
         assert control is not None and control.model_calls == 1
+
+        with pytest.raises(ExecutionControlRepositoryConflict) as replay_conflict:
+            await _reserve(
+                prepared,
+                replace(command, redacted_input={"neutral_field": "different"}),
+            )
+        assert replay_conflict.value.code == "attempt_id_conflict"
 
         completed_at = command.reserved_at + timedelta(seconds=1)
         completed = await _complete(
@@ -849,6 +937,7 @@ async def test_orch_06_busy_cancel_or_completion_is_sanitized_and_rolls_back(
                             outcome=AttemptOutcome.SUCCEEDED,
                             expected_control_version=reserved.control.version,
                             completed_at=command.reserved_at + timedelta(seconds=1),
+                            output_artifact_id="artifact.not-reached.busy",
                         )
                     )
         assert conflict.value.code == "stale_execution_control"
@@ -965,6 +1054,7 @@ async def test_orch_06_hmac_tamper_blocks_every_authoritative_record(
                             outcome=AttemptOutcome.SUCCEEDED,
                             expected_control_version=reserved.control.version,
                             completed_at=command.reserved_at + timedelta(seconds=1),
+                            output_artifact_id="artifact.not-reached.tamper",
                         )
                     )
                 elif target in {"operation", "operation_payload_budget"}:

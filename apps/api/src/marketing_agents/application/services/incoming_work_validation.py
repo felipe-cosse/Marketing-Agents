@@ -17,8 +17,11 @@ from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
 from marketing_agents.application.policies.runtime_guard import RuntimePolicyViolation
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.canonical_json import CanonicalJsonError, canonical_json_bytes
+from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities._validation import require_digest, require_id
 from marketing_agents.domain.enums import TriggerKind, WorkMode
+from marketing_agents.domain.validation import frozen_json_mapping
+from marketing_agents.security.redaction import redact, redaction_classification
 
 
 class IncomingWorkValidationError(ValueError):
@@ -192,6 +195,8 @@ class ValidatedIncomingWork:
 
     envelope: AdmissionEnvelope
     snapshot: WorkflowAdmissionSnapshot
+    redacted_input_projection: Mapping[str, Any] = field(repr=False)
+    input_classification: DataClassification
     _seal: object = field(repr=False, compare=False)
     _integrity_hash: str = field(repr=False, compare=False)
 
@@ -202,18 +207,48 @@ class ValidatedIncomingWork:
 def _issue_validated(
     envelope: AdmissionEnvelope,
     snapshot: WorkflowAdmissionSnapshot,
+    payload: Mapping[str, Any],
+    schema: Mapping[str, Any],
 ) -> ValidatedIncomingWork:
+    try:
+        redacted = redact(payload, schema=schema)
+        projection = redacted if isinstance(redacted, Mapping) else {"$redacted_input": redacted}
+        frozen_projection = frozen_json_mapping(projection, "redacted input projection")
+        classification = redaction_classification(payload, schema=schema)
+    except (CanonicalJsonError, TypeError, ValueError) as exc:
+        raise IncomingWorkValidationError(
+            "input_redaction_invalid",
+            "incoming payload could not produce a safe redacted projection",
+        ) from exc
+    if classification is DataClassification.SECRET:
+        raise IncomingWorkValidationError(
+            "input_secret_not_retainable",
+            "incoming payload contains data classified as non-retainable secret material",
+        )
     value = object.__new__(ValidatedIncomingWork)
     object.__setattr__(value, "envelope", envelope)
     object.__setattr__(value, "snapshot", snapshot)
+    object.__setattr__(value, "redacted_input_projection", frozen_projection)
+    object.__setattr__(value, "input_classification", classification)
     object.__setattr__(value, "_seal", _VALIDATION_SEAL)
-    object.__setattr__(value, "_integrity_hash", _validated_integrity_hash(envelope, snapshot))
+    object.__setattr__(
+        value,
+        "_integrity_hash",
+        _validated_integrity_hash(
+            envelope,
+            snapshot,
+            frozen_projection,
+            classification,
+        ),
+    )
     return value
 
 
 def _validated_integrity_hash(
     envelope: AdmissionEnvelope,
     snapshot: WorkflowAdmissionSnapshot,
+    redacted_input_projection: Mapping[str, Any],
+    input_classification: DataClassification,
 ) -> str:
     projection = {
         "envelope": {
@@ -238,6 +273,8 @@ def _validated_integrity_hash(
             "input_schema_id": snapshot.input_schema_id,
             "input_schema_hash": snapshot.input_schema_hash,
         },
+        "redacted_input_projection": redacted_input_projection,
+        "input_classification": input_classification.value,
     }
     digest = hashlib.sha256(
         b"validated-incoming-work:v1\x00" + canonical_json_bytes(projection)
@@ -247,7 +284,12 @@ def _validated_integrity_hash(
 
 def _validated_parts(
     value: object,
-) -> tuple[AdmissionEnvelope, WorkflowAdmissionSnapshot]:
+) -> tuple[
+    AdmissionEnvelope,
+    WorkflowAdmissionSnapshot,
+    Mapping[str, Any],
+    DataClassification,
+]:
     if (
         type(value) is not ValidatedIncomingWork
         or getattr(value, "_seal", None) is not _VALIDATION_SEAL
@@ -258,13 +300,28 @@ def _validated_parts(
         )
     envelope = getattr(value, "envelope", None)
     snapshot = getattr(value, "snapshot", None)
+    redacted_input_projection = getattr(value, "redacted_input_projection", None)
+    input_classification = getattr(value, "input_classification", None)
     if type(envelope) is not AdmissionEnvelope or type(snapshot) is not WorkflowAdmissionSnapshot:
         raise IncomingWorkValidationError(
             "incoming_work_not_validated",
             "work admission requires a complete validator-issued incoming-work marker",
         )
+    if not isinstance(redacted_input_projection, Mapping) or not isinstance(
+        input_classification,
+        DataClassification,
+    ):
+        raise IncomingWorkValidationError(
+            "incoming_work_not_validated",
+            "work admission requires a complete redacted incoming-work projection",
+        )
     try:
-        expected_integrity_hash = _validated_integrity_hash(envelope, snapshot)
+        expected_integrity_hash = _validated_integrity_hash(
+            envelope,
+            snapshot,
+            redacted_input_projection,
+            input_classification,
+        )
     except (CanonicalJsonError, TypeError, ValueError) as exc:
         raise IncomingWorkValidationError(
             "incoming_work_not_validated",
@@ -289,7 +346,7 @@ def _validated_parts(
             "admission_snapshot_invalid",
             "incoming work no longer matches its validator-issued admission snapshot",
         )
-    return envelope, snapshot
+    return envelope, snapshot, redacted_input_projection, input_classification
 
 
 def _validated_envelope(value: object) -> AdmissionEnvelope:
@@ -298,6 +355,13 @@ def _validated_envelope(value: object) -> AdmissionEnvelope:
 
 def _validated_snapshot(value: object) -> WorkflowAdmissionSnapshot:
     return _validated_parts(value)[1]
+
+
+def _validated_redacted_input(
+    value: object,
+) -> tuple[Mapping[str, Any], DataClassification]:
+    parts = _validated_parts(value)
+    return parts[2], parts[3]
 
 
 def _unique_by_id[RecordT](records: Sequence[RecordT], label: str) -> dict[str, RecordT]:
@@ -543,7 +607,7 @@ class IncomingWorkValidator:
             self._guard.validate_input(payload, plain_schema)
         except RuntimePolicyViolation as exc:
             raise IncomingWorkValidationError(exc.code, str(exc)) from exc
-        return _issue_validated(envelope, snapshot)
+        return _issue_validated(envelope, snapshot, payload, plain_schema)
 
     @staticmethod
     def _compare_snapshot(

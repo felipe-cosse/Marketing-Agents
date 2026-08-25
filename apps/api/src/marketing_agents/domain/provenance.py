@@ -66,6 +66,7 @@ class ArtifactProvenance(BaseModel):
     providers: tuple[ProviderVersion, ...] = Field(min_length=1, max_length=32)
     output_schema_id: str = Field(min_length=1, max_length=240)
     output_schema_version: str = Field(min_length=1, max_length=100)
+    output_schema_hash: str = Field(pattern=r"^schema-sha256-v1:[0-9a-f]{64}$")
     payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: AwareDatetime
     classification: DataClassification
@@ -128,6 +129,7 @@ class ArtifactEnvelope(BaseModel):
         providers: tuple[ProviderVersion, ...],
         output_schema_id: str,
         output_schema_version: str,
+        output_schema_hash: str,
         created_at: datetime,
         classification: DataClassification,
     ) -> ArtifactEnvelope:
@@ -148,6 +150,7 @@ class ArtifactEnvelope(BaseModel):
             providers=providers,
             output_schema_id=output_schema_id,
             output_schema_version=output_schema_version,
+            output_schema_hash=output_schema_hash,
             payload_hash=artifact_payload_hash(payload),
             created_at=created_at,
             classification=classification,
