@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,8 @@ from marketing_agents.domain.enums import (
     ExternalActionState,
     RunState,
 )
+from marketing_agents.domain.execution_control import AttemptOutcome, ExecutionAttempt
+from marketing_agents.domain.provenance import ArtifactEnvelope
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
 from marketing_agents.domain.step_lifecycle import (
@@ -231,6 +234,119 @@ class AuditEventFactory:
             previous_state=transition.previous_state.value,
             new_state=transition.new_state.value,
             reason_code=normalize_audit_reason_code(transition.reason_code),
+        )
+
+    def attempt_reserved(self, attempt: ExecutionAttempt) -> AuditEventDraft:
+        """Witness one exact durable model/tool attempt reservation."""
+
+        if type(attempt) is not ExecutionAttempt:
+            raise ValueError("attempt reservation audit requires the exact persisted attempt")
+        replace(attempt)
+        if attempt.outcome is not None or attempt.version != 1:
+            raise ValueError("attempt reservation audit requires one open attempt")
+        return self._build(
+            run_id=attempt.run_id,
+            event_type="attempt.reserved",
+            aggregate_type="execution_attempt",
+            aggregate_id=attempt.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=attempt.reserved_at,
+            metadata={
+                "attempt_kind": attempt.kind.value,
+                "attempt_number": attempt.attempt_number,
+                "input_classification": attempt.input_classification.value,
+                "input_schema_id": attempt.input_schema_id,
+                "operation_key": attempt.operation_key,
+            },
+            step_id=attempt.step_id,
+            attempt_id=attempt.id,
+            mutation_version=attempt.version,
+            previous_state=None,
+            new_state="reserved",
+        )
+
+    def attempt_completed(self, attempt: ExecutionAttempt) -> AuditEventDraft:
+        """Witness one exact terminal attempt without retaining provider detail."""
+
+        if type(attempt) is not ExecutionAttempt:
+            raise ValueError("attempt completion audit requires the exact persisted attempt")
+        replace(attempt)
+        if attempt.outcome is None or attempt.completed_at is None or attempt.version != 2:
+            raise ValueError("attempt completion audit requires one completed attempt")
+        succeeded = attempt.outcome is AttemptOutcome.SUCCEEDED
+        if succeeded:
+            if attempt.output_artifact_id is None or attempt.safe_error_code is not None:
+                raise ValueError("successful attempt audit requires its exact output artifact")
+        elif attempt.output_artifact_id is not None or attempt.safe_error_code is None:
+            raise ValueError("failed attempt audit requires one allowlisted safe error")
+        metadata: dict[str, Any] = {
+            "attempt_kind": attempt.kind.value,
+            "attempt_number": attempt.attempt_number,
+            "attempt_outcome": attempt.outcome.value,
+            "operation_key": attempt.operation_key,
+        }
+        if attempt.safe_error_code is not None:
+            metadata["safe_error_code"] = attempt.safe_error_code
+        return self._build(
+            run_id=attempt.run_id,
+            event_type="attempt.completed",
+            aggregate_type="execution_attempt",
+            aggregate_id=attempt.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=attempt.completed_at,
+            metadata=metadata,
+            step_id=attempt.step_id,
+            artifact_id=attempt.output_artifact_id,
+            attempt_id=attempt.id,
+            mutation_version=attempt.version,
+            previous_state="reserved",
+            new_state=attempt.outcome.value,
+        )
+
+    def artifact_persisted(
+        self,
+        artifact: ArtifactEnvelope,
+        attempt: ExecutionAttempt,
+    ) -> AuditEventDraft:
+        """Witness one immutable artifact produced by one succeeded attempt."""
+
+        if type(artifact) is not ArtifactEnvelope or type(attempt) is not ExecutionAttempt:
+            raise ValueError("artifact audit requires exact artifact and attempt contracts")
+        ArtifactEnvelope.model_validate(artifact.model_dump(mode="python"))
+        replace(attempt)
+        provenance = artifact.provenance
+        if not artifact.verify_payload():
+            raise ValueError("artifact audit requires an intact immutable payload hash")
+        if (
+            attempt.outcome is not AttemptOutcome.SUCCEEDED
+            or attempt.version != 2
+            or attempt.completed_at is None
+            or attempt.safe_error_code is not None
+            or attempt.output_artifact_id != provenance.artifact_id
+            or attempt.run_id != provenance.run_id
+            or attempt.step_id != provenance.step_id
+            or attempt.completed_at != provenance.created_at
+        ):
+            raise ValueError("artifact audit does not match its succeeded attempt")
+        return self._build(
+            run_id=provenance.run_id,
+            event_type="artifact.persisted",
+            aggregate_type="artifact",
+            aggregate_id=provenance.artifact_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=provenance.created_at,
+            metadata={
+                "data_classification": provenance.classification.value,
+                "output_schema_id": provenance.output_schema_id,
+                "output_schema_version": provenance.output_schema_version,
+                "output_schema_hash": provenance.output_schema_hash,
+            },
+            step_id=provenance.step_id,
+            artifact_id=provenance.artifact_id,
+            attempt_id=attempt.id,
+            mutation_version=1,
+            previous_state=None,
+            new_state="persisted",
         )
 
     def run_transition_rejected(

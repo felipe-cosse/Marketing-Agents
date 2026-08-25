@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from marketing_agents.application.orchestration import (
     DeterministicInstanceRouter,
@@ -106,6 +108,7 @@ def build_read_only_plan(
     dependent_steps: bool = False,
     parallel_steps: bool = False,
     workflow_definition_hash: str = "d" * 64,
+    output_schema: Mapping[str, Any] | None = None,
 ) -> tuple[EffectPlan, DependencyGraph, RoutingResult]:
     """Build one target-only plan through the real ORCH-04 and RUN-02 contracts."""
 
@@ -187,6 +190,7 @@ def build_read_only_plan(
         ids=_UnexpectedIds(),
         capabilities=(_Capability(),),
         templates=(template,),
+        template_output_schemas={template.id: output_schema or {"type": "object"}},
         approval_policies=(_Policy(),),
         operations=(),
         bindings=(),

@@ -18,6 +18,7 @@ from marketing_agents.application.ports.read_adapter import (
     ReadAdapterRequest,
     ReadAdapterResult,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.application.services.approval_boundaries import (
     ApprovalBoundaryDisposition,
     ApprovalBoundaryService,
@@ -61,6 +62,7 @@ from marketing_agents.domain.enums import (
     RunState,
     StepState,
 )
+from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.run_lifecycle import (
     ApprovalBarrierContext,
     CancellationContext,
@@ -101,7 +103,7 @@ from tests.integration.db.test_run_08_approval_persistence import (
 from tests.support.identity import human_principal
 from tests.support.incoming_work import validate_incoming_for_test
 from tests.support.read_adapter import ExactReadContractAdapter, observation_for
-from tests.unit.application.test_run_02_effect_aware_planning import CATALOG
+from tests.unit.application.test_run_02_effect_aware_planning import CATALOG, REGISTRY
 
 
 def _principal(suffix: str):
@@ -303,9 +305,27 @@ async def _complete_read_dependency(
     )
 
     class _ReadAdapter(ExactReadContractAdapter):
+        def output_contract_for(
+            self,
+            operation: OperationExecutionPolicy,
+        ) -> RuntimeOutputContract:
+            if operation.result_schema_id is None:
+                raise ValueError("callable test operation requires a result schema")
+            result_type = REGISTRY.resolve(operation.capability_id).result_type
+            return RuntimeOutputContract(
+                schema_id=operation.result_schema_id,
+                schema_version="v1",
+                schema=result_type.model_json_schema(),  # type: ignore[union-attr]
+                classification=operation.data_classification,
+                provider_kind="connector",
+                provider_mode="mock",
+                provider_name=operation.connector_family,
+                provider_version=result_type.__name__,
+            )
+
         async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
             assert request.step_id == ready.step.id
-            return observation_for(request, {"membership": "confirmed"})
+            return observation_for(request, {"records": []})
 
     clock.current += timedelta(seconds=1)
     completed = await ControlledReadExecutor(dependencies, _ReadAdapter()).execute(

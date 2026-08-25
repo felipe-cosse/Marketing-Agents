@@ -86,6 +86,13 @@ class RunStepRecord(Base):
             name="ck_run_steps_runtime_policy_hash",
         ),
         CheckConstraint(
+            "(result_schema_hash IS NULL AND result_schema_id IS NULL) OR "
+            "(length(result_schema_hash) = 81 AND "
+            "substr(result_schema_hash, 1, 17) = 'schema-sha256-v1:' AND "
+            "result_schema_id IS NOT NULL)",
+            name="ck_run_steps_result_schema_hash",
+        ),
+        CheckConstraint(
             "approval_expires_after_seconds IS NULL OR approval_expires_after_seconds >= 1",
             name="ck_run_steps_approval_expiry_positive",
         ),
@@ -144,6 +151,7 @@ class RunStepRecord(Base):
     binding_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     result_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    result_schema_hash: Mapped[str | None] = mapped_column(String(81), nullable=True)
     request_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     result_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     data_classification: Mapped[str] = mapped_column(String(16), nullable=False)

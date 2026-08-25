@@ -14,8 +14,9 @@ from marketing_agents.domain.runtime_policy import (
     run_policy_projection,
     step_policy_projection,
 )
+from marketing_agents.domain.schema_hash import require_schema_hash
 
-EFFECT_PLAN_HASH_DOMAIN = b"marketing-agents:effect-plan:v4\x00"
+EFFECT_PLAN_HASH_DOMAIN = b"marketing-agents:effect-plan:v5\x00"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,7 @@ class EffectPlanStepHashMaterial:
     binding_configuration_revision: int | None
     request_schema_id: str | None
     result_schema_id: str | None
+    result_schema_hash: str | None
     request_redaction_fields: tuple[str, ...]
     result_redaction_fields: tuple[str, ...]
     data_classification: DataClassification
@@ -64,6 +66,10 @@ class EffectPlanStepHashMaterial:
             )
         if type(self.runtime_policy) is not StepRuntimePolicy:
             raise ValueError("plan hash runtime policy must use the exact immutable snapshot")
+        if self.result_schema_hash is not None:
+            require_schema_hash(self.result_schema_hash, "plan hash result schema hash")
+        if (self.result_schema_id is None) != (self.result_schema_hash is None):
+            raise ValueError("plan hash result schema ID and hash must be present together")
 
 
 def effect_plan_hash(
@@ -88,7 +94,7 @@ def effect_plan_hash(
     if type(run_policy) is not RunRuntimePolicy:
         raise ValueError("plan hash run policy must use the exact immutable contract")
     projection = {
-        "version": 4,
+        "version": 5,
         "workflow_id": workflow_id,
         "workflow_version": workflow_version,
         "workflow_definition_hash": workflow_definition_hash,
@@ -114,6 +120,7 @@ def effect_plan_hash(
                 "binding_configuration_revision": step.binding_configuration_revision,
                 "request_schema_id": step.request_schema_id,
                 "result_schema_id": step.result_schema_id,
+                "result_schema_hash": step.result_schema_hash,
                 "request_redaction_fields": list(step.request_redaction_fields),
                 "result_redaction_fields": list(step.result_redaction_fields),
                 "data_classification": step.data_classification.value,

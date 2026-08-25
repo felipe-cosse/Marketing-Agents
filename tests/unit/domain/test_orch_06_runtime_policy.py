@@ -116,7 +116,7 @@ def test_orch_06_policy_projections_are_frozen_canonical_and_complete() -> None:
         "runtime-operation-sha256-v1:"
         "f7e818518c59440be7015d384a578131409066e096c96f1af1aed1cbe338d2a0"
     )
-    assert EFFECT_PLAN_HASH_DOMAIN == b"marketing-agents:effect-plan:v4\x00"
+    assert EFFECT_PLAN_HASH_DOMAIN == b"marketing-agents:effect-plan:v5\x00"
     with pytest.raises(FrozenInstanceError):
         policy.retry.max_attempts = 1  # type: ignore[misc]
 

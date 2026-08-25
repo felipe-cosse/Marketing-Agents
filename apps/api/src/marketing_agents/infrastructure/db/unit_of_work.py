@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
+    ArtifactRepository,
     AuditRepository,
     ConnectorReceiptRepository,
     ExecutionControlRepository,
@@ -35,6 +36,7 @@ class RepositoryBundle:
     external_actions: ExternalActionRepository | None = None
     connector_receipts: ConnectorReceiptRepository | None = None
     execution_control: ExecutionControlRepository | None = None
+    artifacts: ArtifactRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,7 @@ class SQLAlchemyRepositoryFactories:
     external_actions: Callable[[AsyncSession], ExternalActionRepository] | None = None
     connector_receipts: Callable[[AsyncSession], ConnectorReceiptRepository] | None = None
     execution_control: Callable[[AsyncSession], ExecutionControlRepository] | None = None
+    artifacts: Callable[[AsyncSession], ArtifactRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
@@ -64,6 +67,7 @@ class SQLAlchemyRepositoryFactories:
             execution_control=(
                 None if self.execution_control is None else self.execution_control(session)
             ),
+            artifacts=None if self.artifacts is None else self.artifacts(session),
         )
 
 
@@ -102,6 +106,13 @@ class SQLAlchemyUnitOfWork:
     @property
     def audits(self) -> AuditRepository:
         return self._require_repositories().audits
+
+    @property
+    def artifacts(self) -> ArtifactRepository:
+        repository = self._require_repositories().artifacts
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("artifact repository is not configured")
+        return repository
 
     @property
     def approvals(self) -> ApprovalRepository:

@@ -72,6 +72,7 @@ RUNTIME_CONTROL_DENIAL_CODES = frozenset(
         "model_output_tokens_invalid",
         "operation_policy_missing",
         "output_payload_too_large",
+        "output_schema_invalid",
         "permanent_failure",
         "rate_limit_conflict",
         "rate_limit_exhausted",
@@ -100,6 +101,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
         "model_output_tokens_exceeded",
         "model_output_tokens_invalid",
         "output_payload_too_large",
+        "output_schema_invalid",
         "retry_deadline_exceeded",
         "tool_budget_exhausted",
     }
@@ -111,6 +113,9 @@ _EVENT_AGGREGATES = {
     "run.plan_recorded": "run",
     "step.recorded": "step",
     "step.transitioned": "step",
+    "attempt.reserved": "execution_attempt",
+    "attempt.completed": "execution_attempt",
+    "artifact.persisted": "artifact",
     "action.proposed": "external_action",
     "action.awaiting_approval": "external_action",
     "action.approved": "external_action",
@@ -182,6 +187,31 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
             "step_kind",
             "template_id",
             "terminal_result",
+        }
+    ),
+    "attempt.reserved": frozenset(
+        {
+            "attempt_kind",
+            "attempt_number",
+            "input_classification",
+            "input_schema_id",
+            "operation_key",
+        }
+    ),
+    "attempt.completed": frozenset(
+        {
+            "attempt_kind",
+            "attempt_number",
+            "attempt_outcome",
+            "operation_key",
+        }
+    ),
+    "artifact.persisted": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
         }
     ),
     "action.proposed": frozenset({"idempotency_support"}),
@@ -290,6 +320,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     "runtime.control_denied": frozenset({"denial_code", "operation_key"}),
 }
 _EVENT_OPTIONAL_METADATA: Mapping[str, frozenset[str]] = {
+    "attempt.completed": frozenset({"safe_error_code"}),
     "runtime.control_denied": frozenset({"retry_after_seconds"}),
 }
 _RUN_COMMANDS = frozenset(
@@ -830,30 +861,39 @@ class AuditEventDraft:
             raise ValueError(
                 "approval audit aggregate requires its request, action, and step links"
             )
-        rejection_fields = (
-            self.attempt_id,
+        if self.aggregate_type == "execution_attempt" and (
+            self.aggregate_id != self.attempt_id or self.step_id is None
+        ):
+            raise ValueError("attempt audit aggregate requires its attempt and step links")
+        if self.aggregate_type == "artifact" and (
+            self.aggregate_id != self.artifact_id or self.step_id is None or self.attempt_id is None
+        ):
+            raise ValueError("artifact audit aggregate requires artifact, attempt, and step links")
+        rejection_observation_fields = (
             self.attempted_command,
             self.expected_version,
             self.observed_version,
             self.observed_state,
+            self.requested_state,
         )
         if self.aggregate_type == "run_attempt":
             if (
                 self.event_type != "run.transition_rejected"
                 or self.aggregate_id != self.attempt_id
+                or self.attempt_id is None
                 or self.mutation_version is not None
                 or self.transition_sequence is not None
                 or self.previous_state is not None
                 or self.new_state is not None
                 or self.outcome is not AuditOutcome.REJECTED
-                or any(value is None for value in rejection_fields)
+                or any(value is None for value in rejection_observation_fields)
                 or self.step_id is not None
                 or self.action_id is not None
                 or self.action_attempt_number is not None
                 or self.receipt_id is not None
             ):
                 raise ValueError("rejected run attempt has an invalid nonmutation shape")
-        elif any(value is not None for value in (*rejection_fields, self.requested_state)):
+        elif any(value is not None for value in rejection_observation_fields):
             raise ValueError("only rejected attempts may retain attempt observations")
         if self.outcome in {AuditOutcome.ACCEPTED, AuditOutcome.OBSERVED}:
             if self.mutation_version is None:
@@ -876,6 +916,31 @@ class AuditEventDraft:
                 or self.transition_sequence is None
             ):
                 raise ValueError("step audit event has invalid subject links")
+        elif self.aggregate_type == "execution_attempt":
+            if (
+                self.step_id is None
+                or self.attempt_id is None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.transition_sequence is not None
+            ):
+                raise ValueError("attempt audit event has invalid subject links")
+        elif self.aggregate_type == "artifact":
+            if (
+                self.step_id is None
+                or self.attempt_id is None
+                or self.artifact_id is None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.transition_sequence is not None
+            ):
+                raise ValueError("artifact audit event has invalid subject links")
         elif self.aggregate_type == "external_action":
             if (
                 self.step_id is None
@@ -1091,8 +1156,19 @@ def _draft_fingerprint_payload(draft: AuditEventDraft) -> Mapping[str, Any]:
 
 
 def _validate_event_semantics(draft: AuditEventDraft) -> None:
-    if draft.artifact_id is not None:
-        raise ValueError("future audit subject links are not valid for current event families")
+    attempt_link_event = draft.event_type in {
+        "run.transition_rejected",
+        "attempt.reserved",
+        "attempt.completed",
+        "artifact.persisted",
+    }
+    if attempt_link_event != (draft.attempt_id is not None):
+        raise ValueError("attempt link does not match its event family")
+    artifact_link_event = draft.event_type == "artifact.persisted" or (
+        draft.event_type == "attempt.completed" and draft.new_state == "succeeded"
+    )
+    if artifact_link_event != (draft.artifact_id is not None):
+        raise ValueError("artifact link does not match its event family")
     required_decision_witness = draft.event_type in {
         "action.approved",
         "action.rejected",
@@ -1260,6 +1336,36 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             or draft.reason_code not in allowed_reasons
         ):
             raise ValueError("rejected run audit has an invalid observation")
+    elif draft.event_type == "attempt.reserved":
+        if (
+            draft.mutation_version != 1
+            or draft.previous_state is not None
+            or draft.new_state != "reserved"
+            or draft.reason_code is not None
+        ):
+            raise ValueError("attempt reservation audit has an invalid initial state")
+    elif draft.event_type == "attempt.completed":
+        safe_error_present = "safe_error_code" in metadata
+        succeeded = draft.new_state == "succeeded"
+        if (
+            draft.mutation_version != 2
+            or draft.previous_state != "reserved"
+            or draft.new_state
+            not in {"succeeded", "transient_failure", "permanent_failure", "cancelled"}
+            or metadata["attempt_outcome"] != draft.new_state
+            or succeeded != (draft.artifact_id is not None)
+            or safe_error_present == succeeded
+            or draft.reason_code is not None
+        ):
+            raise ValueError("attempt completion audit has an invalid terminal state")
+    elif draft.event_type == "artifact.persisted":
+        if (
+            draft.mutation_version != 1
+            or draft.previous_state is not None
+            or draft.new_state != "persisted"
+            or draft.reason_code is not None
+        ):
+            raise ValueError("artifact persistence audit has an invalid initial state")
     elif draft.event_type == "step.recorded":
         if (
             draft.mutation_version != 1

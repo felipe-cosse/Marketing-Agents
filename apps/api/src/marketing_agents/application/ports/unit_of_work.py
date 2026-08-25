@@ -7,6 +7,7 @@ from typing import Protocol
 
 from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
+    ArtifactRepository,
     AuditRepository,
     ConnectorReceiptRepository,
     ExecutionControlRepository,
@@ -26,6 +27,9 @@ class UnitOfWork(Protocol):
 
     @property
     def audits(self) -> AuditRepository: ...
+
+    @property
+    def artifacts(self) -> ArtifactRepository: ...
 
     @property
     def approvals(self) -> ApprovalRepository: ...

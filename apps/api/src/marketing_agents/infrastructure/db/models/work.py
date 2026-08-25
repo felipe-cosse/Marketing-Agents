@@ -46,6 +46,24 @@ class WorkItemRecord(Base):
             "length(digest_key_version) = 89",
             name="ck_work_items_digest_key_version_length",
         ),
+        CheckConstraint(
+            "length(input_schema_hash) = 81 AND "
+            "substr(input_schema_hash, 1, 17) = 'schema-sha256-v1:'",
+            name="ck_work_items_input_schema_hash",
+        ),
+        CheckConstraint(
+            "input_classification IN ('public','internal','personal','sensitive','secret')",
+            name="ck_work_items_input_classification",
+        ),
+        CheckConstraint(
+            "input_projection_created_at = created_at AND "
+            "input_projection_expires_at > input_projection_created_at",
+            name="ck_work_items_input_projection_retention",
+        ),
+        CheckConstraint(
+            "length(input_projection_integrity_digest) = 64",
+            name="ck_work_items_input_projection_integrity_digest",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(240), primary_key=True)
@@ -59,6 +77,22 @@ class WorkItemRecord(Base):
     campaign_brief_revision: Mapped[int | None] = mapped_column(nullable=True)
     configuration_revision: Mapped[int] = mapped_column(nullable=False)
     admitted_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    redacted_input_projection: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    input_schema_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    input_schema_hash: Mapped[str] = mapped_column(String(81), nullable=False)
+    input_classification: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_projection_created_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        nullable=False,
+    )
+    input_projection_expires_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(),
+        nullable=False,
+    )
+    input_projection_integrity_digest: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
     input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     admission_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     digest_key_version: Mapped[str] = mapped_column(String(128), nullable=False)

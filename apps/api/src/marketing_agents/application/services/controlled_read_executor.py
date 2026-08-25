@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from math import ceil
 from typing import Any
+
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
 
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
 from marketing_agents.application.ports.read_adapter import (
@@ -25,14 +29,19 @@ from marketing_agents.application.ports.repositories import (
     AttemptReservationResult,
     ExecutionControlRepositoryConflict,
 )
+from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.domain.audit import (
     RUNTIME_CONTROL_DENIAL_CODES,
     TERMINAL_RUNTIME_CONTROL_DENIAL_CODES,
     AuditContext,
     AuditEventDraft,
 )
-from marketing_agents.domain.data_classification import DataClassification
-from marketing_agents.domain.entities import RunStep
+from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.data_classification import (
+    DataClassification,
+    highest_classification,
+)
+from marketing_agents.domain.entities import RunPlanSnapshot, RunStep, WorkItem
 from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.execution_control import (
     AttemptCompletionCommand,
@@ -41,6 +50,12 @@ from marketing_agents.domain.execution_control import (
     ExecutionAttempt,
     ExpiredAttemptRecoveryCommand,
     OperationExecutionPolicy,
+    normalize_attempt_error_code,
+)
+from marketing_agents.domain.provenance import (
+    ArtifactEnvelope,
+    ProvenanceSource,
+    ProviderVersion,
 )
 from marketing_agents.domain.runtime_policy import (
     AttemptKind,
@@ -56,6 +71,7 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
+from marketing_agents.security.redaction import REDACTED, redact_json_pointers
 
 from .audit_events import AuditEventFactory
 from .terminal_execution_cleanup import TerminalExecutionCleanupService
@@ -88,6 +104,24 @@ class ControlledReadExecutorError(RuntimeError):
         self.retry_after_seconds = retry_after_seconds
 
 
+def _redacted_attempt_input(
+    payload: Mapping[str, Any],
+    operation: OperationExecutionPolicy,
+) -> Mapping[str, Any]:
+    """Retain useful shape only where incomplete pointer metadata cannot expose PII."""
+
+    if operation.data_classification in {
+        DataClassification.PERSONAL,
+        DataClassification.SENSITIVE,
+        DataClassification.SECRET,
+    }:
+        return {"$redacted": REDACTED}
+    projected = redact_json_pointers(payload, operation.request_redaction_fields)
+    if not isinstance(projected, dict):  # pragma: no cover - command payload is a mapping
+        raise ValueError("attempt input projection must remain a JSON object")
+    return projected
+
+
 @dataclass(frozen=True, slots=True)
 class ControlledReadCommand:
     """Caller input contains no retry, deadline, counter, or operation authority."""
@@ -110,6 +144,7 @@ class ControlledReadResult:
     attempt: ExecutionAttempt
     step: RunStep
     output: ReadAdapterResult | None
+    artifact: ArtifactEnvelope | None
     retry_not_before: datetime | None
     cancellation_observed_after_return: bool
 
@@ -134,6 +169,8 @@ class ControlledReadResult:
         if self.classification is ReadExecutionClassification.SUCCEEDED:
             if (
                 type(self.output) is not ReadAdapterResult
+                or type(self.artifact) is not ArtifactEnvelope
+                or self.artifact.provenance.artifact_id != self.attempt.output_artifact_id
                 or self.attempt.outcome is not AttemptOutcome.SUCCEEDED
                 or self.retry_not_before is not None
                 or self.step.state is not StepState.SUCCEEDED
@@ -142,6 +179,8 @@ class ControlledReadResult:
             return
         if self.output is not None:
             raise ValueError("failed READ result cannot retain an adapter output")
+        if self.artifact is not None:
+            raise ValueError("failed READ result cannot retain an output artifact")
         if self.retry_not_before is not None:
             if (
                 self.classification
@@ -166,6 +205,7 @@ class _ReservedRead:
     reservation: AttemptReservationResult
     operation: OperationExecutionPolicy
     request: ReadAdapterRequest
+    output_contract: RuntimeOutputContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,12 +253,14 @@ class ControlledReadExecutor:
         classification: ReadExecutionClassification
         output: ReadAdapterResult | None = None
         runtime_denial_code: str | None = None
+        safe_error_code: str | None = None
         timeout_seconds = (
             reserved.reservation.attempt.call_deadline_at - self._dependencies.utc_now()
         ).total_seconds()
         try:
             if timeout_seconds <= 0:
                 classification = ReadExecutionClassification.TIMED_OUT
+                safe_error_code = "connector_timeout"
             else:
                 loop = asyncio.get_running_loop()
                 monotonic_deadline = loop.time() + timeout_seconds
@@ -231,26 +273,43 @@ class ControlledReadExecutor:
                     or returned_monotonic >= monotonic_deadline
                 ):
                     classification = ReadExecutionClassification.TIMED_OUT
+                    safe_error_code = "connector_timeout"
                 elif not _result_binds_request(candidate, reserved.request):
                     classification = ReadExecutionClassification.PERMANENT_FAILURE
+                    safe_error_code = "adapter_response_mismatch"
                 else:
                     runtime_denial_code = _result_runtime_denial_code(
                         candidate,
                         reserved.operation,
+                        reserved.output_contract,
                     )
                     if runtime_denial_code is None:
                         classification = ReadExecutionClassification.SUCCEEDED
                         output = candidate
                     else:
                         classification = ReadExecutionClassification.PERMANENT_FAILURE
-        except ReadAdapterTransientError:
+                        safe_error_code = runtime_denial_code
+        except ReadAdapterTransientError as exc:
             classification = ReadExecutionClassification.TRANSIENT_FAILURE
-        except ReadAdapterPermanentError:
+            safe_error_code = normalize_attempt_error_code(
+                exc.code,
+                fallback="unclassified_failure",
+            )
+        except ReadAdapterPermanentError as exc:
             classification = ReadExecutionClassification.PERMANENT_FAILURE
-        except ReadAdapterCancelledError:
+            safe_error_code = normalize_attempt_error_code(
+                exc.code,
+                fallback="unclassified_failure",
+            )
+        except ReadAdapterCancelledError as exc:
             classification = ReadExecutionClassification.CANCELLED
+            safe_error_code = normalize_attempt_error_code(
+                exc.code,
+                fallback="adapter_cancelled",
+            )
         except TimeoutError:
             classification = ReadExecutionClassification.TIMED_OUT
+            safe_error_code = "connector_timeout"
         except asyncio.CancelledError:
             completion = asyncio.create_task(
                 self._complete(
@@ -258,6 +317,7 @@ class ControlledReadExecutor:
                     ReadExecutionClassification.CANCELLED,
                     None,
                     runtime_denial_code=None,
+                    safe_error_code="adapter_cancelled",
                     audit_context=audit_context,
                 )
             )
@@ -265,6 +325,7 @@ class ControlledReadExecutor:
             raise
         except Exception:
             classification = ReadExecutionClassification.PERMANENT_FAILURE
+            safe_error_code = "unclassified_failure"
 
         try:
             return await self._complete(
@@ -272,6 +333,7 @@ class ControlledReadExecutor:
                 classification,
                 output,
                 runtime_denial_code=runtime_denial_code,
+                safe_error_code=safe_error_code,
                 audit_context=audit_context,
             )
         except ControlledReadExecutorError as exc:
@@ -443,6 +505,9 @@ class ControlledReadExecutor:
                         )
                     )
                     recovered_step = step
+                    recovery_events = [
+                        AuditEventFactory(audit_context).attempt_completed(completed.attempt)
+                    ]
                     if completed.retry_not_before is None:
                         transition = transition_step(
                             step,
@@ -467,13 +532,14 @@ class ControlledReadExecutor:
                                 "expired READ attempt lost its step recovery fence",
                                 step_id=step.id,
                             )
-                        await unit_of_work.audits.append(
+                        recovery_events.append(
                             AuditEventFactory(audit_context).step_transition(
                                 transition.step,
                                 transition.transition,
                             )
                         )
                         recovered_step = transition.step
+                    await unit_of_work.audits.append_many(tuple(recovery_events))
                     await unit_of_work.commit()
                     return _RecoveredRead(
                         ControlledReadResult(
@@ -489,6 +555,7 @@ class ControlledReadExecutor:
                             attempt=completed.attempt,
                             step=recovered_step,
                             output=None,
+                            artifact=None,
                             retry_not_before=completed.retry_not_before,
                             cancellation_observed_after_return=cancellation_observed,
                         )
@@ -538,6 +605,7 @@ class ControlledReadExecutor:
                 try:
                     expected_contract = ReadAdapterContract.from_operation(operation)
                     declared_contract = self._adapter.contract_for(operation)
+                    output_contract = self._adapter.output_contract_for(operation)
                 except ReadAdapterError as exc:
                     safe_code = (
                         exc.code
@@ -563,6 +631,12 @@ class ControlledReadExecutor:
                 if (
                     type(declared_contract) is not ReadAdapterContract
                     or declared_contract != expected_contract
+                    or type(output_contract) is not RuntimeOutputContract
+                    or output_contract.schema_id != expected_contract.result_schema_id
+                    or output_contract.schema_hash != operation.result_schema_hash
+                    or output_contract.classification is not expected_contract.data_classification
+                    or output_contract.provider_kind
+                    != ("llm" if operation.kind is AttemptKind.MODEL else "connector")
                 ):
                     raise ControlledReadExecutorError(
                         "adapter_contract_drift",
@@ -578,6 +652,9 @@ class ControlledReadExecutor:
                         expected_control_version=control.version,
                         expected_step_version=step.version,
                         reserved_at=reserved_at,
+                        redacted_input=_redacted_attempt_input(command.input_payload, operation),
+                        input_schema_id=expected_contract.request_schema_id,
+                        input_classification=operation.data_classification,
                     )
                 )
                 attempt = reservation.attempt
@@ -587,6 +664,7 @@ class ControlledReadExecutor:
                         "completed attempt cannot authorize another adapter call",
                         step_id=step.id,
                     )
+                reservation_events: list[AuditEventDraft] = []
                 if attempt.attempt_number == 1:
                     if step.state is not StepState.READY:
                         raise ControlledReadExecutorError(
@@ -613,7 +691,7 @@ class ControlledReadExecutor:
                             "READ step changed before its controlled attempt committed",
                             step_id=step.id,
                         )
-                    await unit_of_work.audits.append(
+                    reservation_events.append(
                         AuditEventFactory(audit_context).step_transition(
                             transition.step,
                             transition.transition,
@@ -625,6 +703,10 @@ class ControlledReadExecutor:
                         "READ retry requires its already executing step",
                         step_id=step.id,
                     )
+                reservation_events.append(
+                    AuditEventFactory(audit_context).attempt_reserved(attempt)
+                )
+                await unit_of_work.audits.append_many(tuple(reservation_events))
                 await unit_of_work.commit()
                 request = ReadAdapterRequest(
                     attempt_id=attempt.id,
@@ -637,11 +719,11 @@ class ControlledReadExecutor:
                     correlation_id=audit_context.correlation_id,
                     requested_timeout_seconds=operation.step_timeout_seconds,
                     provenance_ids=(f"work-item:{run.work_item_id}",),
-                    input_classification=DataClassification.INTERNAL,
+                    input_classification=operation.data_classification,
                     contract=expected_contract,
                     input_payload=command.input_payload,
                 )
-                return _ReservedRead(reservation, operation, request)
+                return _ReservedRead(reservation, operation, request, output_contract)
         except ControlledReadExecutorError:
             raise
         except ExecutionControlRepositoryConflict as exc:
@@ -665,8 +747,14 @@ class ControlledReadExecutor:
         output: ReadAdapterResult | None,
         *,
         runtime_denial_code: str | None,
+        safe_error_code: str | None,
         audit_context: AuditContext,
     ) -> ControlledReadResult:
+        artifact_id = (
+            self._dependencies.new_id("artifact")
+            if classification is ReadExecutionClassification.SUCCEEDED and output is not None
+            else None
+        )
         for retry_index in range(3):
             try:
                 return await self._complete_once(
@@ -674,6 +762,8 @@ class ControlledReadExecutor:
                     classification,
                     output,
                     runtime_denial_code=runtime_denial_code,
+                    safe_error_code=safe_error_code,
+                    artifact_id=artifact_id,
                     audit_context=audit_context,
                 )
             except _CompletionConflict as exc:
@@ -692,6 +782,8 @@ class ControlledReadExecutor:
         output: ReadAdapterResult | None,
         *,
         runtime_denial_code: str | None,
+        safe_error_code: str | None,
+        artifact_id: str | None,
         audit_context: AuditContext,
     ) -> ControlledReadResult:
         try:
@@ -749,27 +841,68 @@ class ControlledReadExecutor:
                 terminal_parent = run.state in {RunState.FAILED, RunState.REJECTED}
                 effective_classification = classification
                 effective_runtime_denial_code = runtime_denial_code
+                effective_safe_error_code = safe_error_code
                 if (
                     cancellation_observed
                     and classification is not ReadExecutionClassification.SUCCEEDED
                 ):
                     effective_classification = ReadExecutionClassification.CANCELLED
                     effective_runtime_denial_code = None
+                    effective_safe_error_code = "run_cancelled"
                 elif (
                     terminal_parent and classification is not ReadExecutionClassification.SUCCEEDED
                 ):
                     effective_classification = ReadExecutionClassification.PERMANENT_FAILURE
                     effective_runtime_denial_code = None
+                    effective_safe_error_code = "parent_run_terminal"
                 outcome = _attempt_outcome(effective_classification)
                 completed_at = self._dependencies.utc_now()
+                artifact: ArtifactEnvelope | None = None
+                if effective_classification is ReadExecutionClassification.SUCCEEDED:
+                    if output is None or artifact_id is None:
+                        raise ControlledReadExecutorError(
+                            "completion_state_invalid",
+                            "successful READ completion lacks its exact output identity",
+                            step_id=step.id,
+                        )
+                    work = await unit_of_work.works.get(run.work_item_id)
+                    plan = await unit_of_work.run_steps.get_plan(run.id)
+                    if work is None or plan is None:
+                        raise ControlledReadExecutorError(
+                            "completion_plan_invalid",
+                            "READ output lacks its immutable work and plan snapshot",
+                            step_id=step.id,
+                        )
+                    artifact = _build_artifact(
+                        artifact_id=artifact_id,
+                        work=work,
+                        run_id=run.id,
+                        step=step,
+                        plan=plan,
+                        output=output,
+                        output_contract=reserved.output_contract,
+                        created_at=completed_at,
+                    )
+                    stored_artifact = await unit_of_work.artifacts.add_or_get(artifact)
+                    artifact = stored_artifact.artifact
                 completed = await unit_of_work.execution_control.complete_attempt(
                     AttemptCompletionCommand(
                         attempt_id=attempt.id,
                         outcome=outcome,
                         expected_control_version=control.version,
                         completed_at=completed_at,
+                        safe_error_code=effective_safe_error_code,
+                        output_artifact_id=(
+                            None if artifact is None else artifact.provenance.artifact_id
+                        ),
                     )
                 )
+                audit_factory = AuditEventFactory(audit_context)
+                completion_events = [audit_factory.attempt_completed(completed.attempt)]
+                if artifact is not None:
+                    completion_events.append(
+                        audit_factory.artifact_persisted(artifact, completed.attempt)
+                    )
                 updated_step = step
                 if completed.retry_not_before is None:
                     if effective_runtime_denial_code is not None:
@@ -791,7 +924,7 @@ class ControlledReadExecutor:
                             denial_code=effective_runtime_denial_code,
                             occurred_at=completed_at,
                         )
-                        await unit_of_work.audits.append_many((denial_event, *cleanup.audit_events))
+                        completion_events.extend((denial_event, *cleanup.audit_events))
                         updated_step = cleanup.denied_step
                     elif effective_classification is ReadExecutionClassification.SUCCEEDED:
                         command = StepLifecycleCommand.SUCCEED
@@ -814,12 +947,11 @@ class ControlledReadExecutor:
                         )
                         if not applied:
                             raise _CompletionConflict("parent Run or READ step changed")
-                        await unit_of_work.audits.append(
-                            AuditEventFactory(audit_context).step_transition(
-                                transition.step, transition.transition
-                            )
+                        completion_events.append(
+                            audit_factory.step_transition(transition.step, transition.transition)
                         )
                         updated_step = transition.step
+                await unit_of_work.audits.append_many(tuple(completion_events))
                 await unit_of_work.commit()
                 return ControlledReadResult(
                     classification=effective_classification,
@@ -830,6 +962,7 @@ class ControlledReadExecutor:
                         if effective_classification is ReadExecutionClassification.SUCCEEDED
                         else None
                     ),
+                    artifact=artifact,
                     retry_not_before=completed.retry_not_before,
                     cancellation_observed_after_return=cancellation_observed,
                 )
@@ -871,6 +1004,7 @@ def _operation_binds_step(operation: OperationExecutionPolicy, step: RunStep) ->
         and operation.binding_configuration_revision == step.binding_configuration_revision
         and operation.request_schema_id == step.request_schema_id
         and operation.result_schema_id == step.result_schema_id
+        and operation.result_schema_hash == step.result_schema_hash
         and operation.request_redaction_fields == step.request_redaction_fields
         and operation.result_redaction_fields == step.result_redaction_fields
         and operation.data_classification is step.data_classification
@@ -888,6 +1022,69 @@ def _operation_binds_step(operation: OperationExecutionPolicy, step: RunStep) ->
         and operation.rate_limit_key == policy.rate_limit.key
         and operation.rate_window_max_calls == policy.rate_limit.max_calls
         and operation.rate_window_seconds == policy.rate_limit.window_seconds
+    )
+
+
+def _build_artifact(
+    *,
+    artifact_id: str,
+    work: WorkItem,
+    run_id: str,
+    step: RunStep,
+    plan: RunPlanSnapshot,
+    output: ReadAdapterResult,
+    output_contract: RuntimeOutputContract,
+    created_at: datetime,
+) -> ArtifactEnvelope:
+    """Construct one schema-validated output with complete immutable lineage."""
+
+    payload = json.loads(canonical_json_bytes(output.output_payload))
+    if not isinstance(payload, dict):  # pragma: no cover - result contract requires an object
+        raise ValueError("READ output payload must be a JSON object")
+    return ArtifactEnvelope.create(
+        payload=payload,
+        artifact_id=artifact_id,
+        work_item_id=work.id,
+        run_id=run_id,
+        step_id=step.id,
+        workflow_id=plan.workflow_id,
+        workflow_version=str(plan.workflow_version),
+        template_id=step.template_id,
+        instance_id=step.selected_instance_id,
+        admitted_input_digest=work.input_digest,
+        catalog_hash=plan.catalog_content_hash,
+        instance_config_revision=step.configuration_revision,
+        sources=(
+            ProvenanceSource(
+                kind="work_input",
+                source_id=work.id,
+                integrity_digest=work.input_digest,
+                classification=work.input_classification,
+            ),
+            ProvenanceSource(
+                kind="external_observation",
+                source_id=output.observation_id,
+                integrity_digest=None,
+                classification=output.classification,
+            ),
+        ),
+        parent_artifact_ids=(),
+        providers=(
+            ProviderVersion(
+                provider_kind=output_contract.provider_kind,
+                mode=output_contract.provider_mode,
+                name=output_contract.provider_name,
+                version=output_contract.provider_version,
+            ),
+        ),
+        output_schema_id=output_contract.schema_id,
+        output_schema_version=output_contract.schema_version,
+        output_schema_hash=output_contract.schema_hash,
+        created_at=created_at,
+        classification=highest_classification(
+            work.input_classification,
+            output.classification,
+        ),
     )
 
 
@@ -928,6 +1125,7 @@ def _result_binds_request(result: ReadAdapterResult, request: ReadAdapterRequest
 def _result_runtime_denial_code(
     result: ReadAdapterResult,
     operation: OperationExecutionPolicy,
+    output_contract: RuntimeOutputContract,
 ) -> str | None:
     """Validate untrusted result budgets without retaining result content or sizes."""
 
@@ -941,6 +1139,14 @@ def _result_runtime_denial_code(
             return "model_output_tokens_exceeded"
     elif tokens is not None:
         return "model_output_tokens_invalid"
+    try:
+        schema = json.loads(canonical_json_bytes(output_contract.schema))
+        Draft202012Validator.check_schema(schema)
+        plain_output = json.loads(canonical_json_bytes(result.output_payload))
+        if next(Draft202012Validator(schema).iter_errors(plain_output), None) is not None:
+            return "output_schema_invalid"
+    except (SchemaError, TypeError, ValueError):
+        return "output_schema_invalid"
     return None
 
 

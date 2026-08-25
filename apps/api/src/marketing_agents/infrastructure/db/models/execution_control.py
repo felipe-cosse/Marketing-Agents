@@ -158,7 +158,9 @@ class ExecutionOperationPolicyRecord(Base):
             name="ck_execution_operations_rate_seconds",
         ),
         CheckConstraint(
-            "length(policy_hash) = 64 AND length(integrity_digest) = 64",
+            "length(policy_hash) = 64 AND length(integrity_digest) = 64 AND "
+            "length(result_schema_hash) = 81 AND "
+            "substr(result_schema_hash, 1, 17) = 'schema-sha256-v1:'",
             name="ck_execution_operations_digests",
         ),
     )
@@ -175,6 +177,7 @@ class ExecutionOperationPolicyRecord(Base):
     binding_configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     result_schema_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    result_schema_hash: Mapped[str] = mapped_column(String(81), nullable=False)
     request_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     result_redaction_fields: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     data_classification: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -235,6 +238,12 @@ class ExecutionAttemptRecord(Base):
             "attempt_number",
             name="uq_execution_attempts_operation_number",
         ),
+        UniqueConstraint(
+            "id",
+            "run_id",
+            "step_id",
+            name="uq_execution_attempts_id_run_step",
+        ),
         ForeignKeyConstraint(
             ["run_id", "step_id", "operation_key", "policy_hash", "kind"],
             [
@@ -249,6 +258,11 @@ class ExecutionAttemptRecord(Base):
         ForeignKeyConstraint(
             ["rate_limit_scope", "rate_limit_key", "rate_window_started_at"],
             ["rate_limit_windows.scope", "rate_limit_windows.key", "rate_limit_windows.started_at"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["output_artifact_id", "run_id", "step_id"],
+            ["artifacts.id", "artifacts.run_id", "artifacts.step_id"],
             ondelete="RESTRICT",
         ),
         CheckConstraint("kind IN ('model','tool')", name="ck_execution_attempts_kind"),
@@ -269,19 +283,27 @@ class ExecutionAttemptRecord(Base):
         ),
         CheckConstraint(
             "(outcome IS NULL AND completed_at IS NULL AND retry_not_before IS NULL "
-            "AND terminal_reason_code IS NULL AND version = 1) OR "
+            "AND terminal_reason_code IS NULL AND safe_error_code IS NULL "
+            "AND output_artifact_id IS NULL AND version = 1) OR "
             "(outcome = 'succeeded' AND completed_at IS NOT NULL AND retry_not_before IS NULL "
-            "AND terminal_reason_code IS NULL AND version = 2) OR "
+            "AND terminal_reason_code IS NULL AND safe_error_code IS NULL "
+            "AND output_artifact_id IS NOT NULL AND version = 2) OR "
             "(outcome = 'transient_failure' AND completed_at IS NOT NULL AND version = 2 "
+            "AND output_artifact_id IS NULL "
             "AND ((retry_not_before IS NOT NULL AND terminal_reason_code IS NULL) OR "
             "(retry_not_before IS NULL AND terminal_reason_code IN "
             "('attempts_exhausted','retry_deadline_exceeded')))) OR "
             "(outcome = 'permanent_failure' AND completed_at IS NOT NULL "
             "AND retry_not_before IS NULL AND terminal_reason_code = 'permanent_failure' "
-            "AND version = 2) OR "
+            "AND output_artifact_id IS NULL AND version = 2) OR "
             "(outcome = 'cancelled' AND completed_at IS NOT NULL AND retry_not_before IS NULL "
-            "AND terminal_reason_code IN ('cancelled','run_cancelled') AND version = 2)",
+            "AND terminal_reason_code IN ('cancelled','run_cancelled') "
+            "AND output_artifact_id IS NULL AND version = 2)",
             name="ck_execution_attempts_completion",
+        ),
+        CheckConstraint(
+            "input_classification IN ('public','internal','personal','sensitive','secret')",
+            name="ck_execution_attempts_input_classification",
         ),
         CheckConstraint(
             "completed_at IS NULL OR completed_at >= reserved_at",
@@ -309,6 +331,9 @@ class ExecutionAttemptRecord(Base):
     eligible_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     reserved_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     call_deadline_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    input_schema_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    redacted_input: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    input_classification: Mapped[str] = mapped_column(String(16), nullable=False)
     rate_limit_scope: Mapped[str] = mapped_column(String(32), nullable=False)
     rate_limit_key: Mapped[str] = mapped_column(String(240), nullable=False)
     rate_window_started_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
@@ -316,5 +341,7 @@ class ExecutionAttemptRecord(Base):
     completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     retry_not_before: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     terminal_reason_code: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    safe_error_code: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    output_artifact_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     integrity_digest: Mapped[str] = mapped_column(String(64), nullable=False)

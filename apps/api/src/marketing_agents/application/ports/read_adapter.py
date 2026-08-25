@@ -10,6 +10,7 @@ from typing import Any, Literal, Protocol
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.runtime_policy import AttemptKind
+from marketing_agents.domain.schema_hash import require_schema_hash
 from marketing_agents.domain.validation import (
     frozen_json_mapping,
     require_digest,
@@ -17,6 +18,8 @@ from marketing_agents.domain.validation import (
     require_json_pointers,
     require_utc,
 )
+
+from .runtime_outputs import RuntimeOutputContract
 
 
 def _require_provenance_ids(values: tuple[str, ...], name: str) -> None:
@@ -44,6 +47,7 @@ class ReadAdapterContract:
     binding_configuration_revision: int | None
     request_schema_id: str
     result_schema_id: str
+    result_schema_hash: str
     request_redaction_fields: tuple[str, ...]
     result_redaction_fields: tuple[str, ...]
     data_classification: DataClassification
@@ -71,6 +75,7 @@ class ReadAdapterContract:
             AttemptKind.TOOL,
         }:
             raise ValueError("READ adapter contract kind must be model or tool")
+        require_schema_hash(self.result_schema_hash, "READ adapter contract result schema hash")
         if type(self.data_classification) is not DataClassification:
             raise ValueError("READ adapter contract classification must use the exact enum")
         if type(self.configuration_revision) is not int or self.configuration_revision < 1:
@@ -147,6 +152,7 @@ class ReadAdapterContract:
             binding_configuration_revision=operation.binding_configuration_revision,
             request_schema_id=operation.request_schema_id,
             result_schema_id=operation.result_schema_id,
+            result_schema_hash=operation.result_schema_hash,
             request_redaction_fields=operation.request_redaction_fields,
             result_redaction_fields=operation.result_redaction_fields,
             data_classification=operation.data_classification,
@@ -428,6 +434,13 @@ class ReadAdapterCancelledError(ReadAdapterError):
 class ReadAdapter(Protocol):
     def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
         """Declare exact support before any durable budget or attempt mutation."""
+        ...
+
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        """Return the exact schema/provider snapshot used for independent validation."""
         ...
 
     async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:

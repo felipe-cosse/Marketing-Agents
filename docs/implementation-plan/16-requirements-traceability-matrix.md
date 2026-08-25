@@ -74,7 +74,7 @@ Allowed status values:
 | RUN-03 | Cancellation is best effort and cannot reverse completed actions. | 03, 05, 06 | Cancellation service/timeline | Cancellation race tests | verified |
 | RUN-04 | Work idempotency uses source/event/instance or stronger. | 04, 07 | Work unique constraint | Manual/webhook replay tests | verified |
 | RUN-05 | Every action has a unique persisted key passed to connector. | 04, 06, 10 | External action/dispatcher | Constraint/contract tests | verified |
-| RUN-06 | Persist redacted inputs, transitions, selections, attempts, approvals, actions, outputs, errors, timestamps. | 04, 05, 13 | Runtime/audit schema | Timeline/redaction tests | planned |
+| RUN-06 | Persist redacted inputs, transitions, selections, attempts, approvals, actions, outputs, errors, timestamps. | 04, 05, 13 | Runtime/audit schema | Timeline/redaction tests | verified |
 | RUN-07 | Approval authorizes one immutable proposed action. | 03, 06 | Action hash/request model | Hash/tamper/reuse tests | verified |
 | RUN-08 | Store action/destination/redacted payload/hash/run/step/actor/decision/scope/times/expiry/use. | 04, 06, 09 | Tables/API projections | Persistence/API tests | verified |
 | RUN-09 | Payload changes invalidate approval. | 03, 06 | Canonical hash recompute | Payload mutation tests | verified |

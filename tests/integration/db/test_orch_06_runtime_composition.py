@@ -35,6 +35,7 @@ from marketing_agents.domain.step_lifecycle import (
 from marketing_agents.infrastructure.db import (
     DatabaseRuntime,
     ExecutionControlPersistenceConflict,
+    SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
     SQLAlchemyExecutionControlRepository,
     SQLAlchemyRepositoryFactories,
@@ -236,6 +237,7 @@ def _read_dependencies(
                 works=SQLAlchemyWorkRepository,
                 runs=run_factory,
                 audits=SQLAlchemyAuditRepository,
+                artifacts=SQLAlchemyArtifactRepository,
                 run_steps=step_factory,
                 execution_control=execution_factory,
             ),

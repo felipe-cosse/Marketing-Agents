@@ -117,6 +117,7 @@ def _operation_material(record: ExecutionOperationPolicyRecord) -> dict[str, Any
         "binding_configuration_revision": record.binding_configuration_revision,
         "request_schema_id": record.request_schema_id,
         "result_schema_id": record.result_schema_id,
+        "result_schema_hash": record.result_schema_hash,
         "request_redaction_fields": record.request_redaction_fields,
         "result_redaction_fields": record.result_redaction_fields,
         "data_classification": record.data_classification,
@@ -151,6 +152,9 @@ def _attempt_material(record: ExecutionAttemptRecord) -> dict[str, Any]:
         "eligible_at": _time(record.eligible_at),
         "reserved_at": _time(record.reserved_at),
         "call_deadline_at": _time(record.call_deadline_at),
+        "input_schema_id": record.input_schema_id,
+        "redacted_input": record.redacted_input,
+        "input_classification": record.input_classification,
         "rate_limit_scope": record.rate_limit_scope,
         "rate_limit_key": record.rate_limit_key,
         "rate_window_started_at": _time(record.rate_window_started_at),
@@ -158,6 +162,8 @@ def _attempt_material(record: ExecutionAttemptRecord) -> dict[str, Any]:
         "completed_at": _time(record.completed_at),
         "retry_not_before": _time(record.retry_not_before),
         "terminal_reason_code": record.terminal_reason_code,
+        "safe_error_code": record.safe_error_code,
+        "output_artifact_id": record.output_artifact_id,
         "version": record.version,
     }
 
@@ -255,6 +261,7 @@ class SQLAlchemyExecutionControlRepository:
                 binding_configuration_revision=record.binding_configuration_revision,
                 request_schema_id=record.request_schema_id,
                 result_schema_id=record.result_schema_id,
+                result_schema_hash=record.result_schema_hash,
                 request_redaction_fields=_redaction_tuple(
                     record.request_redaction_fields,
                     "operation request redaction fields",
@@ -305,10 +312,15 @@ class SQLAlchemyExecutionControlRepository:
                 eligible_at=record.eligible_at,
                 reserved_at=record.reserved_at,
                 call_deadline_at=record.call_deadline_at,
+                input_schema_id=record.input_schema_id,
+                redacted_input=record.redacted_input,
+                input_classification=DataClassification(record.input_classification),
                 outcome=(None if record.outcome is None else AttemptOutcome(record.outcome)),
                 completed_at=record.completed_at,
                 retry_not_before=record.retry_not_before,
                 terminal_reason_code=record.terminal_reason_code,
+                safe_error_code=record.safe_error_code,
+                output_artifact_id=record.output_artifact_id,
                 version=record.version,
             )
         except ExecutionControlPersistenceConflict:
@@ -479,6 +491,7 @@ class SQLAlchemyExecutionControlRepository:
                 or operation.binding_configuration_revision != step.binding_configuration_revision
                 or operation.request_schema_id != step.request_schema_id
                 or operation.result_schema_id != step.result_schema_id
+                or operation.result_schema_hash != step.result_schema_hash
                 or operation.request_redaction_fields != step.request_redaction_fields
                 or operation.result_redaction_fields != step.result_redaction_fields
                 or operation.data_classification is not step.data_classification
@@ -544,6 +557,7 @@ class SQLAlchemyExecutionControlRepository:
                 binding_configuration_revision=operation.binding_configuration_revision,
                 request_schema_id=operation.request_schema_id,
                 result_schema_id=operation.result_schema_id,
+                result_schema_hash=operation.result_schema_hash,
                 request_redaction_fields=list(operation.request_redaction_fields),
                 result_redaction_fields=list(operation.result_redaction_fields),
                 data_classification=operation.data_classification.value,
@@ -909,6 +923,18 @@ class SQLAlchemyExecutionControlRepository:
         operation = await self.get_operation(command.step_id, command.operation_key)
         if operation is None:
             _raise_corrupt("reserved attempt has no operation policy")
+        expected_schema_id = command.input_schema_id or operation.request_schema_id
+        if (
+            expected_schema_id is None
+            or attempt.input_schema_id != expected_schema_id
+            or attempt.redacted_input != command.redacted_input
+            or attempt.input_classification is not command.input_classification
+            or attempt.input_classification is not operation.data_classification
+        ):
+            raise ExecutionControlPersistenceConflict(
+                "attempt_id_conflict",
+                "attempt ID already binds different input audit facts",
+            )
         window_start = fixed_window_start(command.reserved_at, operation.rate_window_seconds)
         window = await self.get_rate_window(
             operation.rate_limit_scope, operation.rate_limit_key, window_start
@@ -1086,6 +1112,20 @@ class SQLAlchemyExecutionControlRepository:
         window_record.integrity_digest = rate_limit_window_record_digest(
             _window_material(window_record), self._integrity_key
         )
+        input_schema_id = command.input_schema_id or operation.request_schema_id
+        if input_schema_id is None or (
+            command.input_schema_id is not None
+            and command.input_schema_id != operation.request_schema_id
+        ):
+            raise ExecutionControlPersistenceConflict(
+                "execution_policy_conflict",
+                "attempt input schema differs from the immutable operation policy",
+            )
+        if command.input_classification is not operation.data_classification:
+            raise ExecutionControlPersistenceConflict(
+                "execution_policy_conflict",
+                "attempt input classification differs from the immutable operation policy",
+            )
         attempt = ExecutionAttempt(
             id=command.attempt_id,
             run_id=command.run_id,
@@ -1099,10 +1139,15 @@ class SQLAlchemyExecutionControlRepository:
             eligible_at=eligible_at,
             reserved_at=command.reserved_at,
             call_deadline_at=call_deadline,
+            input_schema_id=input_schema_id,
+            redacted_input=command.redacted_input,
+            input_classification=command.input_classification,
             outcome=None,
             completed_at=None,
             retry_not_before=None,
             terminal_reason_code=None,
+            safe_error_code=None,
+            output_artifact_id=None,
             version=1,
         )
         attempt_record = ExecutionAttemptRecord(
@@ -1118,6 +1163,9 @@ class SQLAlchemyExecutionControlRepository:
             eligible_at=attempt.eligible_at,
             reserved_at=attempt.reserved_at,
             call_deadline_at=attempt.call_deadline_at,
+            input_schema_id=attempt.input_schema_id,
+            redacted_input=dict(attempt.redacted_input),
+            input_classification=attempt.input_classification.value,
             rate_limit_scope=operation.rate_limit_scope.value,
             rate_limit_key=operation.rate_limit_key,
             rate_window_started_at=window_start,
@@ -1125,6 +1173,8 @@ class SQLAlchemyExecutionControlRepository:
             completed_at=None,
             retry_not_before=None,
             terminal_reason_code=None,
+            safe_error_code=None,
+            output_artifact_id=None,
             version=1,
             integrity_digest="",
         )
@@ -1517,6 +1567,15 @@ class SQLAlchemyExecutionControlRepository:
             if (
                 replay_outcome_matches
                 and attempt.completed_at == command.completed_at
+                and (
+                    attempt.output_artifact_id == command.output_artifact_id
+                    if attempt.outcome is AttemptOutcome.SUCCEEDED
+                    else attempt.output_artifact_id is None
+                )
+                and (
+                    command.safe_error_code is None
+                    or attempt.safe_error_code == command.safe_error_code
+                )
                 and control.version >= command.expected_control_version + 1
             ):
                 return AttemptCompletionResult(attempt=attempt, completed=False)
@@ -1557,6 +1616,18 @@ class SQLAlchemyExecutionControlRepository:
                 effective_outcome = AttemptOutcome.CANCELLED
             elif terminal_parent:
                 effective_outcome = AttemptOutcome.PERMANENT_FAILURE
+        safe_error_code = command.safe_error_code
+        if effective_outcome is AttemptOutcome.SUCCEEDED:
+            safe_error_code = None
+        elif cancellation_fenced:
+            safe_error_code = "run_cancelled"
+        elif terminal_parent:
+            safe_error_code = "parent_run_terminal"
+        elif safe_error_code is None:
+            safe_error_code = "unclassified_failure"
+        output_artifact_id = (
+            command.output_artifact_id if effective_outcome is AttemptOutcome.SUCCEEDED else None
+        )
         current_record = (
             await self._session.execute(
                 select(ExecutionAttemptRecord)
@@ -1602,10 +1673,15 @@ class SQLAlchemyExecutionControlRepository:
             eligible_at=attempt.eligible_at,
             reserved_at=attempt.reserved_at,
             call_deadline_at=attempt.call_deadline_at,
+            input_schema_id=attempt.input_schema_id,
+            redacted_input=attempt.redacted_input,
+            input_classification=attempt.input_classification,
             outcome=effective_outcome,
             completed_at=command.completed_at,
             retry_not_before=retry_not_before,
             terminal_reason_code=terminal_reason,
+            safe_error_code=safe_error_code,
+            output_artifact_id=output_artifact_id,
             version=2,
         )
         record = ExecutionAttemptRecord(
@@ -1621,6 +1697,9 @@ class SQLAlchemyExecutionControlRepository:
             eligible_at=completed.eligible_at,
             reserved_at=completed.reserved_at,
             call_deadline_at=completed.call_deadline_at,
+            input_schema_id=completed.input_schema_id,
+            redacted_input=dict(completed.redacted_input),
+            input_classification=completed.input_classification.value,
             rate_limit_scope=operation.rate_limit_scope.value,
             rate_limit_key=operation.rate_limit_key,
             rate_window_started_at=fixed_window_start(
@@ -1630,6 +1709,8 @@ class SQLAlchemyExecutionControlRepository:
             completed_at=completed.completed_at,
             retry_not_before=completed.retry_not_before,
             terminal_reason_code=completed.terminal_reason_code,
+            safe_error_code=completed.safe_error_code,
+            output_artifact_id=completed.output_artifact_id,
             version=completed.version,
             integrity_digest="",
         )
@@ -1707,6 +1788,8 @@ class SQLAlchemyExecutionControlRepository:
                         completed_at=record.completed_at,
                         retry_not_before=record.retry_not_before,
                         terminal_reason_code=record.terminal_reason_code,
+                        safe_error_code=record.safe_error_code,
+                        output_artifact_id=record.output_artifact_id,
                         version=2,
                         integrity_digest=digest,
                     )
@@ -1837,6 +1920,15 @@ class SQLAlchemyExecutionControlRepository:
                         outcome=current_outcome,
                         expected_control_version=current_control.version,
                         completed_at=command.recovered_at,
+                        safe_error_code=(
+                            "run_cancelled"
+                            if current_outcome is AttemptOutcome.CANCELLED
+                            else (
+                                "parent_run_terminal"
+                                if current_outcome is AttemptOutcome.PERMANENT_FAILURE
+                                else "connector_timeout"
+                            )
+                        ),
                     )
                 )
             except ExecutionControlPersistenceConflict as exc:
