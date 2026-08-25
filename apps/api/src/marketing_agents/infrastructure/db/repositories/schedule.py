@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,15 +15,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import (
     ScheduleInsertResult,
+    ScheduleOccurrenceInsertResult,
+    ScheduleOccurrenceLinkResult,
     ScheduleRepositoryConflict,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
-from marketing_agents.domain.entities import Schedule, ScheduleClaim
-from marketing_agents.domain.enums import MisfirePolicy
+from marketing_agents.domain.entities import Schedule, ScheduleClaim, ScheduleOccurrence
+from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState
+from marketing_agents.domain.schedule_occurrence_identity import (
+    SCHEDULE_OCCURRENCE_ID_SCHEME,
+)
 from marketing_agents.domain.validation import require_id, require_utc
-from marketing_agents.infrastructure.db.models.schedule import ScheduleRecord
+from marketing_agents.infrastructure.db.models.run import RunRecord
+from marketing_agents.infrastructure.db.models.schedule import (
+    ScheduleOccurrenceRecord,
+    ScheduleRecord,
+)
 
 _SCHEDULE_INTEGRITY_DOMAIN = b"marketing-agents:schedule:persistence:v1\x00"
+_OCCURRENCE_INTEGRITY_DOMAIN = b"marketing-agents:schedule-occurrence:persistence:v1\x00"
 
 
 class SchedulePersistenceConflict(ScheduleRepositoryConflict):
@@ -42,8 +53,10 @@ def _integrity_material(
     schedule_id: str,
     trigger_id: str,
     instance_id: str,
+    workflow_id: str,
     cron_expression: str,
     timezone_name: str,
+    recurrence_version: str,
     next_run_at_utc: datetime,
     misfire_policy: str,
     enabled: bool,
@@ -56,8 +69,10 @@ def _integrity_material(
         "id": schedule_id,
         "trigger_id": trigger_id,
         "instance_id": instance_id,
+        "workflow_id": workflow_id,
         "cron_expression": cron_expression,
         "timezone_name": timezone_name,
+        "recurrence_version": recurrence_version,
         "next_run_at_utc": _timestamp_material(next_run_at_utc),
         "misfire_policy": misfire_policy,
         "enabled": enabled,
@@ -77,8 +92,10 @@ def _schedule_material(schedule: Schedule) -> dict[str, Any]:
         schedule_id=schedule.id,
         trigger_id=schedule.trigger_id,
         instance_id=schedule.instance_id,
+        workflow_id=schedule.workflow_id,
         cron_expression=schedule.cron,
         timezone_name=schedule.timezone,
+        recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
         misfire_policy=schedule.misfire_policy.value,
         enabled=schedule.enabled,
@@ -94,8 +111,10 @@ def _record_material(record: ScheduleRecord) -> dict[str, Any]:
         schedule_id=record.id,
         trigger_id=record.trigger_id,
         instance_id=record.instance_id,
+        workflow_id=record.workflow_id,
         cron_expression=record.cron_expression,
         timezone_name=record.timezone_name,
+        recurrence_version=record.recurrence_version,
         next_run_at_utc=record.next_run_at_utc,
         misfire_policy=record.misfire_policy,
         enabled=record.enabled,
@@ -123,8 +142,10 @@ def _to_record(schedule: Schedule) -> ScheduleRecord:
         id=schedule.id,
         trigger_id=schedule.trigger_id,
         instance_id=schedule.instance_id,
+        workflow_id=schedule.workflow_id,
         cron_expression=schedule.cron,
         timezone_name=schedule.timezone,
+        recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
         misfire_policy=schedule.misfire_policy.value,
         enabled=schedule.enabled,
@@ -155,6 +176,7 @@ def _claim_from_record(record: ScheduleRecord) -> ScheduleClaim | None:
             lease_owner=lease_owner,
             claimed_at_utc=claimed_at_utc,
             lease_expires_at_utc=lease_expires_at_utc,
+            recurrence_version=record.recurrence_version,
             version=record.version,
         )
     except (TypeError, ValueError) as exc:
@@ -182,11 +204,13 @@ def _to_domain(record: ScheduleRecord) -> Schedule:
             id=record.id,
             trigger_id=record.trigger_id,
             instance_id=record.instance_id,
+            workflow_id=record.workflow_id,
             cron=record.cron_expression,
             timezone=record.timezone_name,
             next_run_at_utc=record.next_run_at_utc,
             misfire_policy=MisfirePolicy(record.misfire_policy),
             enabled=record.enabled,
+            recurrence_version=record.recurrence_version,
             version=record.version,
         )
         _claim_from_record(record)
@@ -205,11 +229,148 @@ def _creation_facts(schedule: Schedule) -> tuple[Any, ...]:
         schedule.id,
         schedule.trigger_id,
         schedule.instance_id,
+        schedule.workflow_id,
         schedule.cron,
         schedule.timezone,
+        schedule.recurrence_version,
         schedule.next_run_at_utc,
         schedule.misfire_policy,
         schedule.enabled,
+    )
+
+
+def _occurrence_material(
+    *,
+    occurrence_id: str,
+    identity_scheme: str,
+    schedule_id: str,
+    scheduled_for_utc: datetime,
+    scheduled_local: str,
+    timezone_name: str,
+    timezone_fold: int,
+    recurrence_version: str,
+    state: str,
+    work_item_id: str | None,
+    run_id: str | None,
+) -> dict[str, Any]:
+    return {
+        "id": occurrence_id,
+        "identity_scheme": identity_scheme,
+        "schedule_id": schedule_id,
+        "scheduled_for_utc": _timestamp_material(scheduled_for_utc),
+        "scheduled_local": scheduled_local,
+        "timezone_name": timezone_name,
+        "timezone_fold": timezone_fold,
+        "recurrence_version": recurrence_version,
+        "state": state,
+        "work_item_id": work_item_id,
+        "run_id": run_id,
+    }
+
+
+def _occurrence_digest(material: dict[str, Any]) -> str:
+    return hashlib.sha256(_OCCURRENCE_INTEGRITY_DOMAIN + canonical_json_bytes(material)).hexdigest()
+
+
+def _occurrence_domain_material(occurrence: ScheduleOccurrence) -> dict[str, Any]:
+    return _occurrence_material(
+        occurrence_id=occurrence.id,
+        identity_scheme=SCHEDULE_OCCURRENCE_ID_SCHEME,
+        schedule_id=occurrence.schedule_id,
+        scheduled_for_utc=occurrence.scheduled_for_utc,
+        scheduled_local=occurrence.scheduled_local,
+        timezone_name=occurrence.timezone,
+        timezone_fold=occurrence.timezone_fold,
+        recurrence_version=occurrence.recurrence_version,
+        state=occurrence.state.value,
+        work_item_id=occurrence.work_item_id,
+        run_id=occurrence.run_id,
+    )
+
+
+def _occurrence_record_material(record: ScheduleOccurrenceRecord) -> dict[str, Any]:
+    return _occurrence_material(
+        occurrence_id=record.id,
+        identity_scheme=record.identity_scheme,
+        schedule_id=record.schedule_id,
+        scheduled_for_utc=record.scheduled_for_utc,
+        scheduled_local=record.scheduled_local,
+        timezone_name=record.timezone_name,
+        timezone_fold=record.timezone_fold,
+        recurrence_version=record.recurrence_version,
+        state=record.state,
+        work_item_id=record.work_item_id,
+        run_id=record.run_id,
+    )
+
+
+def _occurrence_to_record(occurrence: ScheduleOccurrence) -> ScheduleOccurrenceRecord:
+    if type(occurrence) is not ScheduleOccurrence:
+        raise SchedulePersistenceConflict(
+            "occurrence_invalid",
+            "occurrence persistence requires one exact validated ScheduleOccurrence",
+        )
+    material = _occurrence_domain_material(occurrence)
+    return ScheduleOccurrenceRecord(
+        id=occurrence.id,
+        identity_scheme=SCHEDULE_OCCURRENCE_ID_SCHEME,
+        schedule_id=occurrence.schedule_id,
+        scheduled_for_utc=occurrence.scheduled_for_utc,
+        scheduled_local=occurrence.scheduled_local,
+        timezone_name=occurrence.timezone,
+        timezone_fold=occurrence.timezone_fold,
+        recurrence_version=occurrence.recurrence_version,
+        state=occurrence.state.value,
+        work_item_id=occurrence.work_item_id,
+        run_id=occurrence.run_id,
+        integrity_digest=_occurrence_digest(material),
+    )
+
+
+def _occurrence_to_domain(record: ScheduleOccurrenceRecord) -> ScheduleOccurrence:
+    try:
+        observed_digest = _occurrence_digest(_occurrence_record_material(record))
+    except (TypeError, ValueError) as exc:
+        raise SchedulePersistenceConflict(
+            "occurrence_tampered",
+            "persisted schedule occurrence is not canonical",
+        ) from exc
+    if record.identity_scheme != SCHEDULE_OCCURRENCE_ID_SCHEME or not hmac.compare_digest(
+        record.integrity_digest, observed_digest
+    ):
+        raise SchedulePersistenceConflict(
+            "occurrence_tampered",
+            "persisted schedule occurrence integrity does not match",
+        )
+    try:
+        return ScheduleOccurrence(
+            id=record.id,
+            schedule_id=record.schedule_id,
+            scheduled_for_utc=record.scheduled_for_utc,
+            scheduled_local=record.scheduled_local,
+            timezone=record.timezone_name,
+            timezone_fold=record.timezone_fold,
+            recurrence_version=record.recurrence_version,
+            state=OccurrenceState(record.state),
+            work_item_id=record.work_item_id,
+            run_id=record.run_id,
+        )
+    except (TypeError, ValueError) as exc:
+        raise SchedulePersistenceConflict(
+            "occurrence_tampered",
+            "persisted schedule occurrence is invalid",
+        ) from exc
+
+
+def _occurrence_identity_facts(occurrence: ScheduleOccurrence) -> tuple[Any, ...]:
+    return (
+        occurrence.id,
+        occurrence.schedule_id,
+        occurrence.scheduled_for_utc,
+        occurrence.scheduled_local,
+        occurrence.timezone,
+        occurrence.timezone_fold,
+        occurrence.recurrence_version,
     )
 
 
@@ -235,6 +396,90 @@ class SQLAlchemyScheduleRepository:
             return None
         _to_domain(record)
         return _claim_from_record(record)
+
+    async def fence_claim(
+        self,
+        claim: ScheduleClaim,
+        *,
+        now: datetime,
+    ) -> bool:
+        """Acquire a transaction-scoped write fence over one exact active lease."""
+
+        if type(claim) is not ScheduleClaim:
+            raise ValueError("schedule processing requires an exact ScheduleClaim")
+        require_utc(now, "schedule processing boundary")
+        if now < claim.claimed_at_utc or claim.lease_expires_at_utc < now:
+            return False
+
+        current_statement = (
+            select(ScheduleRecord)
+            .where(ScheduleRecord.id == claim.schedule_id)
+            .execution_options(populate_existing=True)
+        )
+        current = (await self._session.execute(current_statement)).scalar_one_or_none()
+        if current is None:
+            return False
+        _to_domain(current)
+        if _claim_from_record(current) != claim:
+            return False
+
+        statement = (
+            update(ScheduleRecord)
+            .where(
+                ScheduleRecord.id == claim.schedule_id,
+                ScheduleRecord.version == claim.version,
+                ScheduleRecord.integrity_digest == current.integrity_digest,
+                ScheduleRecord.enabled.is_(True),
+                ScheduleRecord.next_run_at_utc == claim.scheduled_for_utc,
+                ScheduleRecord.recurrence_version == claim.recurrence_version,
+                ScheduleRecord.lease_owner == claim.lease_owner,
+                ScheduleRecord.lease_claimed_at_utc == claim.claimed_at_utc,
+                ScheduleRecord.lease_expires_at_utc == claim.lease_expires_at_utc,
+                ScheduleRecord.lease_claimed_at_utc <= now,
+                ScheduleRecord.lease_expires_at_utc >= now,
+            )
+            .values(integrity_digest=current.integrity_digest)
+            .returning(ScheduleRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            fenced_id = (await self._session.execute(statement)).scalar_one_or_none()
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return False
+            raise
+        return fenced_id == claim.schedule_id
+
+    async def get_occurrence(
+        self,
+        occurrence_id: str,
+    ) -> ScheduleOccurrence | None:
+        require_id(occurrence_id, "occurrence ID")
+        statement = (
+            select(ScheduleOccurrenceRecord)
+            .where(ScheduleOccurrenceRecord.id == occurrence_id)
+            .execution_options(populate_existing=True)
+        )
+        record = (await self._session.execute(statement)).scalar_one_or_none()
+        return None if record is None else _occurrence_to_domain(record)
+
+    async def get_occurrence_by_schedule_due(
+        self,
+        schedule_id: str,
+        scheduled_for_utc: datetime,
+    ) -> ScheduleOccurrence | None:
+        require_id(schedule_id, "occurrence schedule ID")
+        require_utc(scheduled_for_utc, "scheduled occurrence time")
+        statement = (
+            select(ScheduleOccurrenceRecord)
+            .where(
+                ScheduleOccurrenceRecord.schedule_id == schedule_id,
+                ScheduleOccurrenceRecord.scheduled_for_utc == scheduled_for_utc,
+            )
+            .execution_options(populate_existing=True)
+        )
+        record = (await self._session.execute(statement)).scalar_one_or_none()
+        return None if record is None else _occurrence_to_domain(record)
 
     async def list_claimable_due(
         self,
@@ -318,8 +563,10 @@ class SQLAlchemyScheduleRepository:
                 schedule_id=current.id,
                 trigger_id=current.trigger_id,
                 instance_id=current.instance_id,
+                workflow_id=current.workflow_id,
                 cron_expression=current.cron_expression,
                 timezone_name=current.timezone_name,
+                recurrence_version=current.recurrence_version,
                 next_run_at_utc=current.next_run_at_utc,
                 misfire_policy=current.misfire_policy,
                 enabled=current.enabled,
@@ -405,3 +652,143 @@ class SQLAlchemyScheduleRepository:
                 ) from exc
             return ScheduleInsertResult(existing, inserted=False)
         return ScheduleInsertResult(schedule, inserted=True)
+
+    async def add_occurrence_or_get(
+        self,
+        occurrence: ScheduleOccurrence,
+    ) -> ScheduleOccurrenceInsertResult:
+        if (
+            type(occurrence) is not ScheduleOccurrence
+            or occurrence.state is not OccurrenceState.CLAIMED
+            or occurrence.work_item_id is not None
+            or occurrence.run_id is not None
+        ):
+            raise SchedulePersistenceConflict(
+                "occurrence_invalid",
+                "new schedule occurrence must be one unlinked claimed occurrence",
+            )
+        record = _occurrence_to_record(occurrence)
+        try:
+            async with self._session.begin_nested():
+                self._session.add(record)
+                await self._session.flush()
+        except IntegrityError as exc:
+            existing = await self.get_occurrence(occurrence.id)
+            if existing is not None:
+                if _occurrence_identity_facts(existing) != _occurrence_identity_facts(occurrence):
+                    raise SchedulePersistenceConflict(
+                        "occurrence_id_conflict",
+                        "occurrence ID already identifies different immutable facts",
+                    ) from exc
+                return ScheduleOccurrenceInsertResult(existing, inserted=False)
+            due_existing = await self.get_occurrence_by_schedule_due(
+                occurrence.schedule_id,
+                occurrence.scheduled_for_utc,
+            )
+            if due_existing is not None:
+                raise SchedulePersistenceConflict(
+                    "occurrence_identity_conflict",
+                    "schedule and due instant already identify another occurrence",
+                ) from exc
+            raise SchedulePersistenceConflict(
+                "occurrence_insert_conflict",
+                "occurrence could not be inserted with its exact identity",
+            ) from exc
+        return ScheduleOccurrenceInsertResult(occurrence, inserted=True)
+
+    async def mark_occurrence_enqueued(
+        self,
+        *,
+        occurrence_id: str,
+        work_item_id: str,
+        run_id: str,
+    ) -> ScheduleOccurrenceLinkResult:
+        require_id(occurrence_id, "occurrence ID")
+        require_id(work_item_id, "occurrence WorkItem ID")
+        require_id(run_id, "occurrence Run ID")
+        run_work_item_id = await self._session.scalar(
+            select(RunRecord.work_item_id).where(RunRecord.id == run_id)
+        )
+        if run_work_item_id != work_item_id:
+            raise SchedulePersistenceConflict(
+                "occurrence_receipt_conflict",
+                "occurrence Run does not belong to the supplied WorkItem",
+            )
+        current = await self.get_occurrence(occurrence_id)
+        if current is None:
+            raise SchedulePersistenceConflict(
+                "occurrence_missing",
+                "occurrence must exist before its receipt can be linked",
+            )
+        if current.state is OccurrenceState.ENQUEUED:
+            if current.work_item_id != work_item_id or current.run_id != run_id:
+                raise SchedulePersistenceConflict(
+                    "occurrence_receipt_conflict",
+                    "occurrence already links a different WorkItem or Run",
+                )
+            return ScheduleOccurrenceLinkResult(current, linked=False)
+        if (
+            current.state is not OccurrenceState.CLAIMED
+            or current.work_item_id is not None
+            or current.run_id is not None
+        ):
+            raise SchedulePersistenceConflict(
+                "occurrence_state_conflict",
+                "only one unlinked claimed occurrence can become enqueued",
+            )
+
+        linked = replace(
+            current,
+            state=OccurrenceState.ENQUEUED,
+            work_item_id=work_item_id,
+            run_id=run_id,
+        )
+        current_record = await self._session.get(ScheduleOccurrenceRecord, occurrence_id)
+        if current_record is None:
+            raise SchedulePersistenceConflict(
+                "occurrence_missing",
+                "occurrence disappeared before its receipt could be linked",
+            )
+        _occurrence_to_domain(current_record)
+        expected_digest = current_record.integrity_digest
+        new_digest = _occurrence_digest(_occurrence_domain_material(linked))
+        statement = (
+            update(ScheduleOccurrenceRecord)
+            .where(
+                ScheduleOccurrenceRecord.id == occurrence_id,
+                ScheduleOccurrenceRecord.integrity_digest == expected_digest,
+                ScheduleOccurrenceRecord.state == OccurrenceState.CLAIMED.value,
+                ScheduleOccurrenceRecord.work_item_id.is_(None),
+                ScheduleOccurrenceRecord.run_id.is_(None),
+            )
+            .values(
+                state=OccurrenceState.ENQUEUED.value,
+                work_item_id=work_item_id,
+                run_id=run_id,
+                integrity_digest=new_digest,
+            )
+            .returning(ScheduleOccurrenceRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            async with self._session.begin_nested():
+                linked_id = (await self._session.execute(statement)).scalar_one_or_none()
+        except IntegrityError as exc:
+            raise SchedulePersistenceConflict(
+                "occurrence_receipt_conflict",
+                "WorkItem or Run already belongs to another occurrence",
+            ) from exc
+        if linked_id is None:
+            fresh = await self.get_occurrence(occurrence_id)
+            if (
+                fresh is not None
+                and fresh.state is OccurrenceState.ENQUEUED
+                and fresh.work_item_id == work_item_id
+                and fresh.run_id == run_id
+            ):
+                return ScheduleOccurrenceLinkResult(fresh, linked=False)
+            raise SchedulePersistenceConflict(
+                "occurrence_receipt_conflict",
+                "occurrence changed before its receipt could be linked",
+            )
+        return ScheduleOccurrenceLinkResult(linked, linked=True)

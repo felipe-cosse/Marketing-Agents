@@ -1,0 +1,144 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SCHED-03",
+  "matrix_statement_sha256": "51548436d593d807c7ac660388426ba39db3f8533f318cb52c028ade79ed4cc1",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/schedule_occurrence_identity.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/SCHED-03.json",
+      "docs/verification/requirements/SCHED-03.md",
+      "tests/integration/db/test_sched_01_schedule_persistence.py",
+      "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+      "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/scheduler/test_sched_01_recurrence.py",
+      "tests/unit/scheduler/test_sched_03_occurrence_identity.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/schedule_occurrence_identity.py",
+          "apps/api/src/marketing_agents/domain/entities/control.py",
+          "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/scheduler/test_sched_03_occurrence_identity.py",
+          "tests/integration/scheduler/test_sched_03_occurrence_ingress.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "versioned-stable-occurrence-identity",
+      "type": "contract",
+      "statement": "A domain-separated canonical SHA-256 occurrence ID derives only from the exact schedule ID, persisted scheduled UTC instant, and persisted recurrence-semantics version. Worker, claim time, expiry, fencing version, processing time, routing, and payload do not affect it; changed schedule, due instant, or recurrence version changes it, while the local timezone representation and fold remain a separate durable snapshot.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_occurrence_id_has_a_fixed_known_vector",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_occurrence_id_ignores_claim_worker_and_restart_facts",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_occurrence_id_changes_with_each_immutable_identity_fact",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_local_snapshot_records_which_fall_back_instant_was_chosen",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_occurrence_rejects_a_false_local_or_fold_snapshot",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py::test_sched_03_occurrence_id_rejects_invalid_identity_inputs"
+      ]
+    },
+    {
+      "id": "constraint-backed-occurrence-replay",
+      "type": "negative_control",
+      "statement": "Each occurrence is sealed and constrained by primary occurrence ID, unique schedule and due instant, unique complete WorkItem and Run links, restrictive foreign keys, supported fold and state tuples, and a full-row consistency digest. Exact committed replay returns the authoritative occurrence across engine restart; changed immutable snapshots, another ID for the same due instant, and unrecomputed row drift fail closed.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_occurrence_event_creates_one_atomic_run_receipt_and_restarts",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_occurrence_id_and_schedule_due_constraints_reject_conflicts",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_repository_rejects_a_run_from_another_work_item",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_occurrence_digest_drift_fails_hydration",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_occurrence_schema_has_portable_identity_and_receipt_constraints"
+      ]
+    },
+    {
+      "id": "occurrence-event-id-run-idempotency",
+      "type": "contract",
+      "statement": "Production schedule ingress fences one exact active claim, hard-sets source schedule and derived occurrence event_id, copies routing only from the persisted schedule, validates the envelope, and creates or replays occurrence, WorkItem, primary Run, transition, and audit in one transaction. Exact expiry remains active; stale, replaced, or expired claims, changed payload, mixed dispositions, a mismatched Run/Work pair, and a post-receipt fault cannot commit a duplicate or partial receipt.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_occurrence_event_creates_one_atomic_run_receipt_and_restarts",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_changed_payload_collides_without_duplicate_receipt",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_invalid_claim_fails_before_any_receipt_mutation",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_claim_remains_processable_at_exact_expiry",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_claim_expiring_during_fence_rolls_back_before_receipt",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py::test_sched_03_post_receipt_link_fault_rolls_back_every_new_row"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "sched-03-occurrence-run-idempotency",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+        "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py",
+        "tests/integration/db/test_run_04_work_idempotency.py",
+        "tests/unit/scheduler/test_sched_01_recurrence.py",
+        "tests/unit/domain/test_dom_01_core_entities.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "versioned-stable-occurrence-identity",
+        "constraint-backed-occurrence-replay",
+        "occurrence-event-id-run-idempotency"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/schedule_occurrence_identity.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+    ],
+    "gate_id": "sched-03-occurrence-run-idempotency"
+  },
+  "limitations": [
+    "SCHED-02 owns exclusive active claim acquisition. SCHED-03 consumes and transactionally fences an already issued schedule ID, due instant, owner, claim time, expiry, recurrence version, and fencing version tuple.",
+    "Restart proof deliberately resubmits the same committed occurrence while its claim remains active. SCHED-06 owns expired-lease discovery, restart recovery, and recovery races.",
+    "SCHED-04 owns grace calculation and skip or run_once misfire behavior. SCHED-03 processes the normal claimed occurrence anchored to the persisted due instant.",
+    "SCHED-03 atomically persists the occurrence, WorkItem, primary Run, initial transition, and receipt audit. SCHED-05 owns recurrence recomputation, next-run advancement, occurrence audit, and lease release in the larger atomic transaction.",
+    "Mode, campaign-brief reference, instance configuration revision, and payload come from a trusted schedule input mapper and are revalidated here; schedule source, event, instance, trigger, and workflow bindings cannot be caller-selected.",
+    "Stable IDs and uniqueness provide idempotent receipt identity, not authorization or exactly-once Run execution.",
+    "Runtime tests use file-backed SQLite. PostgreSQL table and constraint DDL compile, but PostgreSQL runtime contention and migrations are not exercised.",
+    "Worker polling, public APIs, authorization, scheduler metrics, recurrence upgrades, and deployment remain outside this requirement."
+  ]
+}

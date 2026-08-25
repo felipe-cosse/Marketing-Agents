@@ -26,6 +26,7 @@ from .models import (
     RunStepDependencyRecord,
     RunStepRecord,
     RunStepStateTransitionRecord,
+    ScheduleOccurrenceRecord,
     ScheduleRecord,
     WorkItemRecord,
 )
@@ -110,6 +111,7 @@ __all__ = [
     "SQLAlchemyUnitOfWorkError",
     "SQLAlchemyUnitOfWorkFactory",
     "SQLAlchemyWorkRepository",
+    "ScheduleOccurrenceRecord",
     "SchedulePersistenceConflict",
     "ScheduleRecord",
     "StepPersistenceConflict",

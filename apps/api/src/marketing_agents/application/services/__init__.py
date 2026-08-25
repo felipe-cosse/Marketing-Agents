@@ -92,6 +92,13 @@ from .schedule_configuration import (
     ScheduleConfigurationError,
     ScheduleConfigurationService,
 )
+from .schedule_occurrence_ingress import (
+    ScheduleOccurrenceCommand,
+    ScheduleOccurrenceIngressDisposition,
+    ScheduleOccurrenceIngressError,
+    ScheduleOccurrenceIngressResult,
+    ScheduleOccurrenceIngressService,
+)
 from .terminal_execution_cleanup import (
     TerminalExecutionCleanupError,
     TerminalExecutionCleanupResult,
@@ -162,6 +169,11 @@ __all__ = [
     "ScheduleClaimService",
     "ScheduleConfigurationError",
     "ScheduleConfigurationService",
+    "ScheduleOccurrenceCommand",
+    "ScheduleOccurrenceIngressDisposition",
+    "ScheduleOccurrenceIngressError",
+    "ScheduleOccurrenceIngressResult",
+    "ScheduleOccurrenceIngressService",
     "TerminalExecutionCleanupError",
     "TerminalExecutionCleanupResult",
     "TerminalExecutionCleanupService",

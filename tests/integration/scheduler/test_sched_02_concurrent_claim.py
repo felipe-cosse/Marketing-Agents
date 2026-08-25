@@ -12,7 +12,7 @@ import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
 from marketing_agents.application.ports.repositories import ScheduleRepository
 from marketing_agents.application.services import ScheduleClaimService
-from marketing_agents.domain.entities import Schedule, ScheduleClaim
+from marketing_agents.domain.entities import Schedule, ScheduleClaim, ScheduleOccurrence
 from marketing_agents.domain.enums import MisfirePolicy
 from marketing_agents.infrastructure.db import (
     Base,
@@ -77,8 +77,46 @@ class BarrierScheduleRepository:
     async def get_claim(self, schedule_id: str) -> ScheduleClaim | None:
         return await self._delegate.get_claim(schedule_id)
 
+    async def fence_claim(self, claim: ScheduleClaim, *, now: datetime) -> bool:
+        return await self._delegate.fence_claim(claim, now=now)
+
+    async def get_occurrence(
+        self,
+        occurrence_id: str,
+    ) -> ScheduleOccurrence | None:
+        return await self._delegate.get_occurrence(occurrence_id)
+
+    async def get_occurrence_by_schedule_due(
+        self,
+        schedule_id: str,
+        scheduled_for_utc: datetime,
+    ) -> ScheduleOccurrence | None:
+        return await self._delegate.get_occurrence_by_schedule_due(
+            schedule_id,
+            scheduled_for_utc,
+        )
+
     async def add_or_get(self, schedule: Schedule):  # type: ignore[no-untyped-def]
         return await self._delegate.add_or_get(schedule)
+
+    async def add_occurrence_or_get(
+        self,
+        occurrence: ScheduleOccurrence,
+    ):  # type: ignore[no-untyped-def]
+        return await self._delegate.add_occurrence_or_get(occurrence)
+
+    async def mark_occurrence_enqueued(
+        self,
+        *,
+        occurrence_id: str,
+        work_item_id: str,
+        run_id: str,
+    ):  # type: ignore[no-untyped-def]
+        return await self._delegate.mark_occurrence_enqueued(
+            occurrence_id=occurrence_id,
+            work_item_id=work_item_id,
+            run_id=run_id,
+        )
 
     async def list_claimable_due(
         self,
@@ -143,11 +181,13 @@ def _schedule(
         id=schedule_id,
         trigger_id=f"trigger.{schedule_id}",
         instance_id="instance.sched-02.target",
+        workflow_id="workflow.sched-02.target",
         cron="0 12 * * *",
         timezone="UTC",
         next_run_at_utc=next_run_at_utc,
         misfire_policy=MisfirePolicy.RUN_ONCE,
         enabled=enabled,
+        recurrence_version="five-field-cron-adr0008-v1",
     )
 
 

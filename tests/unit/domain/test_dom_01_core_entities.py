@@ -61,6 +61,7 @@ from marketing_agents.domain.runtime_policy import (
     TimeoutPolicySnapshot,
     runtime_rate_limit_key,
 )
+from marketing_agents.domain.schedule_occurrence_identity import schedule_occurrence_id
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 DIGEST = "a" * 64
@@ -289,13 +290,28 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         "schedule.1",
         trigger.id,
         instance.id,
+        "workflow.1",
         "0 9 * * *",
         "America/Los_Angeles",
         NOW,
         MisfirePolicy.RUN_ONCE,
         True,
+        "five-field-cron-adr0008-v1",
     )
-    occurrence = ScheduleOccurrence("occurrence.1", schedule.id, NOW, OccurrenceState.DUE)
+    occurrence = ScheduleOccurrence(
+        schedule_occurrence_id(
+            schedule.id,
+            NOW,
+            recurrence_version=schedule.recurrence_version,
+        ),
+        schedule.id,
+        NOW,
+        "2025-12-31T16:00:00.000000",
+        schedule.timezone,
+        0,
+        schedule.recurrence_version,
+        OccurrenceState.DUE,
+    )
     audit = AuditEvent(
         AuditEventFactory(
             AuditContext.system("service.intake", correlation_id="correlation.dom-01")
@@ -409,11 +425,13 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
             "schedule.1",
             "trigger.1",
             "instance.1",
+            "workflow.1",
             "* * * * *",
             "Not/A_Zone",
             NOW,
             MisfirePolicy.SKIP,
             True,
+            "five-field-cron-adr0008-v1",
         ),
     ],
 )
