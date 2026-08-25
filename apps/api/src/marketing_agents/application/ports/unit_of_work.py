@@ -14,6 +14,7 @@ from marketing_agents.application.ports.repositories import (
     ExternalActionRepository,
     RunRepository,
     RunStepRepository,
+    ScheduleRepository,
     WorkRepository,
 )
 
@@ -45,6 +46,9 @@ class UnitOfWork(Protocol):
 
     @property
     def execution_control(self) -> ExecutionControlRepository: ...
+
+    @property
+    def schedules(self) -> ScheduleRepository: ...
 
     async def __aenter__(self) -> UnitOfWork: ...
 

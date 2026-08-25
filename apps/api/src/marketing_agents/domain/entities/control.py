@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from marketing_agents.domain.enums import (
     MisfirePolicy,
     OccurrenceState,
 )
 
-from ._validation import require_id, require_text, require_utc
+from ._validation import require_iana_timezone, require_id, require_text, require_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +29,15 @@ class Schedule:
         for field_name in ("id", "trigger_id", "instance_id"):
             require_id(getattr(self, field_name), field_name)
         require_text(self.cron, "schedule cron", maximum=100)
-        try:
-            ZoneInfo(self.timezone)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError("schedule timezone must be a valid IANA zone") from exc
+        if len(self.cron.split()) != 5:
+            raise ValueError("schedule cron must contain exactly five fields")
+        require_iana_timezone(self.timezone, "schedule timezone")
         require_utc(self.next_run_at_utc, "next scheduled UTC time")
-        if self.version < 1:
+        if type(self.misfire_policy) is not MisfirePolicy:
+            raise ValueError("schedule misfire policy must be supported")
+        if type(self.enabled) is not bool:
+            raise ValueError("schedule enabled flag must be a boolean")
+        if type(self.version) is not int or self.version < 1:
             raise ValueError("schedule version must be positive")
 
 

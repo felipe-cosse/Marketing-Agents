@@ -18,6 +18,7 @@ from marketing_agents.application.ports.repositories import (
     ExternalActionRepository,
     RunRepository,
     RunStepRepository,
+    ScheduleRepository,
     WorkRepository,
 )
 
@@ -37,6 +38,7 @@ class RepositoryBundle:
     connector_receipts: ConnectorReceiptRepository | None = None
     execution_control: ExecutionControlRepository | None = None
     artifacts: ArtifactRepository | None = None
+    schedules: ScheduleRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,7 @@ class SQLAlchemyRepositoryFactories:
     connector_receipts: Callable[[AsyncSession], ConnectorReceiptRepository] | None = None
     execution_control: Callable[[AsyncSession], ExecutionControlRepository] | None = None
     artifacts: Callable[[AsyncSession], ArtifactRepository] | None = None
+    schedules: Callable[[AsyncSession], ScheduleRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
@@ -68,6 +71,7 @@ class SQLAlchemyRepositoryFactories:
                 None if self.execution_control is None else self.execution_control(session)
             ),
             artifacts=None if self.artifacts is None else self.artifacts(session),
+            schedules=None if self.schedules is None else self.schedules(session),
         )
 
 
@@ -147,6 +151,13 @@ class SQLAlchemyUnitOfWork:
         repository = self._require_repositories().execution_control
         if repository is None:
             raise SQLAlchemyUnitOfWorkError("execution-control repository is not configured")
+        return repository
+
+    @property
+    def schedules(self) -> ScheduleRepository:
+        repository = self._require_repositories().schedules
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("schedule repository is not configured")
         return repository
 
     async def __aenter__(self) -> SQLAlchemyUnitOfWork:

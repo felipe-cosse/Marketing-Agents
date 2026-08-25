@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "aiosqlite>=0.21,<1",
   "alembic>=1.16,<2",
+  "croniter>=6.2.4,<7",
   "fastapi>=0.116,<1",
   "jsonschema>=4.24,<5",
   "pydantic>=2.11,<3",
@@ -17,6 +18,7 @@ dependencies = [
   "pyyaml>=6.0.2,<7",
   "referencing>=0.36,<1",
   "sqlalchemy[asyncio]>=2.0.41,<3",
+  "tzdata>=2026.3,<2027",
   "uvicorn[standard]>=0.35,<1",
 ]
 

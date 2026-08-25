@@ -26,6 +26,7 @@ from .models import (
     RunStepDependencyRecord,
     RunStepRecord,
     RunStepStateTransitionRecord,
+    ScheduleRecord,
     WorkItemRecord,
 )
 from .repositories import (
@@ -35,6 +36,7 @@ from .repositories import (
     ExecutionControlPersistenceConflict,
     ExternalActionPersistenceConflict,
     RunPersistenceInvariantError,
+    SchedulePersistenceConflict,
     SQLAlchemyApprovalRepository,
     SQLAlchemyArtifactRepository,
     SQLAlchemyAuditRepository,
@@ -43,6 +45,7 @@ from .repositories import (
     SQLAlchemyExternalActionRepository,
     SQLAlchemyRunRepository,
     SQLAlchemyRunStepRepository,
+    SQLAlchemyScheduleRepository,
     SQLAlchemyWorkRepository,
     StepPersistenceConflict,
 )
@@ -102,10 +105,13 @@ __all__ = [
     "SQLAlchemyRepositoryFactories",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",
+    "SQLAlchemyScheduleRepository",
     "SQLAlchemyUnitOfWork",
     "SQLAlchemyUnitOfWorkError",
     "SQLAlchemyUnitOfWorkFactory",
     "SQLAlchemyWorkRepository",
+    "SchedulePersistenceConflict",
+    "ScheduleRecord",
     "StepPersistenceConflict",
     "UTCDateTime",
     "WorkItemRecord",

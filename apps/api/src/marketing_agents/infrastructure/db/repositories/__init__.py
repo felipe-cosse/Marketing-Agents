@@ -13,6 +13,7 @@ from .execution_control import (
     SQLAlchemyExecutionControlRepository,
 )
 from .run import RunPersistenceInvariantError, SQLAlchemyRunRepository
+from .schedule import SchedulePersistenceConflict, SQLAlchemyScheduleRepository
 from .step import SQLAlchemyRunStepRepository, StepPersistenceConflict
 from .work import SQLAlchemyWorkRepository
 
@@ -31,6 +32,8 @@ __all__ = [
     "SQLAlchemyExternalActionRepository",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",
+    "SQLAlchemyScheduleRepository",
     "SQLAlchemyWorkRepository",
+    "SchedulePersistenceConflict",
     "StepPersistenceConflict",
 ]

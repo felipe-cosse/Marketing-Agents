@@ -61,7 +61,7 @@ Document and test the initial policy:
 
 - Calculate future times from the original cron expression in its IANA timezone, not `now + interval`.
 - Convert each selected valid local occurrence to UTC for persistence/claim.
-- For a nonexistent spring-forward local time, record a skipped/nonexistent occurrence reason and advance to the next valid wall-clock match.
+- For a nonexistent spring-forward local time, record a skipped/nonexistent occurrence reason and advance to the first valid local instant after the gap.
 - For an ambiguous fall-back wall time, choose the first occurrence (`fold=0`) in v1 so the same wall-clock label runs once.
 - A timezone database update may change future UTC projections; existing recorded occurrence identities never change.
 
