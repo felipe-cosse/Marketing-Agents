@@ -9,6 +9,7 @@ from marketing_agents.domain.enums import (
     MisfirePolicy,
     OccurrenceState,
 )
+from marketing_agents.domain.schedule_misfire import MAX_MISFIRE_GRACE_SECONDS
 from marketing_agents.domain.schedule_occurrence_identity import (
     schedule_local_snapshot,
     schedule_occurrence_id,
@@ -27,6 +28,7 @@ class Schedule:
     timezone: str
     next_run_at_utc: datetime
     misfire_policy: MisfirePolicy
+    misfire_grace_seconds: int
     enabled: bool
     recurrence_version: str
     version: int = 1
@@ -48,6 +50,11 @@ class Schedule:
         require_utc(self.next_run_at_utc, "next scheduled UTC time")
         if type(self.misfire_policy) is not MisfirePolicy:
             raise ValueError("schedule misfire policy must be supported")
+        if (
+            type(self.misfire_grace_seconds) is not int
+            or not 0 <= self.misfire_grace_seconds <= MAX_MISFIRE_GRACE_SECONDS
+        ):
+            raise ValueError("schedule misfire grace must be an integer from zero through one day")
         if type(self.enabled) is not bool:
             raise ValueError("schedule enabled flag must be a boolean")
         if type(self.version) is not int or self.version < 1:

@@ -186,6 +186,7 @@ def _schedule(
         timezone="UTC",
         next_run_at_utc=next_run_at_utc,
         misfire_policy=MisfirePolicy.RUN_ONCE,
+        misfire_grace_seconds=300,
         enabled=enabled,
         recurrence_version="five-field-cron-adr0008-v1",
     )

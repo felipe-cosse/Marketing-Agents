@@ -295,6 +295,7 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         "America/Los_Angeles",
         NOW,
         MisfirePolicy.RUN_ONCE,
+        300,
         True,
         "five-field-cron-adr0008-v1",
     )
@@ -430,6 +431,7 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
             "Not/A_Zone",
             NOW,
             MisfirePolicy.SKIP,
+            300,
             True,
             "five-field-cron-adr0008-v1",
         ),

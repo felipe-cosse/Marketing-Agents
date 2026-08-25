@@ -1,0 +1,166 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SCHED-04",
+  "matrix_statement_sha256": "70b2e4e671ba2449edf44e6686262c99e9855e7ed973c5af80ef44d8ad70e6f0",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/application/services/schedule_misfire.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/schedule_misfire.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "catalog/schema/instance.schema.json",
+      "catalog/schema/trigger.schema.json",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/SCHED-04.json",
+      "docs/verification/requirements/SCHED-04.md",
+      "tests/integration/db/test_sched_01_schedule_persistence.py",
+      "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+      "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+      "tests/integration/scheduler/test_sched_04_misfire_policies.py",
+      "tests/catalog/test_dom_05_instance_deployment_boundary.py",
+      "tests/unit/domain/test_dom_01_core_entities.py",
+      "tests/unit/scheduler/test_sched_01_recurrence.py",
+      "tests/unit/scheduler/test_sched_04_misfire.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_misfire.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+          "catalog/schema/instance.schema.json"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/schedule_misfire.py",
+          "apps/api/src/marketing_agents/domain/entities/control.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/scheduler/test_sched_04_misfire.py",
+          "tests/integration/scheduler/test_sched_04_misfire_policies.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "explicit-durable-policy-and-grace",
+      "type": "contract",
+      "statement": "Each catalog-authored and persisted Schedule requires a supported skip or run_once policy and an explicit integer grace from zero through one day. Policy and grace survive file-backed SQLite restart, participate in exact replay and the full consistency digest, and have portable schema and database constraints so missing, fractional, out-of-range, or unsealed changed values fail closed.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_configuration_rejects_invalid_grace_before_persistence",
+        "tests/catalog/test_dom_05_instance_deployment_boundary.py::test_sched_04_catalog_schedule_requires_explicit_bounded_integer_grace",
+        "tests/integration/scheduler/test_sched_04_misfire_policies.py::test_sched_04_explicit_policy_and_grace_round_trip_across_restart",
+        "tests/integration/scheduler/test_sched_04_misfire_policies.py::test_sched_04_database_rejects_invalid_grace_and_detects_unsealed_drift"
+      ]
+    },
+    {
+      "id": "strict-claim-time-misfire-boundary",
+      "type": "negative_control",
+      "statement": "Misfire classification uses only the immutable persisted due instant and committed claim time: equality with due plus grace remains on time and only a strictly later claim is a misfire. The planner reads no processing clock, validates the complete schedule and claim snapshot, and rejects inconsistent identities, due times, recurrence versions, fencing versions, and recurrence outputs.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_exact_grace_boundary_is_on_time_and_processing_delay_is_irrelevant",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_invalid_grace_clock_and_policy_inputs_fail_closed",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed"
+      ]
+    },
+    {
+      "id": "skip-bounded-coalescing",
+      "type": "negative_control",
+      "statement": "A skip misfire produces one immutable no-work intent anchored to the original persisted due instant, with the first missed instant, last coalesced instant, exact count, and first recurrence strictly after claim time. Enumeration has a hard safe ceiling and fails closed rather than truncating a long outage or emitting a backlog.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_skip_coalesces_missed_range_without_work_intent",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_dst_coalescing_preserves_existing_wall_clock_policy"
+      ]
+    },
+    {
+      "id": "run-once-single-catch-up",
+      "type": "contract",
+      "statement": "A run_once misfire coalesces every recurrence through claim time into one work-admission intent anchored to the originally persisted due instant, retains the exact bounded missed range, and selects the first strictly future wall-clock occurrence. It returns one plan rather than one intent per missed recurrence.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_run_once_coalesces_to_one_catch_up_anchored_to_persisted_due",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed",
+        "tests/unit/scheduler/test_sched_04_misfire.py::test_sched_04_dst_coalescing_preserves_existing_wall_clock_policy"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "sched-04-explicit-misfire-policies",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/unit/scheduler/test_sched_04_misfire.py",
+        "tests/integration/scheduler/test_sched_04_misfire_policies.py",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+        "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/unit/scheduler/test_sched_01_recurrence.py",
+        "tests/unit/domain/test_dom_01_core_entities.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/catalog/test_dom_05_instance_deployment_boundary.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "explicit-durable-policy-and-grace",
+        "strict-claim-time-misfire-boundary",
+        "skip-bounded-coalescing",
+        "run-once-single-catch-up"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/application/services/schedule_misfire.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/models.py",
+      "catalog/schema/instance.schema.json",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/schedule_misfire.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+    ],
+    "gate_id": "sched-04-explicit-misfire-policies"
+  },
+  "limitations": [
+    "SCHED-02 owns exclusive lease acquisition, and SCHED-03 owns stable occurrence identity plus normal Work and Run ingress. SCHED-04 consumes an exact already-issued claim and does not replace either boundary.",
+    "SCHED-04 produces a pure immutable policy intent and performs no unit-of-work mutation. SCHED-05 owns the live claim fence, authoritative skipped or catch-up occurrence persistence, optional Work and Run receipt, audit, next-time advancement, lease release, and single atomic commit.",
+    "No-work and one-catch-up behavior are planner directives here, not claims about committed WorkItem or Run row counts. Those database side effects and rollback fault injection remain SCHED-05 evidence.",
+    "SCHED-06 retains expired-lease discovery, restart recovery races, and duplicate suppression after lease recovery.",
+    "The missed-range algorithm coalesces at most 10000 occurrences and fails closed when that bound is exceeded; it does not claim unlimited historical catch-up.",
+    "Stable catch-up identity remains anchored to the persisted original due instant, not claim or processing time. A recovered later claim may safely calculate a wider uncommitted range.",
+    "V1 remains five-field cron with the existing IANA timezone, spring-gap, and fold-zero policy. Timezone-database updates may affect newly calculated future projections but not prior stable occurrence IDs.",
+    "Runtime persistence evidence uses file-backed SQLite. PostgreSQL table and constraint DDL compile, but PostgreSQL runtime contention, migrations, audit, metrics, polling, APIs, authorization, deployment, and exactly-once Run execution remain outside scope."
+  ]
+}

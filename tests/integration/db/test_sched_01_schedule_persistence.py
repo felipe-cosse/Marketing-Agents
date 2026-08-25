@@ -50,6 +50,7 @@ def _schedule(
         timezone=timezone_name,
         next_run_at_utc=next_run_at_utc,
         misfire_policy=MisfirePolicy.RUN_ONCE,
+        misfire_grace_seconds=300,
         enabled=True,
         recurrence_version="five-field-cron-adr0008-v1",
         version=1,
@@ -100,6 +101,7 @@ def test_sched_01_schedule_schema_is_portable_and_indexed_by_next_utc_run() -> N
         assert "ck_schedules_cron_bounded" in ddl
         assert "ck_schedules_timezone_bounded" in ddl
         assert "ck_schedules_misfire_policy_supported" in ddl
+        assert "ck_schedules_misfire_grace_bounded" in ddl
         assert "ck_schedules_version_positive" in ddl
         assert "ck_schedules_integrity_digest_length" in ddl
     assert "bool_schedules_enabled" in sqlite_ddl
@@ -165,6 +167,7 @@ async def test_sched_01_calculated_next_utc_is_the_exact_restart_persisted_value
             cron="0 9 * * *",
             timezone="US/Pacific",
             misfire_policy=MisfirePolicy.SKIP,
+            misfire_grace_seconds=300,
             enabled=True,
             after_utc=datetime(2026, 1, 15, 16, 0, tzinfo=UTC),
         )
@@ -242,6 +245,8 @@ async def test_sched_01_constraints_reject_invalid_persisted_configuration(
         invalid_updates = (
             {"version": 0},
             {"misfire_policy": "burst"},
+            {"misfire_grace_seconds": -1},
+            {"misfire_grace_seconds": 86_401},
             {"timezone_name": " "},
             {"cron_expression": " "},
             {"integrity_digest": "too-short"},

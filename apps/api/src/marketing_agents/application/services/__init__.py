@@ -92,6 +92,11 @@ from .schedule_configuration import (
     ScheduleConfigurationError,
     ScheduleConfigurationService,
 )
+from .schedule_misfire import (
+    MAX_COALESCED_MISSED_OCCURRENCES,
+    ScheduleMisfireError,
+    ScheduleMisfirePlanner,
+)
 from .schedule_occurrence_ingress import (
     ScheduleOccurrenceCommand,
     ScheduleOccurrenceIngressDisposition,
@@ -112,6 +117,7 @@ from .work_admission import (
 )
 
 __all__ = [
+    "MAX_COALESCED_MISSED_OCCURRENCES",
     "AdmissionDisposition",
     "ApprovalBoundaryDisposition",
     "ApprovalBoundaryResult",
@@ -169,6 +175,8 @@ __all__ = [
     "ScheduleClaimService",
     "ScheduleConfigurationError",
     "ScheduleConfigurationService",
+    "ScheduleMisfireError",
+    "ScheduleMisfirePlanner",
     "ScheduleOccurrenceCommand",
     "ScheduleOccurrenceIngressDisposition",
     "ScheduleOccurrenceIngressError",

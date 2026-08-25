@@ -25,6 +25,7 @@ def _command(**updates: object) -> CreateScheduleCommand:
         "cron": "0 9 * * *",
         "timezone": "US/Pacific",
         "misfire_policy": MisfirePolicy.RUN_ONCE,
+        "misfire_grace_seconds": 300,
         "enabled": True,
         "after_utc": datetime(2026, 1, 15, 16, 0, tzinfo=UTC),
     }
