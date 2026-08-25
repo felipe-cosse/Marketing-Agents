@@ -105,6 +105,7 @@ from .schedule_occurrence_ingress import (
     ScheduleOccurrenceIngressService,
 )
 from .schedule_processing import (
+    ScheduleClaimProcessingDisposition,
     ScheduleClaimProcessingError,
     ScheduleClaimProcessingResult,
     ScheduleClaimProcessingService,
@@ -177,6 +178,7 @@ __all__ = [
     "RunLifecycleServiceError",
     "RunStepLifecycleService",
     "RunStepLifecycleServiceError",
+    "ScheduleClaimProcessingDisposition",
     "ScheduleClaimProcessingError",
     "ScheduleClaimProcessingResult",
     "ScheduleClaimProcessingService",

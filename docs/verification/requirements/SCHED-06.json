@@ -1,0 +1,131 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SCHED-06",
+  "matrix_statement_sha256": "6ca30f811819b86c133472d58e0354b76aa6fbb3c434794c1c5b6a08211ca96c",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/schedule_processing.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/SCHED-06.json",
+      "docs/verification/requirements/SCHED-06.md",
+      "tests/integration/scheduler/test_sched_06_restart_recovery.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_processing.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/scheduler/test_sched_06_restart_recovery.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/audit_events.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "strict-expiry-restart-recovery",
+      "type": "contract",
+      "statement": "A committed lease abandoned before processing survives restart and remains active at exact expiry. At the first instant strictly after expiry, a replacement keeps the same schedule, due instant, and recurrence identity with a new fencing version; one bounded run_once or skip outcome then persists the planned next UTC occurrence and releases the replacement lease.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_restart_before_processing_requires_strict_expiry_then_recovers_once",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_recovered_skip_advances_without_work_or_run"
+      ]
+    },
+    {
+      "id": "rollback-and-race-recover-once",
+      "type": "negative_control",
+      "statement": "A failed processing commit leaves no occurrence, WorkItem, Run, transition, audit, or schedule advance, so a later strict-expiry replacement can complete once. Two restarted workers racing through independent file-backed SQLite sessions acquire one replacement claim, and stable occurrence plus receipt uniqueness leaves exactly one committed outcome.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_rolled_back_processing_recovers_once_after_expiry",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_two_restarted_workers_race_to_one_recovered_outcome"
+      ]
+    },
+    {
+      "id": "response-loss-read-only-suppression",
+      "type": "contract",
+      "statement": "When the processing commit succeeds but its response is lost, concurrent retries after restart reconstruct the exact deterministic plan and validate the complete claim fingerprint, occurrence, WorkItem, primary Run, initial transition, run.received event, occurrence event, and next-occurrence event. They return DUPLICATE_SUPPRESSED without reading time, allocating IDs, committing, or changing any durable row or audit witness, including after a compatible catalog release.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_response_loss_after_commit_replays_without_any_write",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_committed_replay_survives_current_catalog_hash_change"
+      ]
+    },
+    {
+      "id": "changed-or-incomplete-replay-fails-closed",
+      "type": "negative_control",
+      "statement": "Changed payload, mode, configuration, claim time, or lease-expiry facts cannot replay an already admitted occurrence. Both scheduler mutation witnesses bind every claim coordinate through the same domain-separated fingerprint. A forged claim or missing schedule-advance audit fails closed without healing history or changing the schedule, occurrence, WorkItem, Run, transition, or remaining audit rows.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_committed_replay_rejects_forged_claim_lease_coordinates",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_committed_replay_rejects_changed_command_facts",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py::test_sched_06_committed_replay_does_not_heal_a_missing_audit_witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "sched-06-restart-recovery",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/scheduler/test_sched_06_restart_recovery.py",
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py",
+        "tests/unit/scheduler/test_sched_04_misfire.py",
+        "tests/integration/scheduler/test_sched_04_misfire_policies.py",
+        "tests/unit/scheduler/test_sched_03_occurrence_identity.py",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+        "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+        "tests/unit/scheduler/test_sched_01_recurrence.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/unit/application/test_orch_08_audit_events.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+        "tests/integration/db/test_arch_03_portable_database.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200,
+      "network_requirement": "deny",
+      "covers": [
+        "strict-expiry-restart-recovery",
+        "rollback-and-race-recover-once",
+        "response-loss-read-only-suppression",
+        "changed-or-incomplete-replay-fails-closed"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/schedule_processing.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py"
+    ],
+    "gate_id": "sched-06-restart-recovery"
+  },
+  "limitations": [
+    "SCHED-06 composes the SCHED-02 strict-expiry claim CAS with SCHED-03 stable occurrence and receipt uniqueness, SCHED-04 deterministic misfire planning, and SCHED-05 atomic processing; it does not replace those contracts.",
+    "DUPLICATE_SUPPRESSED is a read-only application disposition, not a new audit mutation. Replay requires the original run.received, occurrence-outcome, and next-occurrence audit witnesses and leaves the global ledger unchanged. Plan 08 schedule.claimed, schedule.lease_conflict, and schedule.duplicate_suppressed operational events remain later observability work.",
+    "Committed replay accepts only the exact immediately resulting schedule projection at claim version plus one. An older occurrence after a later schedule cycle is not reclassified through this narrow response-loss path.",
+    "The evidence proves one durable occurrence and, when policy admits work, one WorkItem and primary Run receipt. It does not prove exactly-once Run execution or exactly-once downstream effects.",
+    "Runtime restart and race tests use independent sessions over file-backed SQLite with injected clocks and no sleeps. PostgreSQL runtime locking and contention are not exercised.",
+    "Scheduler polling and CLI loops, metrics, schedule APIs, authorization, migrations, deployment, and clean-start packaging remain outside SCHED-06. AC-12 retains end-to-end scheduler and Run-worker acceptance ownership."
+  ]
+}
