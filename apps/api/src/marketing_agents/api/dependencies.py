@@ -16,6 +16,7 @@ from marketing_agents.application.ports.identity import (
     IdentityAuthenticationError,
     IdentityProvider,
 )
+from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionCommand,
     AuthorizedApprovalDecision,
@@ -52,6 +53,19 @@ class ApprovalDecisionExecutor(Protocol):
         *,
         principal: AuthenticatedPrincipal,
     ) -> AuthorizedApprovalDecision: ...
+
+
+def get_readiness_probe(request: Request) -> ReadinessProbe | None:
+    """Resolve the optional probe without trusting falsey or malformed objects."""
+
+    try:
+        probe = getattr(request.app.state, "readiness_probe", None)
+        check = getattr(probe, "check", None)
+    except Exception:
+        return None
+    if probe is None or not callable(check):
+        return None
+    return cast(ReadinessProbe, probe)
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:

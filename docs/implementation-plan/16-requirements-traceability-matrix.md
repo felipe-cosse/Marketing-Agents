@@ -90,7 +90,7 @@ Allowed status values:
 
 | ID | Requirement | Plan | Planned implementation | Verification | Status |
 |---|---|---|---|---|---|
-| API-01 | Health and readiness endpoints. | 09 | Health routes | Health tests | planned |
+| API-01 | Health and readiness endpoints. | 09 | Health routes | Health tests | verified |
 | API-02 | Read complete catalog/hierarchy. | 09 | Catalog routes | Exact API count tests | planned |
 | API-03 | Configure instances without modifying seeded templates. | 02, 04, 09 | Config table/PATCH | Field/reseed/revision tests | planned |
 | API-04 | Manual dry-run endpoint. | 07, 09 | Dry-run route/intake | API + demo tests | planned |
