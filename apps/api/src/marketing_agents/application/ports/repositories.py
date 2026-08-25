@@ -29,6 +29,7 @@ from marketing_agents.domain.entities import (
     RunPlanSelectedInstance,
     RunPlanSnapshot,
     RunStep,
+    Schedule,
     WorkItem,
 )
 from marketing_agents.domain.enums import (
@@ -78,6 +79,28 @@ class WorkRepository(Protocol):
     async def add(self, work_item: WorkItem) -> None: ...
 
     async def add_or_get(self, work_item: WorkItem) -> WorkInsertResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleInsertResult:
+    """Outcome of one initial schedule insert-or-exact-replay operation."""
+
+    schedule: Schedule
+    inserted: bool
+
+
+class ScheduleRepositoryConflict(RuntimeError):
+    """Stable fail-closed schedule persistence or hydration conflict."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ScheduleRepository(Protocol):
+    async def get(self, schedule_id: str) -> Schedule | None: ...
+
+    async def add_or_get(self, schedule: Schedule) -> ScheduleInsertResult: ...
 
 
 @dataclass(frozen=True, slots=True)

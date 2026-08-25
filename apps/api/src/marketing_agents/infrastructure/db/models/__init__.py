@@ -22,6 +22,7 @@ from .execution_control import (
     RunExecutionControlRecord,
 )
 from .run import RunRecord, RunStateTransitionRecord
+from .schedule import ScheduleRecord
 from .step import (
     RunPlanRecord,
     RunPlanRoutingAssignmentRecord,
@@ -57,5 +58,6 @@ __all__ = [
     "RunStepDependencyRecord",
     "RunStepRecord",
     "RunStepStateTransitionRecord",
+    "ScheduleRecord",
     "WorkItemRecord",
 ]

@@ -79,7 +79,7 @@ Allowed status values:
 | RUN-08 | Store action/destination/redacted payload/hash/run/step/actor/decision/scope/times/expiry/use. | 04, 06, 09 | Tables/API projections | Persistence/API tests | verified |
 | RUN-09 | Payload changes invalidate approval. | 03, 06 | Canonical hash recompute | Payload mutation tests | verified |
 | RUN-10 | Approval endpoints require authorized actor. | 06, 09 | Identity/authorization | Role matrix tests | verified |
-| SCHED-01 | Store original IANA timezone and next UTC run. | 08 | Schedule table/calculator | Timezone tests | planned |
+| SCHED-01 | Store original IANA timezone and next UTC run. | 08 | Schedule table/calculator | Timezone tests | verified |
 | SCHED-02 | Only one worker claims an occurrence. | 04, 08 | Lease/CAS | Concurrent claim test | planned |
 | SCHED-03 | Stable occurrence ID feeds run idempotency. | 08 | Occurrence/work ingress | Duplicate/restart tests | planned |
 | SCHED-04 | Support explicit `skip` and `run_once`. | 08 | Misfire service | Misfire tests | planned |

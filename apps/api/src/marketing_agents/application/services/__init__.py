@@ -86,6 +86,11 @@ from .run_step_lifecycle import (
     RunStepLifecycleService,
     RunStepLifecycleServiceError,
 )
+from .schedule_configuration import (
+    CreateScheduleCommand,
+    ScheduleConfigurationError,
+    ScheduleConfigurationService,
+)
 from .terminal_execution_cleanup import (
     TerminalExecutionCleanupError,
     TerminalExecutionCleanupResult,
@@ -118,6 +123,7 @@ __all__ = [
     "ControlledReadExecutor",
     "ControlledReadExecutorError",
     "ControlledReadResult",
+    "CreateScheduleCommand",
     "DispatchDisposition",
     "ExecutionActivationError",
     "ExecutionActivationResult",
@@ -152,6 +158,8 @@ __all__ = [
     "RunLifecycleServiceError",
     "RunStepLifecycleService",
     "RunStepLifecycleServiceError",
+    "ScheduleConfigurationError",
+    "ScheduleConfigurationService",
     "TerminalExecutionCleanupError",
     "TerminalExecutionCleanupResult",
     "TerminalExecutionCleanupService",

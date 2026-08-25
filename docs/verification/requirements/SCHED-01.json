@@ -1,0 +1,163 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SCHED-01",
+  "matrix_statement_sha256": "118d92a322eea17d060d253682ceba7a002d9f665e34bffcca4db14023265dca",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/__init__.py",
+      "apps/api/src/marketing_agents/application/ports/recurrence.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/domain/entities/_validation.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/validation.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/scheduling/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/scheduling/cron_recurrence.py",
+      "docs/implementation-plan/08-persistent-scheduler-timezones-and-recovery.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/SCHED-01.json",
+      "docs/verification/requirements/SCHED-01.md",
+      "pyproject.toml",
+      "tests/integration/db/test_sched_01_schedule_persistence.py",
+      "tests/unit/scheduler/test_sched_01_recurrence.py",
+      "uv.lock"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/ports/recurrence.py",
+          "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+          "apps/api/src/marketing_agents/infrastructure/scheduling/cron_recurrence.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/entities/control.py",
+          "apps/api/src/marketing_agents/domain/validation.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+          "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/scheduler/test_sched_01_recurrence.py",
+          "tests/integration/db/test_sched_01_schedule_persistence.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "iana-wall-clock-next-utc",
+      "type": "contract",
+      "statement": "Schedule configuration preserves the exact original five-field cron and IANA timezone key while calculating the first strictly future aware UTC instant. Spring gaps advance to the first valid local instant, and fall folds select the earlier UTC instant once.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_01_recurrence.py::test_sched_01_service_preserves_original_iana_key_and_seals_next_utc_run",
+        "tests/unit/scheduler/test_sched_01_recurrence.py::test_sched_01_spring_gap_advances_to_next_valid_local_instant",
+        "tests/unit/scheduler/test_sched_01_recurrence.py::test_sched_01_fall_fold_chooses_earlier_utc_instant_once"
+      ]
+    },
+    {
+      "id": "fail-closed-recurrence-boundary",
+      "type": "negative_control",
+      "statement": "The configuration boundary rejects unsupported or impossible cron syntax, unknown timezone keys, non-UTC calculation boundaries, and recurrence adapters that return a naive, non-UTC, or nonfuture instant before creating a Schedule.",
+      "test_refs": [
+        "tests/unit/scheduler/test_sched_01_recurrence.py::test_sched_01_invalid_cron_timezone_and_boundary_fail_closed",
+        "tests/unit/scheduler/test_sched_01_recurrence.py::test_sched_01_service_rejects_nonfuture_or_nonutc_adapter_results"
+      ]
+    },
+    {
+      "id": "durable-timezone-next-run-roundtrip",
+      "type": "contract",
+      "statement": "A service-calculated Schedule persists through the unit of work and a file-backed SQLite restart with its exact original timezone key and aware UTC projection. SQLite and PostgreSQL DDL expose the required columns and enabled-next-run-ID index.",
+      "test_refs": [
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_schedule_schema_is_portable_and_indexed_by_next_utc_run",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_round_trip_preserves_original_zone_and_next_utc_across_restart",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_calculated_next_utc_is_the_exact_restart_persisted_value"
+      ]
+    },
+    {
+      "id": "exact-replay-rollback-row-consistency",
+      "type": "negative_control",
+      "statement": "Initial persistence returns an exact authoritative replay for the same ID, rejects changed create-time facts, rolls back uncommitted insertion, enforces row constraints, and detects unrecomputed timezone, cron, or next-run drift through a domain-separated consistency digest.",
+      "test_refs": [
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_round_trip_preserves_original_zone_and_next_utc_across_restart",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_same_id_with_changed_create_facts_is_rejected",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_uncommitted_insert_rolls_back",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_constraints_reject_invalid_persisted_configuration",
+        "tests/integration/db/test_sched_01_schedule_persistence.py::test_sched_01_hydration_fails_closed_on_valid_looking_tampering"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "sched-01-timezone-next-run",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/unit/scheduler/test_sched_01_recurrence.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/unit/domain/test_dom_01_core_entities.py",
+        "tests/unit/architecture/test_arch_01_toolchain.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/integration/db/test_run_04_work_idempotency.py",
+        "tests/catalog/test_dom_05_instance_deployment_boundary.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "iana-wall-clock-next-utc",
+        "fail-closed-recurrence-boundary",
+        "durable-timezone-next-run-roundtrip",
+        "exact-replay-rollback-row-consistency"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/recurrence.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/validation.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/scheduling/cron_recurrence.py"
+    ],
+    "gate_id": "sched-01-timezone-next-run"
+  },
+  "limitations": [
+    "SCHED-01 implements initial configuration and exact create replay. SCHED-02 through SCHED-06 retain lease and claim concurrency, occurrence identity, runtime misfire behavior, transactional next-time advancement, and expired-lease recovery.",
+    "The configuration service calculates the persisted next UTC value, but the low-level repository trusts an internally constructed validated Schedule. This evidence does not claim cryptographic proof that every internal caller used the recurrence adapter.",
+    "The stored digest is an unkeyed consistency seal that detects unrecomputed drift. It does not protect against an administrator who can rewrite both schedule fields and their digest.",
+    "SQLite runtime restart behavior and SQLite/PostgreSQL DDL compilation are tested. PostgreSQL runtime transactions and Alembic rollout remain DEL-04 scope.",
+    "Timezone-database updates can change later recurrence projections. An already persisted UTC instant remains unchanged until a later scheduler requirement advances it.",
+    "Public schedule APIs, authorization, audit and metrics, preview, and the scheduler worker loop remain later API, observability, and scheduler requirements."
+  ]
+}

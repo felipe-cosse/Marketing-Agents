@@ -6,8 +6,10 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 
@@ -34,6 +36,25 @@ def require_utc(value: datetime, field_name: str) -> None:
     offset = value.utcoffset()
     if offset is None or offset.total_seconds() != 0:
         raise ValueError(f"{field_name} must be timezone-aware UTC")
+
+
+@lru_cache(maxsize=1)
+def _iana_timezone_names() -> frozenset[str]:
+    """Freeze the process-local IANA key set used to validate persisted schedules."""
+
+    return frozenset(available_timezones())
+
+
+def require_iana_timezone(value: str, field_name: str) -> ZoneInfo:
+    """Validate one exact IANA key without replacing aliases or the caller's spelling."""
+
+    require_text(value, field_name, maximum=100)
+    if value not in _iana_timezone_names():
+        raise ValueError(f"{field_name} must be a valid IANA timezone")
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a valid IANA timezone") from exc
 
 
 def frozen_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:

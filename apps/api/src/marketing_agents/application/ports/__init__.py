@@ -10,6 +10,7 @@ from .read_adapter import (
     ReadAdapterResult,
     ReadAdapterTransientError,
 )
+from .recurrence import RecurrenceCalculationError, RecurrenceCalculator
 
 __all__ = [
     "ReadAdapter",
@@ -20,4 +21,6 @@ __all__ = [
     "ReadAdapterRequest",
     "ReadAdapterResult",
     "ReadAdapterTransientError",
+    "RecurrenceCalculationError",
+    "RecurrenceCalculator",
 ]
