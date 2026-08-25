@@ -45,11 +45,13 @@ def _schedule(
         id=schedule_id,
         trigger_id="trigger.sched-01.daily",
         instance_id="instance.sched-01.target",
+        workflow_id="workflow.sched-01.target",
         cron="30 9 * * *",
         timezone=timezone_name,
         next_run_at_utc=next_run_at_utc,
         misfire_policy=MisfirePolicy.RUN_ONCE,
         enabled=True,
+        recurrence_version="five-field-cron-adr0008-v1",
         version=1,
     )
 
@@ -159,6 +161,7 @@ async def test_sched_01_calculated_next_utc_is_the_exact_restart_persisted_value
             id="schedule.sched-01.calculated",
             trigger_id="trigger.sched-01.calculated",
             instance_id="instance.sched-01.calculated",
+            workflow_id="workflow.sched-01.calculated",
             cron="0 9 * * *",
             timezone="US/Pacific",
             misfire_policy=MisfirePolicy.SKIP,

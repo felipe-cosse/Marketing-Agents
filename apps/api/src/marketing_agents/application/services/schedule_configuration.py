@@ -8,6 +8,9 @@ from datetime import datetime
 from marketing_agents.application.ports.recurrence import RecurrenceCalculator
 from marketing_agents.domain.entities import Schedule
 from marketing_agents.domain.enums import MisfirePolicy
+from marketing_agents.domain.schedule_occurrence_identity import (
+    SCHEDULE_RECURRENCE_VERSION,
+)
 from marketing_agents.domain.validation import require_utc
 
 
@@ -20,6 +23,7 @@ class CreateScheduleCommand:
     id: str
     trigger_id: str
     instance_id: str
+    workflow_id: str
     cron: str
     timezone: str
     misfire_policy: MisfirePolicy
@@ -52,9 +56,11 @@ class ScheduleConfigurationService:
             id=command.id,
             trigger_id=command.trigger_id,
             instance_id=command.instance_id,
+            workflow_id=command.workflow_id,
             cron=command.cron,
             timezone=command.timezone,
             next_run_at_utc=next_run_at_utc,
             misfire_policy=command.misfire_policy,
             enabled=command.enabled,
+            recurrence_version=SCHEDULE_RECURRENCE_VERSION,
         )

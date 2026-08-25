@@ -31,6 +31,7 @@ from marketing_agents.domain.entities import (
     RunStep,
     Schedule,
     ScheduleClaim,
+    ScheduleOccurrence,
     WorkItem,
 )
 from marketing_agents.domain.enums import (
@@ -90,6 +91,22 @@ class ScheduleInsertResult:
     inserted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ScheduleOccurrenceInsertResult:
+    """Outcome of one pending occurrence insert-or-authoritative-replay."""
+
+    occurrence: ScheduleOccurrence
+    inserted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleOccurrenceLinkResult:
+    """Outcome of binding one occurrence to its WorkItem and primary Run."""
+
+    occurrence: ScheduleOccurrence
+    linked: bool
+
+
 class ScheduleRepositoryConflict(RuntimeError):
     """Stable fail-closed schedule persistence or hydration conflict."""
 
@@ -102,6 +119,24 @@ class ScheduleRepository(Protocol):
     async def get(self, schedule_id: str) -> Schedule | None: ...
 
     async def get_claim(self, schedule_id: str) -> ScheduleClaim | None: ...
+
+    async def fence_claim(
+        self,
+        claim: ScheduleClaim,
+        *,
+        now: datetime,
+    ) -> bool: ...
+
+    async def get_occurrence(
+        self,
+        occurrence_id: str,
+    ) -> ScheduleOccurrence | None: ...
+
+    async def get_occurrence_by_schedule_due(
+        self,
+        schedule_id: str,
+        scheduled_for_utc: datetime,
+    ) -> ScheduleOccurrence | None: ...
 
     async def list_claimable_due(
         self,
@@ -122,6 +157,19 @@ class ScheduleRepository(Protocol):
     ) -> ScheduleClaim | None: ...
 
     async def add_or_get(self, schedule: Schedule) -> ScheduleInsertResult: ...
+
+    async def add_occurrence_or_get(
+        self,
+        occurrence: ScheduleOccurrence,
+    ) -> ScheduleOccurrenceInsertResult: ...
+
+    async def mark_occurrence_enqueued(
+        self,
+        *,
+        occurrence_id: str,
+        work_item_id: str,
+        run_id: str,
+    ) -> ScheduleOccurrenceLinkResult: ...
 
 
 @dataclass(frozen=True, slots=True)

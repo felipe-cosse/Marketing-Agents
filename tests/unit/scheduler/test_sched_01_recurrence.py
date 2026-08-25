@@ -21,6 +21,7 @@ def _command(**updates: object) -> CreateScheduleCommand:
         "id": "schedule.community.reminder",
         "trigger_id": "trigger.community.schedule",
         "instance_id": "inst.community.events.live-session-reminder.01",
+        "workflow_id": "workflow.community.reminder",
         "cron": "0 9 * * *",
         "timezone": "US/Pacific",
         "misfire_policy": MisfirePolicy.RUN_ONCE,
