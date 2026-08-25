@@ -58,6 +58,7 @@ def _integrity_material(
     timezone_name: str,
     recurrence_version: str,
     next_run_at_utc: datetime,
+    last_scheduled_at_utc: datetime | None,
     misfire_policy: str,
     misfire_grace_seconds: int,
     enabled: bool,
@@ -75,6 +76,7 @@ def _integrity_material(
         "timezone_name": timezone_name,
         "recurrence_version": recurrence_version,
         "next_run_at_utc": _timestamp_material(next_run_at_utc),
+        "last_scheduled_at_utc": _optional_timestamp_material(last_scheduled_at_utc),
         "misfire_policy": misfire_policy,
         "misfire_grace_seconds": misfire_grace_seconds,
         "enabled": enabled,
@@ -99,6 +101,7 @@ def _schedule_material(schedule: Schedule) -> dict[str, Any]:
         timezone_name=schedule.timezone,
         recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
+        last_scheduled_at_utc=schedule.last_scheduled_at_utc,
         misfire_policy=schedule.misfire_policy.value,
         misfire_grace_seconds=schedule.misfire_grace_seconds,
         enabled=schedule.enabled,
@@ -119,6 +122,7 @@ def _record_material(record: ScheduleRecord) -> dict[str, Any]:
         timezone_name=record.timezone_name,
         recurrence_version=record.recurrence_version,
         next_run_at_utc=record.next_run_at_utc,
+        last_scheduled_at_utc=record.last_scheduled_at_utc,
         misfire_policy=record.misfire_policy,
         misfire_grace_seconds=record.misfire_grace_seconds,
         enabled=record.enabled,
@@ -136,6 +140,7 @@ def _to_record(schedule: Schedule) -> ScheduleRecord:
         or type(schedule.enabled) is not bool
         or type(schedule.version) is not int
         or schedule.version != 1
+        or schedule.last_scheduled_at_utc is not None
     ):
         raise SchedulePersistenceConflict(
             "schedule_invalid",
@@ -151,6 +156,7 @@ def _to_record(schedule: Schedule) -> ScheduleRecord:
         timezone_name=schedule.timezone,
         recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
+        last_scheduled_at_utc=None,
         misfire_policy=schedule.misfire_policy.value,
         misfire_grace_seconds=schedule.misfire_grace_seconds,
         enabled=schedule.enabled,
@@ -213,6 +219,7 @@ def _to_domain(record: ScheduleRecord) -> Schedule:
             cron=record.cron_expression,
             timezone=record.timezone_name,
             next_run_at_utc=record.next_run_at_utc,
+            last_scheduled_at_utc=record.last_scheduled_at_utc,
             misfire_policy=MisfirePolicy(record.misfire_policy),
             misfire_grace_seconds=record.misfire_grace_seconds,
             enabled=record.enabled,
@@ -240,6 +247,7 @@ def _creation_facts(schedule: Schedule) -> tuple[Any, ...]:
         schedule.timezone,
         schedule.recurrence_version,
         schedule.next_run_at_utc,
+        schedule.last_scheduled_at_utc,
         schedule.misfire_policy,
         schedule.misfire_grace_seconds,
         schedule.enabled,
@@ -259,6 +267,12 @@ def _occurrence_material(
     state: str,
     work_item_id: str | None,
     run_id: str | None,
+    misfire_policy_applied: str | None,
+    misfire_grace_seconds: int | None,
+    misfire_evaluated_at_utc: datetime | None,
+    first_missed_at_utc: datetime | None,
+    last_missed_at_utc: datetime | None,
+    missed_count: int | None,
 ) -> dict[str, Any]:
     return {
         "id": occurrence_id,
@@ -272,6 +286,12 @@ def _occurrence_material(
         "state": state,
         "work_item_id": work_item_id,
         "run_id": run_id,
+        "misfire_policy_applied": misfire_policy_applied,
+        "misfire_grace_seconds": misfire_grace_seconds,
+        "misfire_evaluated_at_utc": _optional_timestamp_material(misfire_evaluated_at_utc),
+        "first_missed_at_utc": _optional_timestamp_material(first_missed_at_utc),
+        "last_missed_at_utc": _optional_timestamp_material(last_missed_at_utc),
+        "missed_count": missed_count,
     }
 
 
@@ -292,6 +312,16 @@ def _occurrence_domain_material(occurrence: ScheduleOccurrence) -> dict[str, Any
         state=occurrence.state.value,
         work_item_id=occurrence.work_item_id,
         run_id=occurrence.run_id,
+        misfire_policy_applied=(
+            None
+            if occurrence.misfire_policy_applied is None
+            else occurrence.misfire_policy_applied.value
+        ),
+        misfire_grace_seconds=occurrence.misfire_grace_seconds,
+        misfire_evaluated_at_utc=occurrence.misfire_evaluated_at_utc,
+        first_missed_at_utc=occurrence.first_missed_at_utc,
+        last_missed_at_utc=occurrence.last_missed_at_utc,
+        missed_count=occurrence.missed_count,
     )
 
 
@@ -308,6 +338,12 @@ def _occurrence_record_material(record: ScheduleOccurrenceRecord) -> dict[str, A
         state=record.state,
         work_item_id=record.work_item_id,
         run_id=record.run_id,
+        misfire_policy_applied=record.misfire_policy_applied,
+        misfire_grace_seconds=record.misfire_grace_seconds,
+        misfire_evaluated_at_utc=record.misfire_evaluated_at_utc,
+        first_missed_at_utc=record.first_missed_at_utc,
+        last_missed_at_utc=record.last_missed_at_utc,
+        missed_count=record.missed_count,
     )
 
 
@@ -328,6 +364,16 @@ def _occurrence_to_record(occurrence: ScheduleOccurrence) -> ScheduleOccurrenceR
         timezone_fold=occurrence.timezone_fold,
         recurrence_version=occurrence.recurrence_version,
         state=occurrence.state.value,
+        misfire_policy_applied=(
+            None
+            if occurrence.misfire_policy_applied is None
+            else occurrence.misfire_policy_applied.value
+        ),
+        misfire_grace_seconds=occurrence.misfire_grace_seconds,
+        misfire_evaluated_at_utc=occurrence.misfire_evaluated_at_utc,
+        first_missed_at_utc=occurrence.first_missed_at_utc,
+        last_missed_at_utc=occurrence.last_missed_at_utc,
+        missed_count=occurrence.missed_count,
         work_item_id=occurrence.work_item_id,
         run_id=occurrence.run_id,
         integrity_digest=_occurrence_digest(material),
@@ -361,6 +407,16 @@ def _occurrence_to_domain(record: ScheduleOccurrenceRecord) -> ScheduleOccurrenc
             state=OccurrenceState(record.state),
             work_item_id=record.work_item_id,
             run_id=record.run_id,
+            misfire_policy_applied=(
+                None
+                if record.misfire_policy_applied is None
+                else MisfirePolicy(record.misfire_policy_applied)
+            ),
+            misfire_grace_seconds=record.misfire_grace_seconds,
+            misfire_evaluated_at_utc=record.misfire_evaluated_at_utc,
+            first_missed_at_utc=record.first_missed_at_utc,
+            last_missed_at_utc=record.last_missed_at_utc,
+            missed_count=record.missed_count,
         )
     except (TypeError, ValueError) as exc:
         raise SchedulePersistenceConflict(
@@ -378,6 +434,12 @@ def _occurrence_identity_facts(occurrence: ScheduleOccurrence) -> tuple[Any, ...
         occurrence.timezone,
         occurrence.timezone_fold,
         occurrence.recurrence_version,
+        occurrence.misfire_policy_applied,
+        occurrence.misfire_grace_seconds,
+        occurrence.misfire_evaluated_at_utc,
+        occurrence.first_missed_at_utc,
+        occurrence.last_missed_at_utc,
+        occurrence.missed_count,
     )
 
 
@@ -575,6 +637,7 @@ class SQLAlchemyScheduleRepository:
                 timezone_name=current.timezone_name,
                 recurrence_version=current.recurrence_version,
                 next_run_at_utc=current.next_run_at_utc,
+                last_scheduled_at_utc=current.last_scheduled_at_utc,
                 misfire_policy=current.misfire_policy,
                 misfire_grace_seconds=current.misfire_grace_seconds,
                 enabled=current.enabled,
@@ -640,6 +703,108 @@ class SQLAlchemyScheduleRepository:
             )
         return claim
 
+    async def advance_and_release_claim(
+        self,
+        claim: ScheduleClaim,
+        *,
+        next_run_at_utc: datetime,
+        completed_at_utc: datetime,
+    ) -> Schedule | None:
+        """Atomically persist the next occurrence and release one exact live claim."""
+
+        if type(claim) is not ScheduleClaim:
+            raise ValueError("schedule advancement requires an exact ScheduleClaim")
+        require_utc(next_run_at_utc, "next scheduled UTC time")
+        require_utc(completed_at_utc, "schedule processing completion time")
+        if next_run_at_utc <= claim.scheduled_for_utc:
+            raise ValueError("next scheduled UTC time must follow the completed occurrence")
+        if completed_at_utc < claim.claimed_at_utc or claim.lease_expires_at_utc < completed_at_utc:
+            return None
+
+        current_statement = (
+            select(ScheduleRecord)
+            .where(ScheduleRecord.id == claim.schedule_id)
+            .execution_options(populate_existing=True)
+        )
+        current = (await self._session.execute(current_statement)).scalar_one_or_none()
+        if current is None:
+            return None
+        _to_domain(current)
+        if _claim_from_record(current) != claim:
+            return None
+
+        expected_digest = current.integrity_digest
+        new_version = claim.version + 1
+        new_digest = _integrity_digest(
+            _integrity_material(
+                schedule_id=current.id,
+                trigger_id=current.trigger_id,
+                instance_id=current.instance_id,
+                workflow_id=current.workflow_id,
+                cron_expression=current.cron_expression,
+                timezone_name=current.timezone_name,
+                recurrence_version=current.recurrence_version,
+                next_run_at_utc=next_run_at_utc,
+                last_scheduled_at_utc=claim.scheduled_for_utc,
+                misfire_policy=current.misfire_policy,
+                misfire_grace_seconds=current.misfire_grace_seconds,
+                enabled=current.enabled,
+                version=new_version,
+                lease_owner=None,
+                lease_claimed_at_utc=None,
+                lease_expires_at_utc=None,
+            )
+        )
+        statement = (
+            update(ScheduleRecord)
+            .where(
+                ScheduleRecord.id == claim.schedule_id,
+                ScheduleRecord.version == claim.version,
+                ScheduleRecord.integrity_digest == expected_digest,
+                ScheduleRecord.enabled.is_(True),
+                ScheduleRecord.next_run_at_utc == claim.scheduled_for_utc,
+                ScheduleRecord.recurrence_version == claim.recurrence_version,
+                ScheduleRecord.lease_owner == claim.lease_owner,
+                ScheduleRecord.lease_claimed_at_utc == claim.claimed_at_utc,
+                ScheduleRecord.lease_expires_at_utc == claim.lease_expires_at_utc,
+                ScheduleRecord.lease_claimed_at_utc <= completed_at_utc,
+                ScheduleRecord.lease_expires_at_utc >= completed_at_utc,
+            )
+            .values(
+                last_scheduled_at_utc=claim.scheduled_for_utc,
+                next_run_at_utc=next_run_at_utc,
+                lease_owner=None,
+                lease_claimed_at_utc=None,
+                lease_expires_at_utc=None,
+                version=new_version,
+                integrity_digest=new_digest,
+            )
+            .returning(ScheduleRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            advanced_id = (await self._session.execute(statement)).scalar_one_or_none()
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return None
+            raise
+        if advanced_id is None:
+            return None
+
+        fresh_statement = (
+            select(ScheduleRecord)
+            .where(ScheduleRecord.id == advanced_id)
+            .execution_options(populate_existing=True)
+        )
+        fresh = (await self._session.execute(fresh_statement)).scalar_one()
+        advanced = _to_domain(fresh)
+        if _claim_from_record(fresh) is not None:
+            raise SchedulePersistenceConflict(
+                "schedule_tampered",
+                "advanced schedule retained lease state",
+            )
+        return advanced
+
     async def add_or_get(self, schedule: Schedule) -> ScheduleInsertResult:
         record = _to_record(schedule)
         try:
@@ -667,13 +832,13 @@ class SQLAlchemyScheduleRepository:
     ) -> ScheduleOccurrenceInsertResult:
         if (
             type(occurrence) is not ScheduleOccurrence
-            or occurrence.state is not OccurrenceState.CLAIMED
+            or occurrence.state not in (OccurrenceState.CLAIMED, OccurrenceState.SKIPPED)
             or occurrence.work_item_id is not None
             or occurrence.run_id is not None
         ):
             raise SchedulePersistenceConflict(
                 "occurrence_invalid",
-                "new schedule occurrence must be one unlinked claimed occurrence",
+                "new schedule occurrence must be unlinked and claimed or skipped",
             )
         record = _occurrence_to_record(occurrence)
         try:

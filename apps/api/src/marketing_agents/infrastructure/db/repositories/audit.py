@@ -50,6 +50,8 @@ def _record_to_domain_unchecked(record: AuditEventRecord) -> AuditEvent:
     draft = _issue_audit_event_draft(
         id=record.id,
         run_id=record.run_id,
+        schedule_id=record.schedule_id,
+        occurrence_id=record.occurrence_id,
         event_type=record.event_type,
         aggregate_type=record.aggregate_type,
         aggregate_id=record.aggregate_id,
@@ -106,12 +108,17 @@ def _record_to_domain(record: AuditEventRecord) -> AuditEvent:
         ) from exc
 
 
-def _draft_to_record(draft: AuditEventDraft, run_sequence: int) -> AuditEventRecord:
+def _draft_to_record(
+    draft: AuditEventDraft,
+    run_sequence: int | None,
+) -> AuditEventRecord:
     return AuditEventRecord(
         id=draft.id,
         schema_version=draft.schema_version,
         run_id=draft.run_id,
         run_sequence=run_sequence,
+        schedule_id=draft.schedule_id,
+        occurrence_id=draft.occurrence_id,
         event_type=draft.event_type,
         aggregate_type=draft.aggregate_type,
         aggregate_id=draft.aggregate_id,
@@ -177,6 +184,8 @@ class SQLAlchemyAuditRepository:
         if any(type(event) is not AuditEventDraft for event in events):
             raise ValueError("audit append requires exact sealed event drafts")
         run_id = events[0].run_id
+        if run_id is None:
+            raise ValueError("Run audit append requires one Run timeline")
         if any(event.run_id != run_id for event in events):
             raise ValueError("one audit append batch may target only one run timeline")
         if len({event.id for event in events}) != len(events):
@@ -239,6 +248,44 @@ class SQLAlchemyAuditRepository:
         records = tuple(
             _draft_to_record(event, first_sequence + offset) for offset, event in enumerate(events)
         )
+        self._session.add_all(records)
+        try:
+            await self._session.flush()
+        except IntegrityError as exc:
+            raise AuditPersistenceInvariantError(
+                "audit_append_conflict",
+                "audit event identity or mutation witness already exists",
+            ) from exc
+        return tuple(_record_to_domain(record) for record in records)
+
+    async def append_global(self, event: AuditEventDraft) -> AuditEvent:
+        """Append one scheduler event without consuming a per-Run sequence."""
+
+        return (await self.append_global_many((event,)))[0]
+
+    async def append_global_many(
+        self,
+        events: tuple[AuditEventDraft, ...],
+    ) -> tuple[AuditEvent, ...]:
+        """Append one bounded, globally ordered scheduler audit batch."""
+
+        if type(events) is not tuple or not events or len(events) > 128:
+            raise ValueError("global audit append batch must contain from 1 through 128 events")
+        if any(type(event) is not AuditEventDraft for event in events):
+            raise ValueError("global audit append requires exact sealed event drafts")
+        schedule_id = events[0].schedule_id
+        if schedule_id is None or any(
+            event.run_id is not None
+            or event.schedule_id != schedule_id
+            or event.aggregate_type not in {"schedule", "schedule_occurrence"}
+            for event in events
+        ):
+            raise ValueError("one global audit append batch may target only one schedule")
+        if len({event.id for event in events}) != len(events):
+            raise ValueError("global audit append batch event IDs must be unique")
+        for event in events:
+            event.verify_integrity()
+        records = tuple(_draft_to_record(event, None) for event in events)
         self._session.add_all(records)
         try:
             await self._session.flush()

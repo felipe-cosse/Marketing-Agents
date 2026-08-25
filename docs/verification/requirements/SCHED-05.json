@@ -1,0 +1,155 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "SCHED-05",
+  "matrix_statement_sha256": "68788906cede6cda8be4c16b9dea33282d9383faac54e9e9842e6b97a33f0a7f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+      "apps/api/src/marketing_agents/application/services/schedule_processing.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/SCHED-05.json",
+      "docs/verification/requirements/SCHED-05.md",
+      "tests/integration/scheduler/test_sched_05_occurrence_transaction.py",
+      "tests/security/test_orch_09_audit_redaction.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_processing.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+          "apps/api/src/marketing_agents/application/ports/repositories.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/entities/control.py",
+          "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/audit_events.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/scheduler/test_sched_05_occurrence_transaction.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "atomic-on-time-advance",
+      "type": "contract",
+      "statement": "One exact active claim is fenced and consumed in one processing unit of work that atomically persists the stable enqueued occurrence, normal WorkItem and primary Run receipt, initial transition and receipt audit, scheduler audit witnesses, consumed due time, planned next UTC occurrence, one schedule version increment, and complete lease release through a final integrity-sealed compare-and-swap.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_on_time_outcome_advances_and_releases_in_one_commit",
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_schema_has_portable_advance_and_misfire_constraints"
+      ]
+    },
+    {
+      "id": "atomic-skip-without-work",
+      "type": "negative_control",
+      "statement": "A skip misfire commits one terminal occurrence anchored to the original due instant with exact bounded policy, grace, evaluation, first, last, and count facts; creates no WorkItem, Run, or transition; advances to the plan's first future recurrence; emits globally ordered non-Run audit witnesses; and releases the lease in the same commit.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_skip_persists_exact_missed_range_without_work",
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_schema_has_portable_advance_and_misfire_constraints"
+      ]
+    },
+    {
+      "id": "atomic-run-once-coalescing",
+      "type": "contract",
+      "statement": "A run_once misfire retains the complete bounded missed range on one stable occurrence and admits exactly one WorkItem and primary Run rather than a backlog, while the same transaction persists scheduler audits, the first planned future recurrence, version advancement, and lease release.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_run_once_coalesces_range_to_exactly_one_receipt"
+      ]
+    },
+    {
+      "id": "fault-rollback-preserves-claim",
+      "type": "negative_control",
+      "statement": "Injected failure after all intended processing rows and recurrence advancement are visible but before the sole commit rolls back every occurrence, WorkItem, Run, transition, processing audit, last-time, next-time, version, and release mutation, leaving the separately committed original due claim byte-for-byte authoritative for later recovery.",
+      "test_refs": [
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_fault_after_advance_rolls_back_to_exact_precommitted_claim",
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py::test_sched_05_final_cas_expiry_rolls_back_receipt_and_preserves_claim"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "sched-05-transactional-next-occurrence",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/scheduler/test_sched_05_occurrence_transaction.py",
+        "tests/unit/scheduler/test_sched_04_misfire.py",
+        "tests/integration/scheduler/test_sched_04_misfire_policies.py",
+        "tests/integration/scheduler/test_sched_03_occurrence_ingress.py",
+        "tests/integration/scheduler/test_sched_02_concurrent_claim.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/unit/scheduler/test_sched_01_recurrence.py",
+        "tests/unit/application/test_orch_08_audit_events.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/unit/domain/test_dom_01_core_entities.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+        "tests/integration/db/test_arch_03_portable_database.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "atomic-on-time-advance",
+        "atomic-skip-without-work",
+        "atomic-run-once-coalescing",
+        "fault-rollback-preserves-claim"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/schedule_processing.py",
+      "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py"
+    ],
+    "gate_id": "sched-05-transactional-next-occurrence"
+  },
+  "limitations": [
+    "SCHED-05 starts with one exact separately committed active and unexpired SCHED-02 claim; it does not move claim acquisition into the processing transaction.",
+    "SCHED-04 remains authoritative for deterministic claim-time misfire classification and bounded next-occurrence planning; SCHED-05 persists that immutable plan rather than recalculating from later processing time.",
+    "A rolled-back processing attempt intentionally leaves the original due time, version, and active lease unchanged. SCHED-06 owns strict-expiry discovery, reclaim, restart races, and duplicate suppression after recovery or response loss.",
+    "Stable uniqueness and atomic receipt prove one committed occurrence and receipt for this exact live claim, not exactly-once Run execution.",
+    "Runtime evidence uses file-backed SQLite and injected time without sleeps. PostgreSQL DDL and constraints compile, but PostgreSQL runtime locking and contention are not exercised.",
+    "Worker polling, metrics, schedule APIs, authorization, migrations, deployment, and later lifecycle execution remain outside this requirement."
+  ]
+}

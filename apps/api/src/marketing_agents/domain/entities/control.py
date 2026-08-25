@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from marketing_agents.domain.enums import (
     MisfirePolicy,
     OccurrenceState,
 )
-from marketing_agents.domain.schedule_misfire import MAX_MISFIRE_GRACE_SECONDS
+from marketing_agents.domain.schedule_misfire import (
+    MAX_COALESCED_MISSED_OCCURRENCES,
+    MAX_MISFIRE_GRACE_SECONDS,
+)
 from marketing_agents.domain.schedule_occurrence_identity import (
     schedule_local_snapshot,
     schedule_occurrence_id,
@@ -32,6 +35,7 @@ class Schedule:
     enabled: bool
     recurrence_version: str
     version: int = 1
+    last_scheduled_at_utc: datetime | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -59,6 +63,10 @@ class Schedule:
             raise ValueError("schedule enabled flag must be a boolean")
         if type(self.version) is not int or self.version < 1:
             raise ValueError("schedule version must be positive")
+        if self.last_scheduled_at_utc is not None:
+            require_utc(self.last_scheduled_at_utc, "last scheduled UTC time")
+            if self.last_scheduled_at_utc >= self.next_run_at_utc:
+                raise ValueError("last scheduled UTC time must precede the next run")
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +109,12 @@ class ScheduleOccurrence:
     state: OccurrenceState
     work_item_id: str | None = None
     run_id: str | None = None
+    misfire_policy_applied: MisfirePolicy | None = None
+    misfire_grace_seconds: int | None = None
+    misfire_evaluated_at_utc: datetime | None = None
+    first_missed_at_utc: datetime | None = None
+    last_missed_at_utc: datetime | None = None
+    missed_count: int | None = None
 
     def __post_init__(self) -> None:
         require_id(self.id, "occurrence ID")
@@ -147,3 +161,57 @@ class ScheduleOccurrence:
         linked_states = (OccurrenceState.ENQUEUED, OccurrenceState.COMPLETED)
         if (self.state in linked_states) != (self.work_item_id is not None):
             raise ValueError("occurrence state and WorkItem/Run links disagree")
+
+        misfire_facts = (
+            self.misfire_policy_applied,
+            self.misfire_grace_seconds,
+            self.misfire_evaluated_at_utc,
+            self.first_missed_at_utc,
+            self.last_missed_at_utc,
+            self.missed_count,
+        )
+        if misfire_facts == (None, None, None, None, None, None):
+            if self.state is OccurrenceState.SKIPPED:
+                raise ValueError("skipped occurrences require complete misfire facts")
+            return
+        if any(value is None for value in misfire_facts):
+            raise ValueError("occurrence misfire facts must be all present or all absent")
+        if type(self.misfire_policy_applied) is not MisfirePolicy:
+            raise ValueError("occurrence misfire policy must be supported")
+        if (
+            type(self.misfire_grace_seconds) is not int
+            or not 0 <= self.misfire_grace_seconds <= MAX_MISFIRE_GRACE_SECONDS
+        ):
+            raise ValueError("occurrence misfire grace must be a safely bounded integer")
+
+        evaluated_at_utc = self.misfire_evaluated_at_utc
+        first_missed_at_utc = self.first_missed_at_utc
+        last_missed_at_utc = self.last_missed_at_utc
+        assert evaluated_at_utc is not None
+        assert first_missed_at_utc is not None
+        assert last_missed_at_utc is not None
+        assert self.misfire_grace_seconds is not None
+        require_utc(evaluated_at_utc, "occurrence misfire evaluation time")
+        require_utc(first_missed_at_utc, "occurrence first missed time")
+        require_utc(last_missed_at_utc, "occurrence last missed time")
+        if first_missed_at_utc != self.scheduled_for_utc:
+            raise ValueError("occurrence missed range must begin at its persisted due instant")
+        if not first_missed_at_utc <= last_missed_at_utc <= evaluated_at_utc:
+            raise ValueError("occurrence missed range must be ordered through evaluation time")
+        if evaluated_at_utc - self.scheduled_for_utc <= timedelta(
+            seconds=self.misfire_grace_seconds
+        ):
+            raise ValueError("occurrence misfire facts must exceed the configured grace")
+        if (
+            type(self.missed_count) is not int
+            or not 1 <= self.missed_count <= MAX_COALESCED_MISSED_OCCURRENCES
+        ):
+            raise ValueError("occurrence missed count must be positive and safely bounded")
+        if (self.missed_count == 1) != (last_missed_at_utc == first_missed_at_utc):
+            raise ValueError("occurrence missed count must agree with its range endpoints")
+        if (self.misfire_policy_applied is MisfirePolicy.SKIP) != (
+            self.state is OccurrenceState.SKIPPED
+        ):
+            raise ValueError("occurrence skip policy and state must agree")
+        if self.state is OccurrenceState.DUE:
+            raise ValueError("evaluated misfire occurrences cannot remain due")

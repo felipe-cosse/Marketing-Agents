@@ -115,7 +115,25 @@ class AuditEventRecord(Base):
             ],
             ondelete="RESTRICT",
         ),
-        CheckConstraint("run_sequence >= 1", name="ck_audit_events_run_sequence_positive"),
+        ForeignKeyConstraint(
+            ["occurrence_id", "schedule_id"],
+            ["schedule_occurrences.id", "schedule_occurrences.schedule_id"],
+            name="fk_audit_events_occurrence_schedule",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "run_sequence IS NULL OR run_sequence >= 1",
+            name="ck_audit_events_run_sequence_positive",
+        ),
+        CheckConstraint(
+            "((aggregate_type IN ('schedule','schedule_occurrence') AND "
+            "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NOT NULL AND "
+            "occurrence_id IS NOT NULL) OR "
+            "(aggregate_type NOT IN ('schedule','schedule_occurrence') AND "
+            "run_id IS NOT NULL AND run_sequence IS NOT NULL AND schedule_id IS NULL AND "
+            "occurrence_id IS NULL))",
+            name="ck_audit_events_timeline_scope",
+        ),
         CheckConstraint("schema_version = 1", name="ck_audit_events_schema_version"),
         CheckConstraint(
             "actor_source IN ('system','user','worker','connector')",
@@ -131,6 +149,24 @@ class AuditEventRecord(Base):
             name="ck_audit_events_outcome_mutation",
         ),
         CheckConstraint(
+            "(aggregate_type = 'schedule_occurrence' AND event_type IN "
+            "('schedule.occurrence_created','schedule.misfire_skipped',"
+            "'schedule.misfire_run_once') AND schedule_id IS NOT NULL AND "
+            "occurrence_id IS NOT NULL AND aggregate_id = occurrence_id AND "
+            "outcome = 'accepted' AND mutation_version = 1 AND "
+            "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
+            "step_id IS NULL AND action_id IS NULL AND action_attempt_number IS NULL AND "
+            "receipt_id IS NULL AND approval_request_id IS NULL AND "
+            "approval_decision_id IS NULL AND artifact_id IS NULL AND attempt_id IS NULL) OR "
+            "(aggregate_type = 'schedule' AND "
+            "event_type = 'schedule.next_occurrence_persisted' AND "
+            "schedule_id IS NOT NULL AND occurrence_id IS NOT NULL AND "
+            "aggregate_id = schedule_id AND outcome = 'accepted' AND "
+            "mutation_version IS NOT NULL AND run_transition_sequence IS NULL AND "
+            "step_transition_sequence IS NULL AND step_id IS NULL AND action_id IS NULL AND "
+            "action_attempt_number IS NULL AND receipt_id IS NULL AND "
+            "approval_request_id IS NULL AND approval_decision_id IS NULL AND "
+            "artifact_id IS NULL AND attempt_id IS NULL) OR "
             "(aggregate_type = 'run' AND event_type IN "
             "('run.received','run.transitioned','run.plan_recorded') AND "
             "aggregate_id = run_id AND outcome = 'accepted' AND mutation_version IS NOT NULL "
@@ -319,6 +355,14 @@ class AuditEventRecord(Base):
             name="ck_audit_events_attempt_observations",
         ),
         CheckConstraint(
+            "aggregate_type NOT IN ('schedule','schedule_occurrence') OR "
+            "(attempted_command IS NULL AND expected_version IS NULL AND "
+            "observed_version IS NULL AND observed_state IS NULL AND "
+            "requested_state IS NULL AND previous_state IS NULL AND new_state IS NULL AND "
+            "reason_code IS NULL)",
+            name="ck_audit_events_scheduler_shape",
+        ),
+        CheckConstraint(
             "expected_version IS NULL OR expected_version >= 0",
             name="ck_audit_events_expected_version",
         ),
@@ -378,14 +422,31 @@ class AuditEventRecord(Base):
             name="ck_audit_events_transition_links",
         ),
         Index("ix_audit_events_run_time_id", "run_id", "occurred_at", "id"),
+        Index(
+            "ix_audit_events_schedule_time_id",
+            "schedule_id",
+            "occurred_at",
+            "id",
+        ),
         Index("ix_audit_events_global_time", "occurred_at", "global_sequence"),
     )
 
     global_sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     id: Mapped[str] = mapped_column(String(80), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="RESTRICT"), nullable=False)
-    run_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    run_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    schedule_id: Mapped[str | None] = mapped_column(
+        ForeignKey("schedules.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    occurrence_id: Mapped[str | None] = mapped_column(
+        ForeignKey("schedule_occurrences.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     event_type: Mapped[str] = mapped_column(String(120), nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(40), nullable=False)
     aggregate_id: Mapped[str] = mapped_column(String(240), nullable=False)

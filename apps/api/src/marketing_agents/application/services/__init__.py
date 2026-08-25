@@ -104,6 +104,11 @@ from .schedule_occurrence_ingress import (
     ScheduleOccurrenceIngressResult,
     ScheduleOccurrenceIngressService,
 )
+from .schedule_processing import (
+    ScheduleClaimProcessingError,
+    ScheduleClaimProcessingResult,
+    ScheduleClaimProcessingService,
+)
 from .terminal_execution_cleanup import (
     TerminalExecutionCleanupError,
     TerminalExecutionCleanupResult,
@@ -172,6 +177,9 @@ __all__ = [
     "RunLifecycleServiceError",
     "RunStepLifecycleService",
     "RunStepLifecycleServiceError",
+    "ScheduleClaimProcessingError",
+    "ScheduleClaimProcessingResult",
+    "ScheduleClaimProcessingService",
     "ScheduleClaimService",
     "ScheduleConfigurationError",
     "ScheduleConfigurationService",

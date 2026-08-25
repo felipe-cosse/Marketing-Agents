@@ -153,7 +153,13 @@ async def _require_complete_run_timeline(
         )
         if not page:
             return
-        after_sequence = page[-1].run_sequence
+        last_sequence = page[-1].run_sequence
+        if last_sequence is None:
+            raise ApprovalRecordServiceError(
+                "approval_audit_timeline_invalid",
+                "Run audit timeline contains a non-Run global event",
+            )
+        after_sequence = last_sequence
         if len(page) < 100:
             return
 

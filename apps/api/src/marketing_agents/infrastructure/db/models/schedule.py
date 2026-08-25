@@ -46,6 +46,10 @@ class ScheduleRecord(Base):
             "misfire_grace_seconds = CAST(misfire_grace_seconds AS INTEGER)",
             name="ck_schedules_misfire_grace_bounded",
         ),
+        CheckConstraint(
+            "last_scheduled_at_utc IS NULL OR last_scheduled_at_utc < next_run_at_utc",
+            name="ck_schedules_last_precedes_next",
+        ),
         CheckConstraint("version >= 1", name="ck_schedules_version_positive"),
         CheckConstraint(
             "lease_owner IS NULL OR "
@@ -91,6 +95,7 @@ class ScheduleRecord(Base):
     timezone_name: Mapped[str] = mapped_column(String(100), nullable=False)
     recurrence_version: Mapped[str] = mapped_column(String(64), nullable=False)
     next_run_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_scheduled_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     misfire_policy: Mapped[str] = mapped_column(String(16), nullable=False)
     misfire_grace_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(
@@ -113,6 +118,11 @@ class ScheduleOccurrenceRecord(Base):
             "schedule_id",
             "scheduled_for_utc",
             name="uq_schedule_occurrences_schedule_due",
+        ),
+        UniqueConstraint(
+            "id",
+            "schedule_id",
+            name="uq_schedule_occurrences_id_schedule",
         ),
         UniqueConstraint(
             "work_item_id",
@@ -158,6 +168,49 @@ class ScheduleOccurrenceRecord(Base):
             name="ck_schedule_occurrences_state_receipt",
         ),
         CheckConstraint(
+            "(misfire_policy_applied IS NULL AND misfire_grace_seconds IS NULL "
+            "AND misfire_evaluated_at_utc IS NULL AND first_missed_at_utc IS NULL "
+            "AND last_missed_at_utc IS NULL AND missed_count IS NULL) OR "
+            "(misfire_policy_applied IS NOT NULL AND misfire_grace_seconds IS NOT NULL "
+            "AND misfire_evaluated_at_utc IS NOT NULL AND first_missed_at_utc IS NOT NULL "
+            "AND last_missed_at_utc IS NOT NULL AND missed_count IS NOT NULL)",
+            name="ck_schedule_occurrences_misfire_complete",
+        ),
+        CheckConstraint(
+            "misfire_policy_applied IS NULL OR misfire_policy_applied IN ('skip','run_once')",
+            name="ck_schedule_occurrences_misfire_policy_supported",
+        ),
+        CheckConstraint(
+            "misfire_grace_seconds IS NULL OR "
+            "(misfire_grace_seconds BETWEEN 0 AND 86400 AND "
+            "misfire_grace_seconds = CAST(misfire_grace_seconds AS INTEGER))",
+            name="ck_schedule_occurrences_misfire_grace_bounded",
+        ),
+        CheckConstraint(
+            "(misfire_policy_applied IS NULL "
+            "AND state IN ('due','claimed','enqueued','completed')) OR "
+            "(misfire_policy_applied IS NOT NULL AND "
+            "((misfire_policy_applied = 'skip' AND state = 'skipped') OR "
+            "(misfire_policy_applied = 'run_once' "
+            "AND state IN ('claimed','enqueued','completed'))))",
+            name="ck_schedule_occurrences_misfire_state",
+        ),
+        CheckConstraint(
+            "first_missed_at_utc IS NULL OR "
+            "(first_missed_at_utc = scheduled_for_utc "
+            "AND first_missed_at_utc <= last_missed_at_utc "
+            "AND last_missed_at_utc <= misfire_evaluated_at_utc)",
+            name="ck_schedule_occurrences_missed_range",
+        ),
+        CheckConstraint(
+            "missed_count IS NULL OR "
+            "(missed_count BETWEEN 1 AND 10000 "
+            "AND missed_count = CAST(missed_count AS INTEGER) "
+            "AND ((missed_count = 1 AND last_missed_at_utc = first_missed_at_utc) "
+            "OR (missed_count > 1 AND last_missed_at_utc > first_missed_at_utc)))",
+            name="ck_schedule_occurrences_missed_count",
+        ),
+        CheckConstraint(
             "length(integrity_digest) = 64",
             name="ck_schedule_occurrences_integrity_digest_length",
         ),
@@ -175,6 +228,12 @@ class ScheduleOccurrenceRecord(Base):
     timezone_fold: Mapped[int] = mapped_column(Integer, nullable=False)
     recurrence_version: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
+    misfire_policy_applied: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    misfire_grace_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    misfire_evaluated_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    first_missed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_missed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    missed_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     work_item_id: Mapped[str | None] = mapped_column(
         ForeignKey("work_items.id", ondelete="RESTRICT"),
         nullable=True,
