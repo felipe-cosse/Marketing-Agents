@@ -152,6 +152,7 @@ _EVENT_OUTCOMES = {
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     "schedule.occurrence_created": frozenset(
         {
+            "claim_fingerprint",
             "next_run_at_utc",
             "recurrence_version",
             "scheduled_for_utc",
@@ -160,6 +161,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     ),
     "schedule.misfire_skipped": frozenset(
         {
+            "claim_fingerprint",
             "first_missed_at_utc",
             "last_missed_at_utc",
             "missed_count",
@@ -171,6 +173,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     ),
     "schedule.misfire_run_once": frozenset(
         {
+            "claim_fingerprint",
             "first_missed_at_utc",
             "last_missed_at_utc",
             "missed_count",
@@ -182,6 +185,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     ),
     "schedule.next_occurrence_persisted": frozenset(
         {
+            "claim_fingerprint",
             "disposition",
             "last_scheduled_at_utc",
             "next_run_at_utc",

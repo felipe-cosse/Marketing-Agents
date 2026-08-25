@@ -35,6 +35,7 @@ from marketing_agents.domain.entities import (
     RunPlanSnapshot,
     RunStep,
     Schedule,
+    ScheduleClaim,
     ScheduleOccurrence,
 )
 from marketing_agents.domain.enums import (
@@ -63,6 +64,35 @@ from marketing_agents.security.audit_metadata import seal_audit_metadata
 
 _AUDIT_EVENT_ID_DOMAIN = b"marketing-agents:audit-event-id:v1\x00"
 _AUDIT_ATTEMPT_ID_DOMAIN = b"marketing-agents:audit-run-attempt-id:v1\x00"
+_SCHEDULE_CLAIM_FINGERPRINT_DOMAIN = b"marketing-agents:schedule-claim:v1\x00"
+
+
+def _schedule_claim_fingerprint(claim: ScheduleClaim) -> str:
+    if type(claim) is not ScheduleClaim:
+        raise ValueError("schedule audit requires the exact claim contract")
+    return hashlib.sha256(
+        _SCHEDULE_CLAIM_FINGERPRINT_DOMAIN
+        + canonical_json_bytes(
+            {
+                "schedule_id": claim.schedule_id,
+                "scheduled_for_utc": _canonical_utc(
+                    claim.scheduled_for_utc,
+                    "schedule claim due time",
+                ),
+                "lease_owner": claim.lease_owner,
+                "claimed_at_utc": _canonical_utc(
+                    claim.claimed_at_utc,
+                    "schedule claim time",
+                ),
+                "lease_expires_at_utc": _canonical_utc(
+                    claim.lease_expires_at_utc,
+                    "schedule claim expiry",
+                ),
+                "recurrence_version": claim.recurrence_version,
+                "version": claim.version,
+            }
+        )
+    ).hexdigest()
 
 
 class AuditEventFactory:
@@ -84,6 +114,7 @@ class AuditEventFactory:
         self,
         occurrence: ScheduleOccurrence,
         plan: ScheduleOccurrencePlan,
+        claim: ScheduleClaim,
         *,
         next_run_at_utc: datetime,
         work_admitted: bool,
@@ -91,16 +122,24 @@ class AuditEventFactory:
     ) -> AuditEventDraft:
         """Witness one exact on-time, skipped, or coalesced occurrence outcome."""
 
-        if type(occurrence) is not ScheduleOccurrence or type(plan) is not ScheduleOccurrencePlan:
+        if (
+            type(occurrence) is not ScheduleOccurrence
+            or type(plan) is not ScheduleOccurrencePlan
+            or type(claim) is not ScheduleClaim
+        ):
             raise ValueError("schedule occurrence audit requires exact persisted contracts")
         replace(occurrence)
         replace(plan)
+        replace(claim)
         if type(work_admitted) is not bool:
             raise ValueError("schedule occurrence audit work admission must be boolean")
         if (
             occurrence.schedule_id != plan.schedule_id
+            or occurrence.schedule_id != claim.schedule_id
             or occurrence.scheduled_for_utc != plan.scheduled_for_utc
+            or occurrence.scheduled_for_utc != claim.scheduled_for_utc
             or occurrence.recurrence_version != plan.recurrence_version
+            or occurrence.recurrence_version != claim.recurrence_version
             or next_run_at_utc != plan.next_run_at_utc
             or work_admitted is not plan.admits_work
             or (occurrence.work_item_id is not None) is not work_admitted
@@ -111,8 +150,11 @@ class AuditEventFactory:
         _canonical_utc(occurred_at, "schedule occurrence audit time")
         if occurred_at < occurrence.scheduled_for_utc:
             raise ValueError("schedule occurrence audit cannot precede its scheduled time")
+        if not claim.claimed_at_utc <= occurred_at <= claim.lease_expires_at_utc:
+            raise ValueError("schedule occurrence audit must occur within its exact claim lease")
 
         metadata: dict[str, Any] = {
+            "claim_fingerprint": _schedule_claim_fingerprint(claim),
             "scheduled_for_utc": _canonical_utc(
                 occurrence.scheduled_for_utc,
                 "schedule audit scheduled time",
@@ -152,6 +194,7 @@ class AuditEventFactory:
                 or occurrence.last_missed_at_utc != plan.last_missed_at_utc
                 or occurrence.missed_count != plan.missed_count
                 or occurrence.misfire_evaluated_at_utc is None
+                or occurrence.misfire_evaluated_at_utc != claim.claimed_at_utc
                 or occurrence.misfire_evaluated_at_utc > occurred_at
             ):
                 raise ValueError("misfire occurrence audit does not match its policy plan")
@@ -195,6 +238,7 @@ class AuditEventFactory:
         resulting_schedule: Schedule,
         occurrence: ScheduleOccurrence,
         plan: ScheduleOccurrencePlan,
+        claim: ScheduleClaim,
         *,
         occurred_at: datetime,
     ) -> AuditEventDraft:
@@ -205,18 +249,24 @@ class AuditEventFactory:
             or type(resulting_schedule) is not Schedule
             or type(occurrence) is not ScheduleOccurrence
             or type(plan) is not ScheduleOccurrencePlan
+            or type(claim) is not ScheduleClaim
         ):
             raise ValueError("schedule advancement audit requires exact persisted contracts")
         replace(previous_schedule)
         replace(resulting_schedule)
         replace(occurrence)
         replace(plan)
+        replace(claim)
         if (
             previous_schedule.id != resulting_schedule.id
             or previous_schedule.id != occurrence.schedule_id
             or previous_schedule.id != plan.schedule_id
+            or previous_schedule.id != claim.schedule_id
             or previous_schedule.next_run_at_utc != occurrence.scheduled_for_utc
             or previous_schedule.next_run_at_utc != plan.scheduled_for_utc
+            or previous_schedule.next_run_at_utc != claim.scheduled_for_utc
+            or previous_schedule.recurrence_version != claim.recurrence_version
+            or previous_schedule.version != claim.version
             or resulting_schedule.last_scheduled_at_utc != occurrence.scheduled_for_utc
             or resulting_schedule.next_run_at_utc != plan.next_run_at_utc
             or resulting_schedule.version != previous_schedule.version + 1
@@ -232,6 +282,8 @@ class AuditEventFactory:
         _canonical_utc(occurred_at, "schedule advancement audit time")
         if occurred_at < occurrence.scheduled_for_utc:
             raise ValueError("schedule advancement audit cannot precede its scheduled time")
+        if not claim.claimed_at_utc <= occurred_at <= claim.lease_expires_at_utc:
+            raise ValueError("schedule advancement audit must occur within its exact claim lease")
         return self._build(
             run_id=None,
             schedule_id=resulting_schedule.id,
@@ -242,6 +294,7 @@ class AuditEventFactory:
             outcome=AuditOutcome.ACCEPTED,
             occurred_at=occurred_at,
             metadata={
+                "claim_fingerprint": _schedule_claim_fingerprint(claim),
                 "previous_next_run_at_utc": _canonical_utc(
                     previous_schedule.next_run_at_utc,
                     "schedule audit previous next run time",

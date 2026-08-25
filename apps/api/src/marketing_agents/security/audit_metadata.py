@@ -50,6 +50,7 @@ _ACTION_FIELDS = frozenset({"conclusion", "connector_status", "idempotency_suppo
 _ATTEMPT_IDENTITY_FIELDS = frozenset({"attempt_kind", "attempt_number", "operation_key"})
 _SCHEDULE_OCCURRENCE_FIELDS = frozenset(
     {
+        "claim_fingerprint",
         "next_run_at_utc",
         "recurrence_version",
         "scheduled_for_utc",
@@ -69,6 +70,7 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "schedule.misfire_run_once": _SCHEDULE_MISFIRE_FIELDS,
     "schedule.next_occurrence_persisted": frozenset(
         {
+            "claim_fingerprint",
             "disposition",
             "last_scheduled_at_utc",
             "next_run_at_utc",
@@ -197,7 +199,15 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     ),
     "runtime.control_denied": frozenset({"denial_code", "operation_key", "retry_after_seconds"}),
 }
-_DIGEST_FIELDS = frozenset({"graph_hash", "plan_hash", "routing_hash", "workflow_definition_hash"})
+_DIGEST_FIELDS = frozenset(
+    {
+        "claim_fingerprint",
+        "graph_hash",
+        "plan_hash",
+        "routing_hash",
+        "workflow_definition_hash",
+    }
+)
 _POSITIVE_INTEGER_FIELDS = frozenset(
     {
         "action_version",

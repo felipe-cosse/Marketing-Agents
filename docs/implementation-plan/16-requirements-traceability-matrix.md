@@ -84,7 +84,7 @@ Allowed status values:
 | SCHED-03 | Stable occurrence ID feeds run idempotency. | 08 | Occurrence/work ingress | Duplicate/restart tests | verified |
 | SCHED-04 | Support explicit `skip` and `run_once`. | 08 | Misfire service | Misfire tests | verified |
 | SCHED-05 | Recompute/persist next occurrence transactionally. | 04, 08 | UoW transaction | Fault-injection test | verified |
-| SCHED-06 | Recover due schedules without duplicates. | 08 | Lease expiry/unique keys | Restart tests | planned |
+| SCHED-06 | Recover due schedules without duplicates. | 08 | Lease expiry/unique keys | Restart tests | verified |
 
 ## Backend and frontend functions
 
