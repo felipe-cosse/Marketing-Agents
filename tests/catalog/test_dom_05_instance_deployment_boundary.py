@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 from jsonschema import Draft202012Validator
 from marketing_agents.infrastructure.catalog import compile_catalog
@@ -15,6 +16,7 @@ from marketing_agents.infrastructure.catalog.models import (
     TriggerBinding,
 )
 from marketing_agents.infrastructure.catalog.semantics import deployment_configuration_issues
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "catalog" / "v1"
@@ -99,10 +101,42 @@ def test_dom_05_schedule_requires_one_enabled_supported_trigger() -> None:
     scheduled = original.model_copy(
         update={
             "schedule": ScheduleBinding(
-                cron="0 9 * * 1", timezone="America/Los_Angeles", misfire_policy="run_once"
+                cron="0 9 * * 1",
+                timezone="America/Los_Angeles",
+                misfire_policy="run_once",
+                misfire_grace_seconds=300,
             )
         }
     )
     assert "instance-schedule-binding" in _codes(
         [scheduled if item is original else item for item in compiled.instances]
     )
+
+
+def test_sched_04_catalog_schedule_requires_explicit_bounded_integer_grace() -> None:
+    valid = {
+        "cron": "0 9 * * 1",
+        "timezone": "America/Los_Angeles",
+        "misfire_policy": "skip",
+        "misfire_grace_seconds": 300,
+    }
+    assert ScheduleBinding(**valid).misfire_grace_seconds == 300  # type: ignore[arg-type]
+    for invalid in (
+        {key: value for key, value in valid.items() if key != "misfire_grace_seconds"},
+        {**valid, "misfire_grace_seconds": -1},
+        {**valid, "misfire_grace_seconds": 86_401},
+        {**valid, "misfire_grace_seconds": 60.5},
+        {**valid, "misfire_grace_seconds": True},
+    ):
+        with pytest.raises(ValidationError):
+            ScheduleBinding(**invalid)  # type: ignore[arg-type]
+
+    schema = json.loads(
+        (ROOT / "catalog" / "schema" / "instance.schema.json").read_text(encoding="utf-8")
+    )
+    validator = Draft202012Validator(schema["properties"]["schedule"]["oneOf"][1])
+    assert validator.is_valid(valid)
+    assert not validator.is_valid(
+        {key: value for key, value in valid.items() if key != "misfire_grace_seconds"}
+    )
+    assert not validator.is_valid({**valid, "misfire_grace_seconds": 60.5})

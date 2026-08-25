@@ -41,6 +41,11 @@ class ScheduleRecord(Base):
             "misfire_policy IN ('skip','run_once')",
             name="ck_schedules_misfire_policy_supported",
         ),
+        CheckConstraint(
+            "misfire_grace_seconds BETWEEN 0 AND 86400 AND "
+            "misfire_grace_seconds = CAST(misfire_grace_seconds AS INTEGER)",
+            name="ck_schedules_misfire_grace_bounded",
+        ),
         CheckConstraint("version >= 1", name="ck_schedules_version_positive"),
         CheckConstraint(
             "lease_owner IS NULL OR "
@@ -87,6 +92,7 @@ class ScheduleRecord(Base):
     recurrence_version: Mapped[str] = mapped_column(String(64), nullable=False)
     next_run_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     misfire_policy: Mapped[str] = mapped_column(String(16), nullable=False)
+    misfire_grace_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(
         Boolean(create_constraint=True, name="bool_schedules_enabled"),
         nullable=False,

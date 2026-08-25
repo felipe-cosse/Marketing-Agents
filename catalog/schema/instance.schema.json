@@ -28,7 +28,8 @@
           "event_source": {"type": ["string", "null"], "maxLength": 100},
           "cron": {"type": ["string", "null"], "maxLength": 100},
           "timezone": {"type": ["string", "null"], "maxLength": 100},
-          "misfire_policy": {"enum": ["skip", "run_once", null]}
+          "misfire_policy": {"enum": ["skip", "run_once", null]},
+          "misfire_grace_seconds": {"type": ["integer", "null"], "minimum": 0, "maximum": 86400}
         }
       }
     },
@@ -52,11 +53,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["cron", "timezone", "misfire_policy"],
+          "required": ["cron", "timezone", "misfire_policy", "misfire_grace_seconds"],
           "properties": {
             "cron": {"type": "string", "minLength": 1, "maxLength": 100},
             "timezone": {"type": "string", "minLength": 1, "maxLength": 100},
-            "misfire_policy": {"enum": ["skip", "run_once"]}
+            "misfire_policy": {"enum": ["skip", "run_once"]},
+            "misfire_grace_seconds": {"type": "integer", "minimum": 0, "maximum": 86400}
           }
         }
       ]

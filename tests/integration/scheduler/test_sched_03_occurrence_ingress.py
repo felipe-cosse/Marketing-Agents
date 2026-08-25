@@ -184,6 +184,7 @@ def _schedule() -> Schedule:
         timezone="America/Los_Angeles",
         next_run_at_utc=DUE,
         misfire_policy=MisfirePolicy.RUN_ONCE,
+        misfire_grace_seconds=300,
         enabled=True,
         recurrence_version=SCHEDULE_RECURRENCE_VERSION,
     )

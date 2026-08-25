@@ -145,6 +145,7 @@ class TriggerBinding(FrozenModel):
     cron: str | None = Field(default=None, max_length=100)
     timezone: str | None = Field(default=None, max_length=100)
     misfire_policy: Literal["skip", "run_once"] | None = None
+    misfire_grace_seconds: int | None = Field(default=None, ge=0, le=86_400, strict=True)
 
 
 class ConnectorBinding(FrozenModel):
@@ -157,6 +158,7 @@ class ScheduleBinding(FrozenModel):
     cron: str = Field(min_length=1, max_length=100)
     timezone: str = Field(min_length=1, max_length=100)
     misfire_policy: Literal["skip", "run_once"]
+    misfire_grace_seconds: int = Field(ge=0, le=86_400, strict=True)
 
 
 class AgentInstanceRecord(FrozenModel):

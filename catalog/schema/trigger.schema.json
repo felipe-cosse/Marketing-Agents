@@ -10,6 +10,7 @@
     "event_source": {"type": ["string", "null"], "maxLength": 100},
     "cron": {"type": ["string", "null"], "maxLength": 100},
     "timezone": {"type": ["string", "null"], "maxLength": 100},
-    "misfire_policy": {"enum": ["skip", "run_once", null]}
+    "misfire_policy": {"enum": ["skip", "run_once", null]},
+    "misfire_grace_seconds": {"type": ["integer", "null"], "minimum": 0, "maximum": 86400}
   }
 }

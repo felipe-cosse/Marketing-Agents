@@ -27,6 +27,7 @@ class CreateScheduleCommand:
     cron: str
     timezone: str
     misfire_policy: MisfirePolicy
+    misfire_grace_seconds: int
     enabled: bool
     after_utc: datetime
 
@@ -61,6 +62,7 @@ class ScheduleConfigurationService:
             timezone=command.timezone,
             next_run_at_utc=next_run_at_utc,
             misfire_policy=command.misfire_policy,
+            misfire_grace_seconds=command.misfire_grace_seconds,
             enabled=command.enabled,
             recurrence_version=SCHEDULE_RECURRENCE_VERSION,
         )
