@@ -42,6 +42,31 @@ class Schedule:
 
 
 @dataclass(frozen=True, slots=True)
+class ScheduleClaim:
+    """One fenced lease over a schedule's exact persisted due instant."""
+
+    schedule_id: str
+    scheduled_for_utc: datetime
+    lease_owner: str
+    claimed_at_utc: datetime
+    lease_expires_at_utc: datetime
+    version: int
+
+    def __post_init__(self) -> None:
+        require_id(self.schedule_id, "claim schedule ID")
+        require_utc(self.scheduled_for_utc, "claim scheduled time")
+        require_id(self.lease_owner, "claim lease owner")
+        require_utc(self.claimed_at_utc, "claim time")
+        require_utc(self.lease_expires_at_utc, "claim lease expiry")
+        if self.scheduled_for_utc > self.claimed_at_utc:
+            raise ValueError("claim scheduled time must be due at claim time")
+        if self.lease_expires_at_utc <= self.claimed_at_utc:
+            raise ValueError("claim lease expiry must follow claim time")
+        if type(self.version) is not int or self.version < 2:
+            raise ValueError("claim version must reflect one successful claim")
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleOccurrence:
     id: str
     schedule_id: str
