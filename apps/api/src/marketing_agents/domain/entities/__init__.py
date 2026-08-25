@@ -11,7 +11,7 @@ from .catalog import (
     ToolCapability,
     TriggerDefinition,
 )
-from .control import Schedule, ScheduleOccurrence
+from .control import Schedule, ScheduleClaim, ScheduleOccurrence
 from .external_action import (
     MAX_DELIVERY_ATTEMPTS,
     ActionReservationSnapshot,
@@ -53,6 +53,7 @@ __all__ = [
     "RunPlanSnapshot",
     "RunStep",
     "Schedule",
+    "ScheduleClaim",
     "ScheduleOccurrence",
     "ToolCapability",
     "TriggerDefinition",

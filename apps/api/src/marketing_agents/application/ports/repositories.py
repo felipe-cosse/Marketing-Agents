@@ -30,6 +30,7 @@ from marketing_agents.domain.entities import (
     RunPlanSnapshot,
     RunStep,
     Schedule,
+    ScheduleClaim,
     WorkItem,
 )
 from marketing_agents.domain.enums import (
@@ -99,6 +100,26 @@ class ScheduleRepositoryConflict(RuntimeError):
 
 class ScheduleRepository(Protocol):
     async def get(self, schedule_id: str) -> Schedule | None: ...
+
+    async def get_claim(self, schedule_id: str) -> ScheduleClaim | None: ...
+
+    async def list_claimable_due(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[Schedule, ...]: ...
+
+    async def try_claim(
+        self,
+        *,
+        schedule_id: str,
+        expected_version: int,
+        expected_due_at_utc: datetime,
+        lease_owner: str,
+        claimed_at_utc: datetime,
+        lease_expires_at_utc: datetime,
+    ) -> ScheduleClaim | None: ...
 
     async def add_or_get(self, schedule: Schedule) -> ScheduleInsertResult: ...
 

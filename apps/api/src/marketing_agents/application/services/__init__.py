@@ -86,6 +86,7 @@ from .run_step_lifecycle import (
     RunStepLifecycleService,
     RunStepLifecycleServiceError,
 )
+from .schedule_claiming import ScheduleClaimService
 from .schedule_configuration import (
     CreateScheduleCommand,
     ScheduleConfigurationError,
@@ -158,6 +159,7 @@ __all__ = [
     "RunLifecycleServiceError",
     "RunStepLifecycleService",
     "RunStepLifecycleServiceError",
+    "ScheduleClaimService",
     "ScheduleConfigurationError",
     "ScheduleConfigurationService",
     "TerminalExecutionCleanupError",

@@ -30,6 +30,30 @@ class ScheduleRecord(Base):
         ),
         CheckConstraint("version >= 1", name="ck_schedules_version_positive"),
         CheckConstraint(
+            "lease_owner IS NULL OR "
+            "(length(lease_owner) BETWEEN 1 AND 240 AND lease_owner = trim(lease_owner))",
+            name="ck_schedules_lease_owner_bounded",
+        ),
+        CheckConstraint(
+            "(lease_owner IS NULL AND lease_claimed_at_utc IS NULL "
+            "AND lease_expires_at_utc IS NULL) OR "
+            "(lease_owner IS NOT NULL AND lease_claimed_at_utc IS NOT NULL "
+            "AND lease_expires_at_utc IS NOT NULL)",
+            name="ck_schedules_lease_complete",
+        ),
+        CheckConstraint(
+            "lease_expires_at_utc IS NULL OR lease_expires_at_utc > lease_claimed_at_utc",
+            name="ck_schedules_lease_expiry_after_claim",
+        ),
+        CheckConstraint(
+            "lease_claimed_at_utc IS NULL OR next_run_at_utc <= lease_claimed_at_utc",
+            name="ck_schedules_lease_due_at_claim",
+        ),
+        CheckConstraint(
+            "lease_owner IS NULL OR version >= 2",
+            name="ck_schedules_lease_version_advanced",
+        ),
+        CheckConstraint(
             "length(integrity_digest) = 64",
             name="ck_schedules_integrity_digest_length",
         ),
@@ -53,4 +77,7 @@ class ScheduleRecord(Base):
         nullable=False,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    lease_claimed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    lease_expires_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     integrity_digest: Mapped[str] = mapped_column(String(64), nullable=False)
