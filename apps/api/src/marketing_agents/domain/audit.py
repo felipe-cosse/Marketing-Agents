@@ -107,6 +107,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     }
 )
 _EVENT_AGGREGATES = {
+    "instance.configuration_changed": "agent_instance_configuration",
     "schedule.occurrence_created": "schedule_occurrence",
     "schedule.misfire_skipped": "schedule_occurrence",
     "schedule.misfire_run_once": "schedule_occurrence",
@@ -150,6 +151,14 @@ _EVENT_OUTCOMES = {
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
+    "instance.configuration_changed": frozenset(
+        {
+            "new_configuration",
+            "new_revision",
+            "previous_configuration",
+            "previous_revision",
+        }
+    ),
     "schedule.occurrence_created": frozenset(
         {
             "claim_fingerprint",
@@ -886,11 +895,14 @@ class AuditEventDraft:
         for required_identifier, name in identifiers:
             require_id(required_identifier, name)
         scheduler_aggregate = self.aggregate_type in {"schedule", "schedule_occurrence"}
-        if scheduler_aggregate:
+        runless_aggregate = scheduler_aggregate or self.aggregate_type == (
+            "agent_instance_configuration"
+        )
+        if runless_aggregate:
             if self.run_id is not None:
-                raise ValueError("scheduler audit events must use the global timeline")
+                raise ValueError("runless audit events must use the global timeline")
         elif self.run_id is None:
-            raise ValueError("non-scheduler audit events require one Run timeline")
+            raise ValueError("non-runless audit events require one Run timeline")
         else:
             require_id(self.run_id, "audit run ID")
         if self.schema_version != 1:
@@ -959,6 +971,17 @@ class AuditEventDraft:
                 or self.receipt_id is not None
             ):
                 raise ValueError("rejected run attempt has an invalid nonmutation shape")
+        elif self.aggregate_type == "agent_instance_configuration":
+            if (
+                self.attempted_command is not None
+                or self.expected_version is None
+                or self.observed_version is None
+                or self.observed_state is not None
+                or self.requested_state is not None
+            ):
+                raise ValueError(
+                    "instance configuration audit requires its exact optimistic-version witness"
+                )
         elif any(value is not None for value in rejection_observation_fields):
             raise ValueError("only rejected attempts may retain attempt observations")
         if self.outcome in {AuditOutcome.ACCEPTED, AuditOutcome.OBSERVED}:
@@ -1014,6 +1037,27 @@ class AuditEventDraft:
                 or self.outcome is not AuditOutcome.ACCEPTED
             ):
                 raise ValueError("schedule audit has invalid subject links")
+        elif self.aggregate_type == "agent_instance_configuration":
+            if (
+                self.event_type != "instance.configuration_changed"
+                or not self.aggregate_id.startswith("inst.")
+                or self.schedule_id is not None
+                or self.occurrence_id is not None
+                or self.step_id is not None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.artifact_id is not None
+                or self.attempt_id is not None
+                or self.transition_sequence is not None
+                or self.previous_state is not None
+                or self.new_state is not None
+                or self.reason_code is not None
+                or self.outcome is not AuditOutcome.ACCEPTED
+            ):
+                raise ValueError("instance configuration audit has invalid subject links")
         elif self.aggregate_type == "step":
             if (
                 self.step_id is None
@@ -1313,7 +1357,21 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
-    if draft.event_type in {
+    if draft.event_type == "instance.configuration_changed":
+        previous_revision = metadata["previous_revision"]
+        new_revision = metadata["new_revision"]
+        if (
+            draft.expected_version != previous_revision
+            or draft.observed_version != previous_revision
+            or draft.mutation_version != new_revision
+            or new_revision != previous_revision + 1
+            or canonical_json_bytes(metadata["previous_configuration"])
+            == canonical_json_bytes(metadata["new_configuration"])
+        ):
+            raise ValueError(
+                "instance configuration audit does not match its exact versioned mutation"
+            )
+    elif draft.event_type in {
         "schedule.occurrence_created",
         "schedule.misfire_skipped",
         "schedule.misfire_run_once",

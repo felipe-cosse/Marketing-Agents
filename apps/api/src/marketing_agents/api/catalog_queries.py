@@ -13,6 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol
 
+from marketing_agents.api.instance_configuration_etag import instance_configuration_etag
 from marketing_agents.api.schemas.catalog import (
     AgentInstanceDetailResponse,
     AgentInstanceListResponse,
@@ -48,7 +49,11 @@ from marketing_agents.api.schemas.catalog import (
 from marketing_agents.application.policies.catalog_authorization import (
     authorize_catalog_reader,
 )
+from marketing_agents.application.services.instance_configuration import (
+    InstanceConfigurationSnapshot,
+)
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.instance_configuration import InstanceConfiguration
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import (
     AgentInstanceRecord,
@@ -61,6 +66,10 @@ from marketing_agents.infrastructure.catalog.models import (
     ScheduleBinding,
     ToolCapabilityRecord,
     TriggerBinding,
+)
+from marketing_agents.infrastructure.instance_configuration_constraints import (
+    InstanceConfigurationConstraintError,
+    validate_mock_connector_bindings,
 )
 
 _ETAG_DOMAIN = b"marketing-agents:catalog-api-etag:v1\x00"
@@ -142,6 +151,14 @@ class CatalogQueryExecutor(Protocol):
     async def read(self, principal: AuthenticatedPrincipal) -> CatalogDocuments: ...
 
 
+class InstanceConfigurationSnapshotReader(Protocol):
+    async def read_all(
+        self,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceConfigurationSnapshot: ...
+
+
 class LocalCatalogQueryService:
     """Compile the local source off-loop and return an immutable safe projection."""
 
@@ -150,15 +167,21 @@ class LocalCatalogQueryService:
         catalog_root: Path,
         *,
         compiler: Callable[[Path], CompiledCatalog] = compile_catalog,
+        configuration_reader: InstanceConfigurationSnapshotReader | None = None,
     ) -> None:
         self._catalog_root = Path(catalog_root)
         self._compiler = compiler
+        self._configuration_reader = configuration_reader
         self._documents: CatalogDocuments | None = None
         self._load_task: asyncio.Task[CatalogDocuments] | None = None
+        self._compiled: CompiledCatalog | None = None
+        self._compile_task: asyncio.Task[CompiledCatalog] | None = None
         self._load_lock = asyncio.Lock()
 
     async def read(self, principal: AuthenticatedPrincipal) -> CatalogDocuments:
         authorize_catalog_reader(principal)
+        if self._configuration_reader is not None:
+            return await self._read_effective(principal)
         if self._documents is not None:
             return self._documents
         async with self._load_lock:
@@ -183,6 +206,61 @@ class LocalCatalogQueryService:
             if self._load_task is task:
                 self._load_task = None
             return self._documents
+
+    async def _read_effective(
+        self,
+        principal: AuthenticatedPrincipal,
+    ) -> CatalogDocuments:
+        compiled = await self._compiled_catalog()
+        try:
+            reader = self._configuration_reader
+            if reader is None:
+                raise TypeError("configuration reader is unavailable")
+            snapshot = await reader.read_all(principal=principal)
+            if type(snapshot) is not InstanceConfigurationSnapshot:
+                raise TypeError("configuration reader returned the wrong boundary type")
+            configurations = {
+                configuration.instance_id: configuration
+                for configuration in snapshot.configurations
+            }
+            if len(configurations) != len(snapshot.configurations):
+                raise TypeError("configuration snapshot contains duplicate instances")
+            documents = await asyncio.to_thread(
+                project_catalog,
+                compiled,
+                configurations,
+            )
+            if type(documents) is not CatalogDocuments:
+                raise TypeError("catalog projection returned the wrong boundary type")
+            return documents
+        except Exception:
+            raise CatalogQueryUnavailable("catalog projection is unavailable") from None
+
+    async def _compiled_catalog(self) -> CompiledCatalog:
+        if self._compiled is not None:
+            return self._compiled
+        async with self._load_lock:
+            if self._compiled is not None:
+                return self._compiled
+            task = self._compile_task
+            if task is None:
+                task = asyncio.create_task(asyncio.to_thread(self._compiler, self._catalog_root))
+                self._compile_task = task
+        try:
+            compiled = await asyncio.shield(task)
+            if type(compiled) is not CompiledCatalog:
+                raise TypeError("catalog compiler returned the wrong boundary type")
+        except Exception:
+            async with self._load_lock:
+                if self._compile_task is task:
+                    self._compile_task = None
+            raise CatalogQueryUnavailable("catalog projection is unavailable") from None
+        async with self._load_lock:
+            if self._compiled is None:
+                self._compiled = compiled
+            if self._compile_task is task:
+                self._compile_task = None
+            return self._compiled
 
     def _compile_and_project(self) -> CatalogDocuments:
         compiled = self._compiler(self._catalog_root)
@@ -316,23 +394,80 @@ def _schedule_view(record: ScheduleBinding | None) -> ScheduleBindingView | None
     )
 
 
-def _instance_view(record: AgentInstanceRecord) -> AgentInstanceView:
+def _instance_view(
+    record: AgentInstanceRecord,
+    configuration: InstanceConfiguration | None = None,
+) -> AgentInstanceView:
     if record.variant is None:
         raise CatalogQueryUnavailable("instance source ordinal is unavailable")
+    if configuration is not None and configuration.instance_id != record.id:
+        raise CatalogQueryUnavailable("effective instance configuration identity is invalid")
     return AgentInstanceView(
         id=record.id,
         template_id=record.template_id,
         display_order=record.display_order,
-        enabled=record.enabled,
+        enabled=record.enabled if configuration is None else configuration.enabled,
         source_ordinal=record.variant.source_ordinal,
-        variant_label=record.variant.variant_label,
-        trigger_bindings=tuple(_trigger_view(item) for item in record.trigger_bindings),
-        connector_bindings={
-            key: _connector_view(record.connector_bindings[key])
-            for key in sorted(record.connector_bindings)
-        },
-        schedule=_schedule_view(record.schedule),
-        configuration_revision=record.configuration_revision,
+        variant_label=(
+            record.variant.variant_label if configuration is None else configuration.variant_label
+        ),
+        trigger_bindings=(
+            tuple(_trigger_view(item) for item in record.trigger_bindings)
+            if configuration is None
+            else tuple(
+                TriggerBindingView(
+                    type=item.kind.value,
+                    enabled=item.enabled,
+                    event_source=item.event_source,
+                    cron=item.cron,
+                    timezone=item.timezone,
+                    misfire_policy=(
+                        None if item.misfire_policy is None else item.misfire_policy.value
+                    ),
+                    misfire_grace_seconds=item.misfire_grace_seconds,
+                )
+                for item in configuration.trigger_bindings
+            )
+        ),
+        connector_bindings=(
+            {
+                key: _connector_view(record.connector_bindings[key])
+                for key in sorted(record.connector_bindings)
+            }
+            if configuration is None
+            else {
+                family: ConnectorBindingView(
+                    connector_family=binding.connector_family,
+                    binding_id=binding.binding_id,
+                    enabled=binding.enabled,
+                )
+                for family, binding in configuration.connector_bindings.items()
+            }
+        ),
+        schedule=(
+            _schedule_view(record.schedule)
+            if configuration is None
+            else (
+                None
+                if configuration.schedule is None
+                else ScheduleBindingView(
+                    cron=configuration.schedule.cron,
+                    timezone=configuration.schedule.timezone,
+                    misfire_policy=configuration.schedule.misfire_policy.value,
+                    misfire_grace_seconds=configuration.schedule.misfire_grace_seconds,
+                )
+            )
+        ),
+        configuration_revision=(
+            record.configuration_revision
+            if configuration is None
+            else configuration.configuration_revision
+        ),
+        configuration_etag=instance_configuration_etag(
+            record.configuration_revision
+            if configuration is None
+            else configuration.configuration_revision
+        ),
     )
 
 
@@ -410,15 +545,18 @@ def _validate_relationships(
             raise CatalogQueryUnavailable("instance template reference is invalid")
 
 
-def project_catalog(compiled: CompiledCatalog) -> CatalogDocuments:
-    """Create every API-02 representation from one validated immutable source."""
+def project_catalog(
+    compiled: CompiledCatalog,
+    configurations: Mapping[str, InstanceConfiguration] | None = None,
+) -> CatalogDocuments:
+    """Create source-authoritative views with an optional complete deployment overlay."""
 
     if type(compiled) is not CompiledCatalog:
         raise CatalogQueryUnavailable("catalog source has the wrong boundary type")
     department_by_id = _index_by_id(compiled.departments, kind="department")
     function_by_id = _index_by_id(compiled.functions, kind="function")
     template_by_id = _index_by_id(compiled.templates, kind="template")
-    _index_by_id(compiled.instances, kind="instance")
+    instance_by_id = _index_by_id(compiled.instances, kind="instance")
     capability_by_id = _index_by_id(compiled.tool_capabilities, kind="capability")
     policy_by_id = _index_by_id(compiled.approval_policies, kind="approval policy")
     _validate_relationships(
@@ -457,7 +595,50 @@ def project_catalog(compiled: CompiledCatalog) -> CatalogDocuments:
     policy_view_by_id = {item.id: item for item in policy_views}
     template_views = tuple(_template_view(item) for item in compiled.templates)
     template_view_by_id = {item.id: item for item in template_views}
-    instance_views = tuple(_instance_view(item) for item in compiled.instances)
+    configuration_by_id: Mapping[str, InstanceConfiguration]
+    if configurations is None:
+        configuration_by_id = MappingProxyType({})
+    else:
+        if not isinstance(configurations, Mapping):
+            raise CatalogQueryUnavailable("effective instance configuration is malformed")
+        normalized_configurations: dict[str, InstanceConfiguration] = {}
+        for instance_id, configuration in configurations.items():
+            if (
+                type(instance_id) is not str
+                or type(configuration) is not InstanceConfiguration
+                or configuration.instance_id != instance_id
+                or instance_id in normalized_configurations
+            ):
+                raise CatalogQueryUnavailable("effective instance configuration is malformed")
+            normalized_configurations[instance_id] = configuration
+        if set(normalized_configurations) != set(instance_by_id):
+            raise CatalogQueryUnavailable(
+                "effective instance configuration must cover the complete catalog"
+            )
+        for instance_id, configuration in normalized_configurations.items():
+            source_instance = instance_by_id[instance_id]
+            template = template_by_id[source_instance.template_id]
+            configured_trigger_types = {
+                binding.kind.value for binding in configuration.trigger_bindings
+            }
+            if not configured_trigger_types.issubset(template.supported_trigger_types):
+                raise CatalogQueryUnavailable(
+                    "effective instance configuration contradicts its template triggers"
+                )
+            try:
+                validate_mock_connector_bindings(
+                    compiled,
+                    instance_id,
+                    configuration.connector_bindings,
+                )
+            except InstanceConfigurationConstraintError:
+                raise CatalogQueryUnavailable(
+                    "effective instance configuration contradicts its template connectors"
+                ) from None
+        configuration_by_id = MappingProxyType(normalized_configurations)
+    instance_views = tuple(
+        _instance_view(item, configuration_by_id.get(item.id)) for item in compiled.instances
+    )
     instance_view_by_id = {item.id: item for item in instance_views}
 
     department_counts = Counter[str]()
@@ -527,7 +708,7 @@ def project_catalog(compiled: CompiledCatalog) -> CatalogDocuments:
                         display_name=template.display_name,
                         purpose=template.purpose,
                         display_order=instance.display_order,
-                        enabled=instance.enabled,
+                        enabled=instance_view_by_id[instance.id].enabled,
                         operation_classification=template.operation_classification,
                         trigger_types=template.supported_trigger_types,
                         capability_summaries=tuple(
@@ -601,6 +782,7 @@ def project_catalog(compiled: CompiledCatalog) -> CatalogDocuments:
             output_schema=_safe_schema(compiled.output_schema_by_template, template.id),
             template_source_references=template.source_references,
             template_implementation_notes=template.implementation_notes,
+            configuration_schema=(f"/api/v1/agent-instances/{instance.id}/configuration-schema"),
         )
         instance_details[instance.id] = _representation(
             f"agent-instance:{instance.id}", instance_detail

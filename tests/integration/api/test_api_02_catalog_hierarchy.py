@@ -377,6 +377,9 @@ async def test_api_02_catalog_returns_complete_resolved_inventory(
             },
             "schedule": expected_schedule,
             "configurationRevision": instance_source.configuration_revision,
+            "configurationEtag": (
+                f'"instance-configuration-v1-{instance_source.configuration_revision}"'
+            ),
         }
 
     department_ids = {item["id"] for item in body["departments"]}
@@ -698,6 +701,9 @@ async def test_api_02_static_list_and_detail_routes_are_typed_and_prompt_free(
     assert instance_detail.json()["instance"]["id"] == instance.id
     assert instance_detail.json()["template"]["id"] == template.id
     assert instance_detail.json()["sharedTemplateDeploymentCount"] >= 1
+    assert instance_detail.json()["configurationSchema"] == (
+        f"/api/v1/agent-instances/{instance.id}/configuration-schema"
+    )
     prompt = compiled.prompt_text_by_template[template.id]
     assert prompt not in template_detail.text
     assert prompt not in instance_detail.text

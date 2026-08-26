@@ -61,6 +61,7 @@ from marketing_agents.domain.step_lifecycle import (
 )
 from marketing_agents.domain.validation import require_utc
 from marketing_agents.security.audit_metadata import seal_audit_metadata
+from marketing_agents.security.digest_key import DigestKey
 
 _AUDIT_EVENT_ID_DOMAIN = b"marketing-agents:audit-event-id:v1\x00"
 _AUDIT_ATTEMPT_ID_DOMAIN = b"marketing-agents:audit-run-attempt-id:v1\x00"
@@ -103,12 +104,63 @@ class AuditEventFactory:
         context: AuditContext,
         *,
         retention_policy: RetentionPolicy | None = None,
+        configuration_pseudonym_key: DigestKey | None = None,
     ) -> None:
         if type(context) is not AuditContext:
             raise ValueError("audit event factory requires the exact actor context")
         context.verify_integrity()
         self._context = context
         self._retention_policy = retention_policy
+        if configuration_pseudonym_key is not None and (
+            type(configuration_pseudonym_key) is not DigestKey
+        ):
+            raise ValueError("configuration audit pseudonym key must use the exact key type")
+        self._configuration_pseudonym_key = configuration_pseudonym_key
+
+    def instance_configuration_changed(
+        self,
+        *,
+        instance_id: str,
+        previous_configuration: Mapping[str, Any],
+        new_configuration: Mapping[str, Any],
+        previous_revision: int,
+        new_revision: int,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one successful optimistic deployment-configuration mutation."""
+
+        if not isinstance(previous_configuration, Mapping) or not isinstance(
+            new_configuration, Mapping
+        ):
+            raise ValueError("instance configuration audit snapshots must be mappings")
+        if (
+            not isinstance(previous_revision, int)
+            or isinstance(previous_revision, bool)
+            or previous_revision < 1
+            or not isinstance(new_revision, int)
+            or isinstance(new_revision, bool)
+            or new_revision != previous_revision + 1
+        ):
+            raise ValueError("instance configuration audit revisions must advance by exactly one")
+        if canonical_json_bytes(previous_configuration) == canonical_json_bytes(new_configuration):
+            raise ValueError("instance configuration audit requires a material change")
+        return self._build(
+            run_id=None,
+            event_type="instance.configuration_changed",
+            aggregate_type="agent_instance_configuration",
+            aggregate_id=instance_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata={
+                "previous_configuration": previous_configuration,
+                "new_configuration": new_configuration,
+                "previous_revision": previous_revision,
+                "new_revision": new_revision,
+            },
+            expected_version=previous_revision,
+            observed_version=previous_revision,
+            mutation_version=new_revision,
+        )
 
     def schedule_occurrence(
         self,
@@ -1841,6 +1893,7 @@ class AuditEventFactory:
             occurred_at=occurred_at,
             classification=classification,
             retention_policy=self._retention_policy,
+            configuration_pseudonym_key=self._configuration_pseudonym_key,
         )
         identity: dict[str, Any] = {
             "schema_version": 1,
