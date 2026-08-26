@@ -1,15 +1,21 @@
-"""FastAPI identity and narrow approval-decision dependency seams."""
+"""FastAPI identity, catalog-query, and approval-decision dependency seams."""
 
 from __future__ import annotations
 
+import inspect
 from typing import Annotated, Protocol, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import SecretStr
 
+from marketing_agents.api.catalog_queries import CatalogQueryExecutor
 from marketing_agents.application.policies.approval_authorization import (
     ApprovalAuthorizationError,
     authorize_approval_principal,
+)
+from marketing_agents.application.policies.catalog_authorization import (
+    CatalogAuthorizationError,
+    authorize_catalog_reader,
 )
 from marketing_agents.application.ports.identity import (
     AuthenticationEvidence,
@@ -66,6 +72,19 @@ def get_readiness_probe(request: Request) -> ReadinessProbe | None:
     if probe is None or not callable(check):
         return None
     return cast(ReadinessProbe, probe)
+
+
+def get_catalog_query_executor(request: Request) -> CatalogQueryExecutor | None:
+    """Resolve the optional catalog query seam without trusting truthiness."""
+
+    try:
+        executor = getattr(request.app.state, "catalog_query_service", None)
+        read = getattr(executor, "read", None)
+    except Exception:
+        return None
+    if executor is None or not callable(read) or not inspect.iscoroutinefunction(read):
+        return None
+    return cast(CatalogQueryExecutor, executor)
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:
@@ -147,6 +166,24 @@ async def require_authenticated_principal(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="authentication required",
+        ) from None
+    return principal
+
+
+async def require_catalog_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    """Apply the authenticated human viewer-equivalent boundary before loading."""
+
+    try:
+        authorize_catalog_reader(principal)
+    except CatalogAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="catalog read is forbidden",
         ) from None
     return principal
 
