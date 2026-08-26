@@ -1,0 +1,128 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-02",
+  "matrix_statement_sha256": "7622dbb507380e3f28ac139ea0c821e1f1119d85a60e38d6ae2d39efec875567",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/catalog.py",
+      "apps/api/src/marketing_agents/api/schemas/catalog.py",
+      "apps/api/src/marketing_agents/application/policies/catalog_authorization.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-02.json",
+      "docs/verification/requirements/API-02.md",
+      "tests/integration/api/test_api_02_catalog_hierarchy.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/catalog_queries.py",
+          "apps/api/src/marketing_agents/api/routes/catalog.py",
+          "apps/api/src/marketing_agents/api/schemas/catalog.py",
+          "apps/api/src/marketing_agents/application/policies/catalog_authorization.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_02_catalog_hierarchy.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-safe-static-catalog",
+      "type": "contract",
+      "statement": "Authenticated control-plane readers receive typed camel-case aggregate, template, capability, policy, and instance list/detail projections with all resolved catalog records, full detail schemas, exact stable IDs, and no system-prompt text or compiler file references.",
+      "test_refs": [
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_catalog_returns_complete_resolved_inventory",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_aggregate_routes_do_not_leak_prompt_or_internal_fields",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_static_list_and_detail_routes_are_typed_and_prompt_free",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_openapi_declares_all_static_typed_read_contracts"
+      ]
+    },
+    {
+      "id": "exact-derived-hierarchy",
+      "type": "positive",
+      "statement": "The ordered department-to-function-to-instance hierarchy derives all counts and relationships from the resolved source: 5 departments, 12 functions, 36 templates, 43 instances, department totals 12/6/5/14/6, and exactly two source-ordinal deployments for each of seven Community templates.",
+      "test_refs": [
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_hierarchy_returns_exact_ordered_ui_projection",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_hierarchy_preserves_department_and_community_multiplicity",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_counts_are_derived_from_resolved_records"
+      ]
+    },
+    {
+      "id": "strong-conditional-representations",
+      "type": "contract",
+      "statement": "Every static representation is serialized once into sealed immutable canonical bytes, receives a representation-specific strong ETag over the exact bytes served, honors strong or weak If-None-Match validators with 304, and cannot drift if nested source data changes after projection.",
+      "test_refs": [
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_etag_is_strong_stable_conditional_and_projection_specific",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_representation_bytes_and_etag_cannot_drift_after_projection",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_catalog_source_failures_are_sanitized"
+      ]
+    },
+    {
+      "id": "authorized-bounded-offline-reads",
+      "type": "negative_control",
+      "statement": "All catalog reads authorize a server-issued human viewer-equivalent role before loading, reject service or unrelated principals, compile and project offline in one bounded single-flight worker, cache only a complete immutable result, and return a sanitized no-store 503 for unavailable, malformed, mismatched, synchronous, or timed-out query dependencies.",
+      "test_refs": [
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_reads_are_offline_side_effect_free_and_compilation_is_offloaded",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_catalog_source_failures_are_sanitized",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_blocking_projection_and_sync_query_cannot_escape_timeout",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py::test_api_02_catalog_routes_require_human_control_plane_reader_before_loading"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-02-catalog-hierarchy",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/unit/application/test_obj_01_five_department_organization.py",
+        "tests/catalog/test_cat_01_authoritative_catalog.py",
+        "tests/catalog/test_del_02_validated_catalog_release.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "complete-safe-static-catalog",
+        "exact-derived-hierarchy",
+        "strong-conditional-representations",
+        "authorized-bounded-offline-reads"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/catalog.py",
+      "apps/api/src/marketing_agents/api/schemas/catalog.py",
+      "apps/api/src/marketing_agents/application/policies/catalog_authorization.py"
+    ],
+    "gate_id": "api-02-catalog-hierarchy"
+  },
+  "limitations": [
+    "API-02 projects the compiled version-controlled catalog and its seed deployment defaults. API-03 and DEL-04 still own persisted effective instance configuration, database/source parity, optimistic revisions, transactional seeding, and mutation; the successful static projection is not described as live database state.",
+    "The deployment-only configuration-schema route and PATCH remain API-03 scope. The instance status summary and recent-run enrichment remain API-07 scope and must use a separate runtime watermark; the future fixed status route must be registered before the dynamic instance-detail route.",
+    "Capability display labels are deterministic neutral API labels derived from stable capability IDs because the v1 source capability model has no explicit display-name field. A later catalog format may make those labels authoritative source data.",
+    "The first successful complete source projection is cached for the life of the API process. Version-controlled catalog deployment therefore requires a process restart; API-03 must add explicit invalidation/versioning before mutable persisted configuration participates in these representations.",
+    "Static list routes return the entire bounded v1 inventory rather than server-side filters or pagination. Browser search/filter behavior remains WEB-02 scope, while a later API version may add query filters without changing these complete snapshots.",
+    "API-09 still owns the unified application/problem+json error vocabulary and global retry/timeout policy. DEL-07 still owns a committed OpenAPI snapshot and generated client drift gate; API-02 verifies the live typed OpenAPI declarations only."
+  ]
+}
