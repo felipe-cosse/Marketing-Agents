@@ -21,6 +21,7 @@ from .instance_configuration import (
 from .run import RunPersistenceInvariantError, SQLAlchemyRunRepository
 from .schedule import SchedulePersistenceConflict, SQLAlchemyScheduleRepository
 from .step import SQLAlchemyRunStepRepository, StepPersistenceConflict
+from .webhook import SQLAlchemyWebhookReceiptRepository, WebhookReceiptPersistenceError
 from .work import SQLAlchemyWorkRepository
 
 __all__ = [
@@ -43,7 +44,9 @@ __all__ = [
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",
     "SQLAlchemyScheduleRepository",
+    "SQLAlchemyWebhookReceiptRepository",
     "SQLAlchemyWorkRepository",
     "SchedulePersistenceConflict",
     "StepPersistenceConflict",
+    "WebhookReceiptPersistenceError",
 ]

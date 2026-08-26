@@ -31,6 +31,8 @@ _RUNTIME_CONTROL_DENIAL_ID_DOMAIN = b"marketing-agents:audit-runtime-control-den
 _RUNTIME_CONTROL_DENIAL_ID_PREFIX = "runtime-control-denial-v1:"
 _MANUAL_AUDIT_AGGREGATE_ID_DOMAIN = b"marketing-agents:audit-manual-ingress-id:v1\x00"
 _MANUAL_AUDIT_AGGREGATE_ID_PREFIX = "manual-audit-v1:"
+_WEBHOOK_AUDIT_AGGREGATE_ID_DOMAIN = b"marketing-agents:audit-webhook-ingress-id:v1\x00"
+_WEBHOOK_AUDIT_AGGREGATE_ID_PREFIX = "webhook-audit-v1:"
 RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     {
         "adapter_contract_drift",
@@ -113,6 +115,12 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
 _EVENT_AGGREGATES = {
     "ingress.manual_received": "manual_ingress",
     "ingress.schema_rejected": "manual_ingress_rejection",
+    "webhook.signature_validated": "webhook_ingress",
+    "webhook.signature_rejected": "webhook_ingress",
+    "webhook.received": "webhook_ingress",
+    "webhook.duplicate_suppressed": "webhook_ingress",
+    "webhook.idempotency_collision": "webhook_ingress",
+    "webhook.schema_rejected": "webhook_ingress",
     "work.created": "work_item",
     "work.duplicate_returned": "manual_ingress",
     "work.idempotency_collision": "manual_ingress",
@@ -159,6 +167,9 @@ _EVENT_OUTCOMES = {
     "runtime.control_denied": "rejected",
     "work.idempotency_collision": "rejected",
     "ingress.schema_rejected": "rejected",
+    "webhook.signature_rejected": "rejected",
+    "webhook.idempotency_collision": "rejected",
+    "webhook.schema_rejected": "rejected",
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
@@ -184,6 +195,41 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
             "trigger_id",
             "workflow_id",
         }
+    ),
+    "webhook.signature_validated": frozenset({"source", "trigger_id", "webhook_attempt_id"}),
+    "webhook.signature_rejected": frozenset({"source", "trigger_id", "webhook_attempt_id"}),
+    "webhook.received": frozenset(
+        {
+            "source",
+            "trigger_id",
+            "webhook_attempt_id",
+            "webhook_receipt_id",
+            "receipt_disposition",
+            "target_count",
+        }
+    ),
+    "webhook.duplicate_suppressed": frozenset(
+        {
+            "source",
+            "trigger_id",
+            "webhook_attempt_id",
+            "webhook_receipt_id",
+            "receipt_disposition",
+            "target_count",
+        }
+    ),
+    "webhook.idempotency_collision": frozenset(
+        {
+            "source",
+            "trigger_id",
+            "webhook_attempt_id",
+            "webhook_receipt_id",
+            "receipt_disposition",
+            "target_count",
+        }
+    ),
+    "webhook.schema_rejected": frozenset(
+        {"source", "trigger_id", "webhook_attempt_id", "rejection_code"}
     ),
     "work.created": frozenset(
         {
@@ -448,6 +494,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
 _EVENT_OPTIONAL_METADATA: Mapping[str, frozenset[str]] = {
     "attempt.completed": frozenset({"safe_error_code"}),
     "runtime.control_denied": frozenset({"retry_after_seconds"}),
+    "webhook.schema_rejected": frozenset({"configuration_revision", "instance_id", "workflow_id"}),
 }
 _RUN_COMMANDS = frozenset(
     {
@@ -498,6 +545,7 @@ _SAFE_AUDIT_REASONS = frozenset(
         "input_validated",
         "idempotency_conflict",
         "schema_rejected",
+        "webhook_authentication_failed",
         "invalid_cancellation_effects",
         "invalid_transition",
         "non_monotonic_time",
@@ -561,6 +609,35 @@ def _manual_audit_aggregate_id(
     )
 
 
+def _webhook_audit_aggregate_id(
+    *,
+    webhook_attempt_id: str,
+    event_type: str,
+) -> str:
+    """Derive one webhook audit family without retaining source event material."""
+
+    require_id(webhook_attempt_id, "webhook audit attempt ID")
+    if event_type not in {
+        "webhook.signature_validated",
+        "webhook.signature_rejected",
+        "webhook.received",
+        "webhook.duplicate_suppressed",
+        "webhook.idempotency_collision",
+        "webhook.schema_rejected",
+    }:
+        raise ValueError("webhook audit event type is unsupported")
+    identity = {
+        "event_type": event_type,
+        "webhook_attempt_id": webhook_attempt_id,
+    }
+    return (
+        _WEBHOOK_AUDIT_AGGREGATE_ID_PREFIX
+        + hashlib.sha256(
+            _WEBHOOK_AUDIT_AGGREGATE_ID_DOMAIN + canonical_json_bytes(identity)
+        ).hexdigest()
+    )
+
+
 def _runtime_control_denial_aggregate_id(
     *,
     actor_id: str,
@@ -615,6 +692,7 @@ class AuditActorSource(StrEnum):
     """Stable provenance class for a timeline actor."""
 
     SYSTEM = "system"
+    SERVICE = "service"
     USER = "user"
     WORKER = "worker"
     CONNECTOR = "connector"
@@ -628,6 +706,7 @@ class AuditOutcome(StrEnum):
 
 _AUTH_METHODS_BY_SOURCE: Mapping[AuditActorSource, frozenset[str]] = {
     AuditActorSource.SYSTEM: frozenset({"internal"}),
+    AuditActorSource.SERVICE: frozenset({"verified_webhook"}),
     AuditActorSource.WORKER: frozenset({"internal"}),
     AuditActorSource.USER: frozenset({"local_session", "local_fixed", "bearer"}),
     AuditActorSource.CONNECTOR: frozenset({"connector_registry"}),
@@ -697,6 +776,18 @@ class AuditContext:
             actor_id=actor_id,
             actor_source=AuditActorSource.SYSTEM,
             auth_method="internal",
+            correlation_id=correlation_id,
+            _seal=_AUDIT_CONTEXT_SEAL,
+        )
+
+    @classmethod
+    def verified_webhook(cls, actor_id: str, *, correlation_id: str) -> AuditContext:
+        """Issue the service provenance retained after webhook authentication."""
+
+        return cls(
+            actor_id=actor_id,
+            actor_source=AuditActorSource.SERVICE,
+            auth_method="verified_webhook",
             correlation_id=correlation_id,
             _seal=_AUDIT_CONTEXT_SEAL,
         )
@@ -997,6 +1088,7 @@ class AuditEventDraft:
         runless_aggregate = scheduler_aggregate or self.aggregate_type in {
             "agent_instance_configuration",
             "manual_ingress_rejection",
+            "webhook_ingress",
         }
         if runless_aggregate:
             if self.run_id is not None:
@@ -1158,6 +1250,46 @@ class AuditEventDraft:
                 or self.outcome is not AuditOutcome.ACCEPTED
             ):
                 raise ValueError("instance configuration audit has invalid subject links")
+        elif self.aggregate_type == "webhook_ingress":
+            if (
+                self.schedule_id is not None
+                or self.occurrence_id is not None
+                or self.step_id is not None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.artifact_id is not None
+                or self.attempt_id is not None
+                or self.transition_sequence is not None
+                or self.previous_state is not None
+                or self.new_state is not None
+                or self.expected_version is not None
+                or self.observed_version is not None
+                or self.observed_state is not None
+                or self.requested_state is not None
+                or self.attempted_command is not None
+            ):
+                raise ValueError("webhook audit has invalid subject links")
+            expected_reason = {
+                "webhook.signature_rejected": "webhook_authentication_failed",
+                "webhook.idempotency_collision": "idempotency_conflict",
+                "webhook.schema_rejected": "schema_rejected",
+            }.get(self.event_type)
+            if expected_reason is None:
+                if (
+                    self.outcome is not AuditOutcome.ACCEPTED
+                    or self.mutation_version != 1
+                    or self.reason_code is not None
+                ):
+                    raise ValueError("accepted webhook audit has an invalid outcome shape")
+            elif (
+                self.outcome is not AuditOutcome.REJECTED
+                or self.mutation_version is not None
+                or self.reason_code != expected_reason
+            ):
+                raise ValueError("rejected webhook audit has an invalid outcome shape")
         elif self.aggregate_type in {"manual_ingress", "manual_ingress_rejection", "work_item"}:
             if (
                 self.schedule_id is not None
@@ -1490,7 +1622,46 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
-    if draft.event_type in {
+    if draft.event_type.startswith("webhook."):
+        expected_actor_source = (
+            AuditActorSource.SYSTEM
+            if draft.event_type == "webhook.signature_rejected"
+            else AuditActorSource.SERVICE
+        )
+        expected_auth_method = (
+            "internal" if draft.event_type == "webhook.signature_rejected" else "verified_webhook"
+        )
+        if (
+            draft.actor_source is not expected_actor_source
+            or draft.auth_method != expected_auth_method
+        ):
+            raise ValueError("webhook audit actor context does not match its trust boundary")
+        if draft.aggregate_id != _webhook_audit_aggregate_id(
+            webhook_attempt_id=metadata["webhook_attempt_id"],
+            event_type=draft.event_type,
+        ):
+            raise ValueError("webhook audit aggregate identity does not match")
+        expected_disposition = {
+            "webhook.received": "created",
+            "webhook.duplicate_suppressed": "replayed",
+            "webhook.idempotency_collision": "collision",
+        }.get(draft.event_type)
+        if expected_disposition is not None and (
+            metadata["receipt_disposition"] != expected_disposition
+        ):
+            raise ValueError("webhook receipt disposition does not match its event type")
+        if draft.event_type == "webhook.schema_rejected":
+            if metadata["rejection_code"] != "schema_rejected":
+                raise ValueError("webhook schema rejection audit code is invalid")
+            configuration_links = {
+                "configuration_revision",
+                "instance_id",
+                "workflow_id",
+            }
+            present_links = configuration_links.intersection(metadata)
+            if present_links and present_links != configuration_links:
+                raise ValueError("webhook schema rejection linkage must be complete")
+    elif draft.event_type in {
         "ingress.manual_received",
         "ingress.schema_rejected",
         "work.created",

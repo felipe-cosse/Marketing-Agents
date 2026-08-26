@@ -135,16 +135,19 @@ class AuditEventRecord(Base):
             "(aggregate_type = 'manual_ingress_rejection' AND "
             "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NULL AND "
             "occurrence_id IS NULL) OR "
+            "(aggregate_type = 'webhook_ingress' AND "
+            "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NULL AND "
+            "occurrence_id IS NULL) OR "
             "(aggregate_type NOT IN "
             "('schedule','schedule_occurrence','agent_instance_configuration',"
-            "'manual_ingress_rejection') AND "
+            "'manual_ingress_rejection','webhook_ingress') AND "
             "run_id IS NOT NULL AND run_sequence IS NOT NULL AND schedule_id IS NULL AND "
             "occurrence_id IS NULL))",
             name="ck_audit_events_timeline_scope",
         ),
         CheckConstraint("schema_version = 1", name="ck_audit_events_schema_version"),
         CheckConstraint(
-            "actor_source IN ('system','user','worker','connector')",
+            "actor_source IN ('system','service','user','worker','connector')",
             name="ck_audit_events_actor_source",
         ),
         CheckConstraint(
@@ -198,6 +201,31 @@ class AuditEventRecord(Base):
             "artifact_id IS NULL AND attempt_id IS NULL AND attempted_command IS NULL AND "
             "observed_state IS NULL AND requested_state IS NULL AND previous_state IS NULL AND "
             "new_state IS NULL) OR "
+            "(aggregate_type = 'webhook_ingress' AND event_type IN "
+            "('webhook.signature_validated','webhook.signature_rejected','webhook.received',"
+            "'webhook.duplicate_suppressed','webhook.idempotency_collision',"
+            "'webhook.schema_rejected') AND run_id IS NULL AND "
+            "aggregate_id LIKE 'webhook-audit-v1:%' AND "
+            "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
+            "step_id IS NULL AND action_id IS NULL AND action_attempt_number IS NULL AND "
+            "receipt_id IS NULL AND approval_request_id IS NULL AND "
+            "approval_decision_id IS NULL AND artifact_id IS NULL AND attempt_id IS NULL AND "
+            "attempted_command IS NULL AND expected_version IS NULL AND "
+            "observed_version IS NULL AND observed_state IS NULL AND "
+            "requested_state IS NULL AND previous_state IS NULL AND new_state IS NULL AND "
+            "((event_type = 'webhook.signature_rejected' AND actor_source = 'system' AND "
+            "auth_method = 'internal' AND outcome = 'rejected' AND mutation_version IS NULL AND "
+            "reason_code = 'webhook_authentication_failed') OR "
+            "(event_type IN ('webhook.signature_validated','webhook.received',"
+            "'webhook.duplicate_suppressed') AND actor_source = 'service' AND "
+            "auth_method = 'verified_webhook' AND outcome = 'accepted' AND "
+            "mutation_version = 1 AND reason_code IS NULL) OR "
+            "(event_type = 'webhook.idempotency_collision' AND actor_source = 'service' AND "
+            "auth_method = 'verified_webhook' AND outcome = 'rejected' AND "
+            "mutation_version IS NULL AND reason_code = 'idempotency_conflict') OR "
+            "(event_type = 'webhook.schema_rejected' AND actor_source = 'service' AND "
+            "auth_method = 'verified_webhook' AND outcome = 'rejected' AND "
+            "mutation_version IS NULL AND reason_code = 'schema_rejected'))) OR "
             "(aggregate_type = 'manual_ingress' AND event_type IN "
             "('ingress.manual_received','work.duplicate_returned',"
             "'work.idempotency_collision') AND run_id IS NOT NULL AND "

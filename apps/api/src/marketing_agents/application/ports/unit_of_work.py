@@ -18,6 +18,7 @@ from marketing_agents.application.ports.repositories import (
     RunRepository,
     RunStepRepository,
     ScheduleRepository,
+    WebhookReceiptRepository,
     WorkRepository,
 )
 
@@ -25,6 +26,9 @@ from marketing_agents.application.ports.repositories import (
 class UnitOfWork(Protocol):
     @property
     def works(self) -> WorkRepository: ...
+
+    @property
+    def webhook_receipts(self) -> WebhookReceiptRepository: ...
 
     @property
     def configurations(self) -> InstanceConfigurationRepository: ...

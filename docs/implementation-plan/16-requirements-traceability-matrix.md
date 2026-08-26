@@ -94,7 +94,7 @@ Allowed status values:
 | API-02 | Read complete catalog/hierarchy. | 09 | Catalog routes | Exact API count tests | verified |
 | API-03 | Configure instances without modifying seeded templates. | 02, 04, 09 | Config table/PATCH | Field/reseed/revision tests | verified |
 | API-04 | Manual dry-run endpoint. | 07, 09 | Dry-run route/intake | API + demo tests | verified |
-| API-05 | Webhook with signature hooks/idempotency. | 07, 09 | Webhook route/verifier | Signature/replay tests | planned |
+| API-05 | Webhook with signature hooks/idempotency. | 07, 09 | Webhook route/verifier | Signature/replay tests | verified |
 | API-06 | Create/inspect/approve/reject immutable approval requests with auth. | 06, 09 | Approval routes/services | Approval API suite | planned |
 | API-07 | Inspect runs, artifacts, and audit. | 09 | Run/artifact/audit routes | API/timeline tests | planned |
 | API-08 | Validate every input and structured output. | 02, 05, 09, 10 | Schema validation boundaries | Negative schema tests | planned |

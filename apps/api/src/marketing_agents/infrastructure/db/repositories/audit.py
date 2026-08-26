@@ -267,7 +267,7 @@ class SQLAlchemyAuditRepository:
         self,
         events: tuple[AuditEventDraft, ...],
     ) -> tuple[AuditEvent, ...]:
-        """Append a scheduler batch or one exact instance-configuration event."""
+        """Append one recognized runless event family without a per-Run sequence."""
 
         if type(events) is not tuple or not events or len(events) > 128:
             raise ValueError("global audit append batch must contain from 1 through 128 events")
@@ -296,7 +296,43 @@ class SQLAlchemyAuditRepository:
             and event.aggregate_type == "manual_ingress_rejection"
             for event in events
         )
-        if not scheduler_batch and not instance_configuration_event and not ingress_rejection_event:
+        webhook_event_types = tuple(event.event_type for event in events)
+        webhook_allowed_sequences = {
+            ("webhook.signature_rejected",),
+            ("webhook.signature_validated",),
+            ("webhook.signature_validated", "webhook.schema_rejected"),
+            ("webhook.signature_validated", "webhook.received"),
+            ("webhook.signature_validated", "webhook.duplicate_suppressed"),
+            ("webhook.signature_validated", "webhook.idempotency_collision"),
+        }
+        webhook_batch = webhook_event_types in webhook_allowed_sequences and all(
+            event.run_id is None
+            and event.schedule_id is None
+            and event.occurrence_id is None
+            and event.aggregate_type == "webhook_ingress"
+            for event in events
+        )
+        if webhook_batch:
+            metadata = tuple(event.safe_metadata.values for event in events)
+            webhook_batch = (
+                len(
+                    {
+                        (
+                            item["source"],
+                            item["trigger_id"],
+                            item["webhook_attempt_id"],
+                        )
+                        for item in metadata
+                    }
+                )
+                == 1
+            )
+        if not (
+            scheduler_batch
+            or instance_configuration_event
+            or ingress_rejection_event
+            or webhook_batch
+        ):
             raise ValueError("global audit append requires a schedule batch or exact runless event")
         if len({event.id for event in events}) != len(events):
             raise ValueError("global audit append batch event IDs must be unique")

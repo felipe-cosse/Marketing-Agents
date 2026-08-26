@@ -32,6 +32,7 @@ from .step import (
     RunStepRecord,
     RunStepStateTransitionRecord,
 )
+from .webhook import WebhookReceiptDeliveryRecord, WebhookReceiptRecord
 from .work import WorkItemRecord
 
 __all__ = [
@@ -62,5 +63,7 @@ __all__ = [
     "RunStepStateTransitionRecord",
     "ScheduleOccurrenceRecord",
     "ScheduleRecord",
+    "WebhookReceiptDeliveryRecord",
+    "WebhookReceiptRecord",
     "WorkItemRecord",
 ]

@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from marketing_agents.infrastructure.db.base import Base
@@ -23,6 +31,11 @@ RUN_COMMANDS_SQL = (
 class RunRecord(Base):
     __tablename__ = "runs"
     __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "work_item_id",
+            name="uq_runs_id_work_item",
+        ),
         CheckConstraint("version >= 1", name="ck_runs_version_positive"),
         CheckConstraint(
             "next_timeline_sequence >= 0",

@@ -21,12 +21,14 @@ from marketing_agents.domain.approval import (
     assert_use_binds_request,
 )
 from marketing_agents.domain.audit import (
+    AuditActorSource,
     AuditContext,
     AuditEventDraft,
     AuditOutcome,
     _issue_audit_event_draft,
     _manual_audit_aggregate_id,
     _runtime_control_denial_aggregate_id,
+    _webhook_audit_aggregate_id,
     normalize_audit_reason_code,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
@@ -62,13 +64,109 @@ from marketing_agents.domain.step_lifecycle import (
     StepTransitionResult,
     initial_pending_transition,
 )
-from marketing_agents.domain.validation import require_utc
+from marketing_agents.domain.validation import require_id, require_utc
 from marketing_agents.security.audit_metadata import seal_audit_metadata
 from marketing_agents.security.digest_key import DigestKey
 
 _AUDIT_EVENT_ID_DOMAIN = b"marketing-agents:audit-event-id:v1\x00"
 _AUDIT_ATTEMPT_ID_DOMAIN = b"marketing-agents:audit-run-attempt-id:v1\x00"
 _SCHEDULE_CLAIM_FINGERPRINT_DOMAIN = b"marketing-agents:schedule-claim:v1\x00"
+_MAX_WEBHOOK_AUDIT_TARGET_COUNT = 64
+
+
+def _webhook_signature_metadata(
+    *,
+    source: str,
+    trigger_id: str,
+    webhook_attempt_id: str,
+) -> dict[str, Any]:
+    for value, field_name in (
+        (source, "webhook audit source"),
+        (trigger_id, "webhook audit trigger ID"),
+        (webhook_attempt_id, "webhook audit attempt ID"),
+    ):
+        require_id(value, field_name)
+    return {
+        "source": source,
+        "trigger_id": trigger_id,
+        "webhook_attempt_id": webhook_attempt_id,
+    }
+
+
+def _webhook_receipt_metadata(
+    *,
+    source: str,
+    trigger_id: str,
+    webhook_attempt_id: str,
+    webhook_receipt_id: str,
+    disposition: str,
+    target_count: int,
+) -> Mapping[str, Any]:
+    metadata = _webhook_signature_metadata(
+        source=source,
+        trigger_id=trigger_id,
+        webhook_attempt_id=webhook_attempt_id,
+    )
+    require_id(webhook_receipt_id, "webhook audit receipt ID")
+    if disposition not in {"created", "replayed", "collision"}:
+        raise ValueError("webhook audit receipt disposition is unsupported")
+    if type(target_count) is not int or not 1 <= target_count <= _MAX_WEBHOOK_AUDIT_TARGET_COUNT:
+        raise ValueError("webhook audit target count must be a bounded positive integer")
+    metadata.update(
+        {
+            "receipt_disposition": disposition,
+            "target_count": target_count,
+            "webhook_receipt_id": webhook_receipt_id,
+        }
+    )
+    return metadata
+
+
+def _webhook_schema_rejection_metadata(
+    *,
+    source: str,
+    trigger_id: str,
+    webhook_attempt_id: str,
+    instance_id: str | None,
+    configuration_revision: int | None,
+    workflow_id: str | None,
+) -> Mapping[str, Any]:
+    metadata = _webhook_signature_metadata(
+        source=source,
+        trigger_id=trigger_id,
+        webhook_attempt_id=webhook_attempt_id,
+    )
+    linkage = (instance_id, configuration_revision, workflow_id)
+    if any(value is not None for value in linkage):
+        if any(value is None for value in linkage):
+            raise ValueError("webhook schema rejection linkage must be complete")
+        assert instance_id is not None
+        assert configuration_revision is not None
+        assert workflow_id is not None
+        require_id(instance_id, "webhook audit instance ID")
+        require_id(workflow_id, "webhook audit workflow ID")
+        if type(configuration_revision) is not int or configuration_revision < 1:
+            raise ValueError("webhook audit configuration revision must be positive")
+        metadata.update(
+            {
+                "configuration_revision": configuration_revision,
+                "instance_id": instance_id,
+                "workflow_id": workflow_id,
+            }
+        )
+    metadata["rejection_code"] = "schema_rejected"
+    return metadata
+
+
+def _require_webhook_audit_context(
+    context: AuditContext,
+    *,
+    rejected_signature: bool,
+) -> None:
+    expected_source = AuditActorSource.SYSTEM if rejected_signature else AuditActorSource.SERVICE
+    expected_method = "internal" if rejected_signature else "verified_webhook"
+    if context.actor_source is not expected_source or context.auth_method != expected_method:
+        raise ValueError("webhook audit requires its exact trusted actor context")
 
 
 def _manual_work_metadata(
@@ -178,6 +276,213 @@ class AuditEventFactory:
         ):
             raise ValueError("configuration audit pseudonym key must use the exact key type")
         self._configuration_pseudonym_key = configuration_pseudonym_key
+
+    def webhook_signature_validated(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness authentication without retaining a signature, secret, or body."""
+
+        _require_webhook_audit_context(self._context, rejected_signature=False)
+        return self._build(
+            run_id=None,
+            event_type="webhook.signature_validated",
+            aggregate_type="webhook_ingress",
+            aggregate_id=_webhook_audit_aggregate_id(
+                webhook_attempt_id=webhook_attempt_id,
+                event_type="webhook.signature_validated",
+            ),
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=_webhook_signature_metadata(
+                source=source,
+                trigger_id=trigger_id,
+                webhook_attempt_id=webhook_attempt_id,
+            ),
+            mutation_version=1,
+        )
+
+    def webhook_signature_rejected(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness failed authentication under the pre-verification system identity."""
+
+        _require_webhook_audit_context(self._context, rejected_signature=True)
+        return self._build(
+            run_id=None,
+            event_type="webhook.signature_rejected",
+            aggregate_type="webhook_ingress",
+            aggregate_id=_webhook_audit_aggregate_id(
+                webhook_attempt_id=webhook_attempt_id,
+                event_type="webhook.signature_rejected",
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=_webhook_signature_metadata(
+                source=source,
+                trigger_id=trigger_id,
+                webhook_attempt_id=webhook_attempt_id,
+            ),
+            mutation_version=None,
+            reason_code="webhook_authentication_failed",
+        )
+
+    def webhook_received(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        webhook_receipt_id: str,
+        target_count: int,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one authenticated webhook receipt creating its target work."""
+
+        return self._webhook_receipt_event(
+            event_type="webhook.received",
+            source=source,
+            trigger_id=trigger_id,
+            webhook_attempt_id=webhook_attempt_id,
+            webhook_receipt_id=webhook_receipt_id,
+            target_count=target_count,
+            disposition="created",
+            outcome=AuditOutcome.ACCEPTED,
+            reason_code=None,
+            occurred_at=occurred_at,
+        )
+
+    def webhook_duplicate_suppressed(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        webhook_receipt_id: str,
+        target_count: int,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness an authenticated identical replay returning prior target work."""
+
+        return self._webhook_receipt_event(
+            event_type="webhook.duplicate_suppressed",
+            source=source,
+            trigger_id=trigger_id,
+            webhook_attempt_id=webhook_attempt_id,
+            webhook_receipt_id=webhook_receipt_id,
+            target_count=target_count,
+            disposition="replayed",
+            outcome=AuditOutcome.ACCEPTED,
+            reason_code=None,
+            occurred_at=occurred_at,
+        )
+
+    def webhook_idempotency_collision(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        webhook_receipt_id: str,
+        target_count: int,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness same source-event identity with different authenticated content."""
+
+        return self._webhook_receipt_event(
+            event_type="webhook.idempotency_collision",
+            source=source,
+            trigger_id=trigger_id,
+            webhook_attempt_id=webhook_attempt_id,
+            webhook_receipt_id=webhook_receipt_id,
+            target_count=target_count,
+            disposition="collision",
+            outcome=AuditOutcome.REJECTED,
+            reason_code="idempotency_conflict",
+            occurred_at=occurred_at,
+        )
+
+    def webhook_schema_rejected(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        occurred_at: datetime,
+        instance_id: str | None = None,
+        configuration_revision: int | None = None,
+        workflow_id: str | None = None,
+    ) -> AuditEventDraft:
+        """Witness rejected untrusted content with optional complete deployment linkage."""
+
+        _require_webhook_audit_context(self._context, rejected_signature=False)
+        return self._build(
+            run_id=None,
+            event_type="webhook.schema_rejected",
+            aggregate_type="webhook_ingress",
+            aggregate_id=_webhook_audit_aggregate_id(
+                webhook_attempt_id=webhook_attempt_id,
+                event_type="webhook.schema_rejected",
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=_webhook_schema_rejection_metadata(
+                source=source,
+                trigger_id=trigger_id,
+                webhook_attempt_id=webhook_attempt_id,
+                instance_id=instance_id,
+                configuration_revision=configuration_revision,
+                workflow_id=workflow_id,
+            ),
+            mutation_version=None,
+            reason_code="schema_rejected",
+        )
+
+    def _webhook_receipt_event(
+        self,
+        *,
+        event_type: str,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        webhook_receipt_id: str,
+        target_count: int,
+        disposition: str,
+        outcome: AuditOutcome,
+        reason_code: str | None,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        _require_webhook_audit_context(self._context, rejected_signature=False)
+        return self._build(
+            run_id=None,
+            event_type=event_type,
+            aggregate_type="webhook_ingress",
+            aggregate_id=_webhook_audit_aggregate_id(
+                webhook_attempt_id=webhook_attempt_id,
+                event_type=event_type,
+            ),
+            outcome=outcome,
+            occurred_at=occurred_at,
+            metadata=_webhook_receipt_metadata(
+                source=source,
+                trigger_id=trigger_id,
+                webhook_attempt_id=webhook_attempt_id,
+                webhook_receipt_id=webhook_receipt_id,
+                disposition=disposition,
+                target_count=target_count,
+            ),
+            mutation_version=1 if outcome is AuditOutcome.ACCEPTED else None,
+            reason_code=reason_code,
+        )
 
     def manual_received(
         self,
