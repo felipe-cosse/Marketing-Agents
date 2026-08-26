@@ -287,6 +287,16 @@ class SQLAlchemyInstanceConfigurationRepository:
         record = (await self._session.execute(statement)).scalar_one_or_none()
         return None if record is None else _to_domain(record)
 
+    async def get_for_update(self, instance_id: str) -> InstanceConfiguration | None:
+        require_id(instance_id, "instance configuration ID")
+        record = await self._session.scalar(
+            select(AgentInstanceConfigurationRecord)
+            .where(AgentInstanceConfigurationRecord.instance_id == instance_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return None if record is None else _to_domain(record)
+
     async def list_all(self) -> tuple[InstanceConfiguration, ...]:
         statement = (
             select(AgentInstanceConfigurationRecord)

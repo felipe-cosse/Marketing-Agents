@@ -44,7 +44,13 @@ from marketing_agents.domain.entities import (
     Run,
     RunStep,
 )
-from marketing_agents.domain.enums import Effect, ExternalActionState, RunState, StepState
+from marketing_agents.domain.enums import (
+    Effect,
+    ExternalActionState,
+    RunState,
+    StepState,
+    WorkMode,
+)
 from marketing_agents.domain.execution_control import (
     DeliveryCallPermit,
     DeliveryCallReservationCommand,
@@ -354,6 +360,23 @@ class ExternalActionDispatcher:
                 raise ExternalActionDispatchError(
                     "action_not_found", "external action does not exist"
                 )
+            run = await unit_of_work.runs.get(action.run_id)
+            if run is None:
+                raise ExternalActionDispatchError(
+                    "execution_run_missing",
+                    "external action lacks its authoritative parent Run",
+                )
+            work = await unit_of_work.works.get(run.work_item_id)
+            if run.id != action.run_id or work is None or work.id != run.work_item_id:
+                raise ExternalActionDispatchError(
+                    "execution_policy_source_corrupt",
+                    "external action lacks its authoritative WorkItem context",
+                )
+            if work.mode is WorkMode.DRY_RUN:
+                raise ExternalActionDispatchError(
+                    "dry_run_external_effect_forbidden",
+                    "dry-run work cannot dispatch an external effect",
+                )
             if action.state is ExternalActionState.SUCCEEDED:
                 return _DispatchCallStart(action)
             if action.state is not ExternalActionState.DISPATCH_RESERVED:
@@ -391,10 +414,8 @@ class ExternalActionDispatcher:
                     "external action lacks its exact committed release authority",
                 )
             self._require_authority(action, authority)
-            run = await unit_of_work.runs.get(action.run_id)
             if (
-                run is None
-                or run.state is not RunState.EXECUTING
+                run.state is not RunState.EXECUTING
                 or run.approval_required is not True
                 or run.version != authority.released_run_version
             ):

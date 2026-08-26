@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from marketing_agents.application.ports.instance_configuration import (
+    InstanceConfigurationRepository,
+)
 from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
     ArtifactRepository,
@@ -27,11 +32,25 @@ class SQLAlchemyUnitOfWorkError(RuntimeError):
     """Raised when the infrastructure transaction boundary is used out of order."""
 
 
+_SQLITE_WRITE_INTENT_MAX_ATTEMPTS = 16
+
+
+def _sqlite_lock_conflict(error: OperationalError) -> bool:
+    code = getattr(error.orig, "sqlite_errorcode", None)
+    return code in {
+        sqlite3.SQLITE_BUSY,
+        getattr(sqlite3, "SQLITE_BUSY_SNAPSHOT", 517),
+        sqlite3.SQLITE_LOCKED,
+        getattr(sqlite3, "SQLITE_LOCKED_SHAREDCACHE", 262),
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class RepositoryBundle:
     works: WorkRepository
     runs: RunRepository
     audits: AuditRepository
+    configurations: InstanceConfigurationRepository | None = None
     approvals: ApprovalRepository | None = None
     run_steps: RunStepRepository | None = None
     external_actions: ExternalActionRepository | None = None
@@ -46,6 +65,7 @@ class SQLAlchemyRepositoryFactories:
     works: Callable[[AsyncSession], WorkRepository]
     runs: Callable[[AsyncSession], RunRepository]
     audits: Callable[[AsyncSession], AuditRepository]
+    configurations: Callable[[AsyncSession], InstanceConfigurationRepository] | None = None
     approvals: Callable[[AsyncSession], ApprovalRepository] | None = None
     run_steps: Callable[[AsyncSession], RunStepRepository] | None = None
     external_actions: Callable[[AsyncSession], ExternalActionRepository] | None = None
@@ -59,6 +79,7 @@ class SQLAlchemyRepositoryFactories:
             works=self.works(session),
             runs=self.runs(session),
             audits=self.audits(session),
+            configurations=(None if self.configurations is None else self.configurations(session)),
             approvals=None if self.approvals is None else self.approvals(session),
             run_steps=None if self.run_steps is None else self.run_steps(session),
             external_actions=(
@@ -82,9 +103,14 @@ class SQLAlchemyUnitOfWork:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         repository_factories: SQLAlchemyRepositoryFactories,
+        *,
+        sqlite_write_intent: bool = False,
     ) -> None:
+        if type(sqlite_write_intent) is not bool:
+            raise ValueError("SQLite write intent must be an exact boolean")
         self._session_factory = session_factory
         self._repository_factories = repository_factories
+        self._sqlite_write_intent = sqlite_write_intent
         self._session: AsyncSession | None = None
         self._repositories: RepositoryBundle | None = None
         self._finished = False
@@ -102,6 +128,13 @@ class SQLAlchemyUnitOfWork:
     @property
     def works(self) -> WorkRepository:
         return self._require_repositories().works
+
+    @property
+    def configurations(self) -> InstanceConfigurationRepository:
+        repository = self._require_repositories().configurations
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("instance configuration repository is not configured")
+        return repository
 
     @property
     def runs(self) -> RunRepository:
@@ -164,11 +197,31 @@ class SQLAlchemyUnitOfWork:
         if self._session is not None:
             raise SQLAlchemyUnitOfWorkError("unit of work cannot be entered more than once")
         self._session = self._session_factory()
-        await self._session.begin()
-        if self._session.get_bind().dialect.name == "sqlite":
-            # Python's sqlite driver otherwise lets the first SAVEPOINT become the
-            # physical outer transaction, so releasing it would escape UoW rollback.
-            await self._session.execute(text("BEGIN DEFERRED"))
+        try:
+            if self._session.get_bind().dialect.name == "sqlite" and self._sqlite_write_intent:
+                for attempt in range(1, _SQLITE_WRITE_INTENT_MAX_ATTEMPTS + 1):
+                    await self._session.begin()
+                    try:
+                        await self._session.execute(text("BEGIN IMMEDIATE"))
+                        break
+                    except OperationalError as exc:
+                        await self._session.rollback()
+                        if (
+                            not _sqlite_lock_conflict(exc)
+                            or attempt == _SQLITE_WRITE_INTENT_MAX_ATTEMPTS
+                        ):
+                            raise
+            else:
+                await self._session.begin()
+                if self._session.get_bind().dialect.name == "sqlite":
+                    # Python's sqlite driver otherwise lets the first SAVEPOINT become
+                    # the physical outer transaction, so releasing it would escape UoW
+                    # rollback.
+                    await self._session.execute(text("BEGIN DEFERRED"))
+        except BaseException:
+            await self._session.close()
+            self._session = None
+            raise
         self._repositories = self._repository_factories.build(self._session)
         return self
 
@@ -208,3 +261,18 @@ class SQLAlchemyUnitOfWorkFactory:
 
     def __call__(self) -> SQLAlchemyUnitOfWork:
         return SQLAlchemyUnitOfWork(self.session_factory, self.repository_factories)
+
+
+@dataclass(frozen=True, slots=True)
+class SQLAlchemyManualAdmissionUnitOfWorkFactory:
+    """Serialize SQLite manual admissions before their configuration snapshot read."""
+
+    session_factory: async_sessionmaker[AsyncSession]
+    repository_factories: SQLAlchemyRepositoryFactories
+
+    def __call__(self) -> SQLAlchemyUnitOfWork:
+        return SQLAlchemyUnitOfWork(
+            self.session_factory,
+            self.repository_factories,
+            sqlite_write_intent=True,
+        )

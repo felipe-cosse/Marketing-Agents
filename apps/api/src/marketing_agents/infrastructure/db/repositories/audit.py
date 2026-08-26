@@ -288,10 +288,16 @@ class SQLAlchemyAuditRepository:
             and event.aggregate_type == "agent_instance_configuration"
             for event in events
         )
-        if not scheduler_batch and not instance_configuration_event:
-            raise ValueError(
-                "global audit append requires one schedule batch or exact instance configuration"
-            )
+        ingress_rejection_event = len(events) == 1 and all(
+            event.run_id is None
+            and event.schedule_id is None
+            and event.occurrence_id is None
+            and event.event_type == "ingress.schema_rejected"
+            and event.aggregate_type == "manual_ingress_rejection"
+            for event in events
+        )
+        if not scheduler_batch and not instance_configuration_event and not ingress_rejection_event:
+            raise ValueError("global audit append requires a schedule batch or exact runless event")
         if len({event.id for event in events}) != len(events):
             raise ValueError("global audit append batch event IDs must be unique")
         for event in events:

@@ -1,5 +1,10 @@
 """Provider- and transport-independent application ports."""
 
+from .manual_work import (
+    ManualAdmissionBinding,
+    ManualAdmissionResolutionError,
+    ManualAdmissionResolver,
+)
 from .read_adapter import (
     ReadAdapter,
     ReadAdapterCancelledError,
@@ -13,6 +18,9 @@ from .read_adapter import (
 from .recurrence import RecurrenceCalculationError, RecurrenceCalculator
 
 __all__ = [
+    "ManualAdmissionBinding",
+    "ManualAdmissionResolutionError",
+    "ManualAdmissionResolver",
     "ReadAdapter",
     "ReadAdapterCancelledError",
     "ReadAdapterContract",

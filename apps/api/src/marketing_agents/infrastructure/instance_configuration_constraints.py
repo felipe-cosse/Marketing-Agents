@@ -10,10 +10,8 @@ from typing import Protocol
 from marketing_agents.application.ports.instance_configuration import (
     InstanceConfigurationConstraints,
 )
+from marketing_agents.domain.connector_families import EXTERNAL_CONNECTOR_FAMILIES
 from marketing_agents.domain.enums import TriggerKind
-from marketing_agents.infrastructure.adapters.connectors.registry import (
-    EXTERNAL_CONNECTOR_FAMILIES,
-)
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 
 

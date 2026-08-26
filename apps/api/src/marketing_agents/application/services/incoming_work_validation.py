@@ -27,9 +27,16 @@ from marketing_agents.security.redaction import redact, redaction_classification
 class IncomingWorkValidationError(ValueError):
     """Stable, payload-safe rejection before work admission can have side effects."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        pointer: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.pointer = pointer
 
 
 class CampaignBriefPolicy(StrEnum):
@@ -606,7 +613,11 @@ class IncomingWorkValidator:
         try:
             self._guard.validate_input(payload, plain_schema)
         except RuntimePolicyViolation as exc:
-            raise IncomingWorkValidationError(exc.code, str(exc)) from exc
+            raise IncomingWorkValidationError(
+                exc.code,
+                str(exc),
+                pointer=exc.pointer,
+            ) from exc
         return _issue_validated(envelope, snapshot, payload, plain_schema)
 
     @staticmethod

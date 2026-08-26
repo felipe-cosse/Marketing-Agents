@@ -84,7 +84,35 @@ _INSTANCE_CONFIGURATION_AUDIT_FIELDS = frozenset(
         "previous_revision",
     }
 )
+_MANUAL_WORK_AUDIT_FIELDS = frozenset(
+    {
+        "configuration_revision",
+        "instance_id",
+        "manual_attempt_id",
+        "mode",
+        "receipt_disposition",
+        "trigger_id",
+        "work_item_id",
+        "workflow_id",
+    }
+)
+_SCHEMA_REJECTION_AUDIT_FIELDS = frozenset(
+    {
+        "configuration_revision",
+        "instance_id",
+        "manual_attempt_id",
+        "mode",
+        "rejection_code",
+        "trigger_id",
+        "workflow_id",
+    }
+)
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
+    "ingress.manual_received": _MANUAL_WORK_AUDIT_FIELDS,
+    "ingress.schema_rejected": _SCHEMA_REJECTION_AUDIT_FIELDS,
+    "work.created": _MANUAL_WORK_AUDIT_FIELDS,
+    "work.duplicate_returned": _MANUAL_WORK_AUDIT_FIELDS,
+    "work.idempotency_collision": _MANUAL_WORK_AUDIT_FIELDS,
     "instance.configuration_changed": _INSTANCE_CONFIGURATION_AUDIT_FIELDS,
     "schedule.occurrence_created": _SCHEDULE_OCCURRENCE_FIELDS,
     "schedule.misfire_skipped": _SCHEDULE_MISFIRE_FIELDS,
@@ -257,6 +285,8 @@ _UTC_TIMESTAMP_FIELDS = frozenset(
     }
 )
 _SCHEDULE_DISPOSITIONS = frozenset({"on_time", "skip", "run_once"})
+_MANUAL_RECEIPT_DISPOSITIONS = frozenset({"created", "replayed", "collision"})
+_MANUAL_WORK_MODES = frozenset({"dry_run", "mock_execution"})
 _CONNECTOR_STATUSES = frozenset(
     {"accepted", "completed", "mock_committed", "mock_succeeded", "succeeded"}
 )
@@ -925,6 +955,21 @@ def _validate_typed_value(
         raise AuditMetadataError(
             "metadata_value_invalid",
             "schedule disposition is not an allowlisted value",
+        )
+    if field_name == "receipt_disposition" and value not in _MANUAL_RECEIPT_DISPOSITIONS:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "manual receipt disposition is not an allowlisted value",
+        )
+    if field_name == "mode" and value not in _MANUAL_WORK_MODES:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "manual work mode is not an allowlisted value",
+        )
+    if field_name == "rejection_code" and value != "schema_rejected":
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "schema rejection code is not an allowlisted value",
         )
     if field_name == "status" and value not in _APPROVAL_STATUSES:
         raise AuditMetadataError(
