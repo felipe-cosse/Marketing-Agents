@@ -17,6 +17,10 @@ from marketing_agents.application.policies.catalog_authorization import (
     CatalogAuthorizationError,
     authorize_catalog_reader,
 )
+from marketing_agents.application.policies.instance_configuration_authorization import (
+    InstanceConfigurationAuthorizationError,
+    authorize_instance_configuration_admin,
+)
 from marketing_agents.application.ports.identity import (
     AuthenticationEvidence,
     IdentityAuthenticationError,
@@ -27,7 +31,14 @@ from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionCommand,
     AuthorizedApprovalDecision,
 )
+from marketing_agents.application.services.instance_configuration import (
+    InstanceConfigurationSchema,
+    InstanceConfigurationSnapshot,
+    InstanceConfigurationUpdateResult,
+    UpdateInstanceConfigurationCommand,
+)
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.instance_configuration import InstanceConfiguration
 
 _FORBIDDEN_IDENTITY_PREFIXES = (
     "x-actor",
@@ -61,6 +72,35 @@ class ApprovalDecisionExecutor(Protocol):
     ) -> AuthorizedApprovalDecision: ...
 
 
+class InstanceConfigurationExecutor(Protocol):
+    async def read(
+        self,
+        instance_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceConfiguration: ...
+
+    async def read_all(
+        self,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceConfigurationSnapshot: ...
+
+    async def schema(
+        self,
+        instance_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceConfigurationSchema: ...
+
+    async def update(
+        self,
+        command: UpdateInstanceConfigurationCommand,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceConfigurationUpdateResult: ...
+
+
 def get_readiness_probe(request: Request) -> ReadinessProbe | None:
     """Resolve the optional probe without trusting falsey or malformed objects."""
 
@@ -85,6 +125,31 @@ def get_catalog_query_executor(request: Request) -> CatalogQueryExecutor | None:
     if executor is None or not callable(read) or not inspect.iscoroutinefunction(read):
         return None
     return cast(CatalogQueryExecutor, executor)
+
+
+def get_instance_configuration_executor(request: Request) -> InstanceConfigurationExecutor:
+    """Resolve only a complete asynchronous configuration application seam."""
+
+    try:
+        executor = getattr(request.app.state, "instance_configuration_service", None)
+        methods = tuple(
+            getattr(executor, name, None) for name in ("read", "read_all", "schema", "update")
+        )
+    except Exception:
+        executor = None
+        methods = ()
+    if (
+        executor is None
+        or len(methods) != 4
+        or any(
+            not callable(method) or not inspect.iscoroutinefunction(method) for method in methods
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="instance configuration service unavailable",
+        )
+    return cast(InstanceConfigurationExecutor, executor)
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:
@@ -184,6 +249,24 @@ async def require_catalog_principal(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="catalog read is forbidden",
+        ) from None
+    return principal
+
+
+async def require_instance_configuration_admin_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    """Apply the local-admin human mutation boundary before service resolution."""
+
+    try:
+        authorize_instance_configuration_admin(principal)
+    except InstanceConfigurationAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="instance configuration mutation is forbidden",
         ) from None
     return principal
 

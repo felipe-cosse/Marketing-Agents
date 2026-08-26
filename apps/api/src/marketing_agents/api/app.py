@@ -11,11 +11,17 @@ from marketing_agents.api.catalog_queries import (
     CatalogQueryExecutor,
     LocalCatalogQueryService,
 )
-from marketing_agents.api.dependencies import ApprovalDecisionExecutor
+from marketing_agents.api.dependencies import (
+    ApprovalDecisionExecutor,
+    InstanceConfigurationExecutor,
+)
 from marketing_agents.api.errors import safe_request_validation_error
 from marketing_agents.api.routes.approvals import router as approvals_router
 from marketing_agents.api.routes.catalog import router as catalog_router
 from marketing_agents.api.routes.health import router as health_router
+from marketing_agents.api.routes.instance_configuration import (
+    router as instance_configuration_router,
+)
 from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
@@ -29,6 +35,7 @@ def create_app(
     approval_decision_service: ApprovalDecisionExecutor | None = None,
     readiness_probe: ReadinessProbe | None = None,
     catalog_query_service: CatalogQueryExecutor | None = None,
+    instance_configuration_service: InstanceConfigurationExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -44,10 +51,14 @@ def create_app(
         else LocalIdentityProvider(active_settings)
     )
     application.state.approval_decision_service = approval_decision_service
+    application.state.instance_configuration_service = instance_configuration_service
     application.state.catalog_query_service = (
         catalog_query_service
         if catalog_query_service is not None
-        else LocalCatalogQueryService(active_settings.catalog_root)
+        else LocalCatalogQueryService(
+            active_settings.catalog_root,
+            configuration_reader=instance_configuration_service,
+        )
     )
     application.state.readiness_probe = (
         readiness_probe if readiness_probe is not None else LocalReadinessProbe(active_settings)
@@ -60,6 +71,7 @@ def create_app(
         TrustedHostMiddleware, allowed_hosts=list(active_settings.trusted_hosts)
     )
     application.include_router(health_router)
+    application.include_router(instance_configuration_router)
     application.include_router(catalog_router)
     application.include_router(approvals_router)
     return application

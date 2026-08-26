@@ -21,6 +21,7 @@ from .execution_control import (
     RateLimitWindowRecord,
     RunExecutionControlRecord,
 )
+from .instance_configuration import AgentInstanceConfigurationRecord
 from .run import RunRecord, RunStateTransitionRecord
 from .schedule import ScheduleOccurrenceRecord, ScheduleRecord
 from .step import (
@@ -34,6 +35,7 @@ from .step import (
 from .work import WorkItemRecord
 
 __all__ = [
+    "AgentInstanceConfigurationRecord",
     "ApprovalDecisionRecord",
     "ApprovalRequestRecord",
     "ApprovalUseRecord",

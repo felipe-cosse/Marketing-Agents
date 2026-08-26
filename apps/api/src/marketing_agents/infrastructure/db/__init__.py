@@ -2,6 +2,7 @@
 
 from .base import NAMING_CONVENTION, Base
 from .models import (
+    AgentInstanceConfigurationRecord,
     ApprovalDecisionRecord,
     ApprovalRequestRecord,
     ApprovalUseRecord,
@@ -36,6 +37,9 @@ from .repositories import (
     AuditPersistenceInvariantError,
     ExecutionControlPersistenceConflict,
     ExternalActionPersistenceConflict,
+    InstanceConfigurationPersistenceError,
+    InstanceConfigurationSQLAlchemyUnitOfWork,
+    InstanceConfigurationSQLAlchemyUnitOfWorkFactory,
     RunPersistenceInvariantError,
     SchedulePersistenceConflict,
     SQLAlchemyApprovalRepository,
@@ -44,6 +48,7 @@ from .repositories import (
     SQLAlchemyConnectorReceiptRepository,
     SQLAlchemyExecutionControlRepository,
     SQLAlchemyExternalActionRepository,
+    SQLAlchemyInstanceConfigurationRepository,
     SQLAlchemyRunRepository,
     SQLAlchemyRunStepRepository,
     SQLAlchemyScheduleRepository,
@@ -63,6 +68,7 @@ from .url import DatabaseURLError, parse_database_url, safe_database_url
 
 __all__ = [
     "NAMING_CONVENTION",
+    "AgentInstanceConfigurationRecord",
     "ApprovalDecisionRecord",
     "ApprovalPersistenceConflict",
     "ApprovalRequestRecord",
@@ -85,6 +91,9 @@ __all__ = [
     "ExternalActionDispatchAttemptRecord",
     "ExternalActionPersistenceConflict",
     "ExternalActionRecord",
+    "InstanceConfigurationPersistenceError",
+    "InstanceConfigurationSQLAlchemyUnitOfWork",
+    "InstanceConfigurationSQLAlchemyUnitOfWorkFactory",
     "RateLimitWindowRecord",
     "RepositoryBundle",
     "RunExecutionControlRecord",
@@ -103,6 +112,7 @@ __all__ = [
     "SQLAlchemyConnectorReceiptRepository",
     "SQLAlchemyExecutionControlRepository",
     "SQLAlchemyExternalActionRepository",
+    "SQLAlchemyInstanceConfigurationRepository",
     "SQLAlchemyRepositoryFactories",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",

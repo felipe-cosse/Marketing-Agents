@@ -12,6 +12,12 @@ from .execution_control import (
     ExecutionControlPersistenceConflict,
     SQLAlchemyExecutionControlRepository,
 )
+from .instance_configuration import (
+    InstanceConfigurationPersistenceError,
+    InstanceConfigurationSQLAlchemyUnitOfWork,
+    InstanceConfigurationSQLAlchemyUnitOfWorkFactory,
+    SQLAlchemyInstanceConfigurationRepository,
+)
 from .run import RunPersistenceInvariantError, SQLAlchemyRunRepository
 from .schedule import SchedulePersistenceConflict, SQLAlchemyScheduleRepository
 from .step import SQLAlchemyRunStepRepository, StepPersistenceConflict
@@ -23,6 +29,9 @@ __all__ = [
     "AuditPersistenceInvariantError",
     "ExecutionControlPersistenceConflict",
     "ExternalActionPersistenceConflict",
+    "InstanceConfigurationPersistenceError",
+    "InstanceConfigurationSQLAlchemyUnitOfWork",
+    "InstanceConfigurationSQLAlchemyUnitOfWorkFactory",
     "RunPersistenceInvariantError",
     "SQLAlchemyApprovalRepository",
     "SQLAlchemyArtifactRepository",
@@ -30,6 +39,7 @@ __all__ = [
     "SQLAlchemyConnectorReceiptRepository",
     "SQLAlchemyExecutionControlRepository",
     "SQLAlchemyExternalActionRepository",
+    "SQLAlchemyInstanceConfigurationRepository",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",
     "SQLAlchemyScheduleRepository",

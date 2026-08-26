@@ -259,7 +259,7 @@ class SQLAlchemyAuditRepository:
         return tuple(_record_to_domain(record) for record in records)
 
     async def append_global(self, event: AuditEventDraft) -> AuditEvent:
-        """Append one scheduler event without consuming a per-Run sequence."""
+        """Append one exact runless event without consuming a per-Run sequence."""
 
         return (await self.append_global_many((event,)))[0]
 
@@ -267,20 +267,31 @@ class SQLAlchemyAuditRepository:
         self,
         events: tuple[AuditEventDraft, ...],
     ) -> tuple[AuditEvent, ...]:
-        """Append one bounded, globally ordered scheduler audit batch."""
+        """Append a scheduler batch or one exact instance-configuration event."""
 
         if type(events) is not tuple or not events or len(events) > 128:
             raise ValueError("global audit append batch must contain from 1 through 128 events")
         if any(type(event) is not AuditEventDraft for event in events):
             raise ValueError("global audit append requires exact sealed event drafts")
         schedule_id = events[0].schedule_id
-        if schedule_id is None or any(
-            event.run_id is not None
-            or event.schedule_id != schedule_id
-            or event.aggregate_type not in {"schedule", "schedule_occurrence"}
+        scheduler_batch = schedule_id is not None and all(
+            event.run_id is None
+            and event.schedule_id == schedule_id
+            and event.aggregate_type in {"schedule", "schedule_occurrence"}
             for event in events
-        ):
-            raise ValueError("one global audit append batch may target only one schedule")
+        )
+        instance_configuration_event = len(events) == 1 and all(
+            event.run_id is None
+            and event.schedule_id is None
+            and event.occurrence_id is None
+            and event.event_type == "instance.configuration_changed"
+            and event.aggregate_type == "agent_instance_configuration"
+            for event in events
+        )
+        if not scheduler_batch and not instance_configuration_event:
+            raise ValueError(
+                "global audit append requires one schedule batch or exact instance configuration"
+            )
         if len({event.id for event in events}) != len(events):
             raise ValueError("global audit append batch event IDs must be unique")
         for event in events:

@@ -1,0 +1,171 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-03",
+  "matrix_statement_sha256": "ec72dbc206c8f1b90523e4a357ddc2b73d28972ea90f64f0f47fd92258f59a38",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/instance_configuration_etag.py",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/api/schemas/catalog.py",
+      "apps/api/src/marketing_agents/api/schemas/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/policies/instance_configuration_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/instance_configuration.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/instance_configuration_seed.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-03.json",
+      "docs/verification/requirements/API-03.md",
+      "tests/integration/api/test_api_02_catalog_hierarchy.py",
+      "tests/integration/api/test_api_03_instance_configuration.py",
+      "tests/integration/db/test_api_03_instance_configuration_persistence.py",
+      "tests/integration/db/test_orch_09_audited_step_state.py",
+      "tests/security/test_orch_09_audit_redaction.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+          "apps/api/src/marketing_agents/application/services/instance_configuration.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_03_instance_configuration.py",
+          "tests/integration/db/test_api_03_instance_configuration_persistence.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "deployment-only-schema-and-update",
+      "type": "contract",
+            "statement": "Viewer-equivalent humans can read a typed camel-case structural configuration schema containing only deployment-owned fields and identifying semantic checks enforced by PATCH, while PATCH rejects unknown, template-owned, coerced, empty, and invalid nullable values without reflecting request content.",
+      "test_refs": [
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_viewer_reads_deployment_only_configuration_schema",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_immutable_and_unknown_input_is_rejected_without_reflection",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_patch_rejects_empty_null_required_and_coerced_values",
+                "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_openapi_exposes_only_typed_deployment_configuration_contracts"
+                ,"tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_configuration_schema_matches_patch_defaults_and_template_support"
+      ]
+    },
+    {
+      "id": "durable-reseed-safe-configuration",
+      "type": "positive",
+      "statement": "All 43 validated catalog defaults are inserted only when missing into integrity-sealed configuration rows; a material operator override and revision survive database runtime disposal, restart, and repeat seeding without overwrite or deletion.",
+      "test_refs": [
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_seed_restart_and_reseed_preserve_operator_override",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_seed_rejects_invalid_recurrence_before_transaction",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_rejects_unregistered_binding_and_tampered_storage"
+      ]
+    },
+    {
+      "id": "atomic-optimistic-audited-revision",
+      "type": "negative_control",
+            "statement": "One exact compare-and-swap advances a material configuration by one revision in the same transaction as one append-only audit witness whose operator text uses installation-keyed HMAC pseudonyms; stale validators disclose only the current revision, no-ops do not audit, malformed raw snapshots fail before pseudonymization, and an audit failure rolls back both writes.",
+      "test_refs": [
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_if_match_requires_one_exact_strong_revision_validator",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_stale_validator_returns_current_revision_without_mutation",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_update_is_exact_plus_one_atomic_and_stale_safe",
+                "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_audit_failure_rolls_back_configuration_and_audit",
+                "tests/integration/db/test_orch_09_audited_step_state.py::test_api_03_runless_instance_configuration_audit_round_trips_globally",
+                "tests/security/test_orch_09_audit_redaction.py::test_api_03_instance_configuration_audit_accepts_bounded_full_snapshots",
+                "tests/security/test_orch_09_audit_redaction.py::test_api_03_instance_configuration_audit_pseudonymizes_sensitive_text_values",
+                "tests/security/test_orch_09_audit_redaction.py::test_api_03_instance_configuration_audit_validates_raw_before_pseudonymizing",
+                "tests/security/test_orch_09_audit_redaction.py::test_api_03_instance_configuration_audit_pseudonym_transform_has_no_input_collision"
+      ]
+    },
+    {
+      "id": "effective-read-and-etag-coherence",
+      "type": "contract",
+      "statement": "Aggregate, hierarchy, instance-list, and instance-detail catalog reads overlay one complete persisted configuration snapshot, expose its revision validator, and update relevant strong representation ETags without modifying template-owned projections.",
+      "test_refs": [
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_effective_catalog_reads_and_etags_follow_persisted_configuration"
+      ]
+    },
+    {
+      "id": "authorized-safe-mutation-boundary",
+      "type": "negative_control",
+            "statement": "The transport and application service independently require an intact server-issued HUMAN local_admin before mutation or mutation-target lookup, accept only one application/json media type and one strong If-Match value, and fail closed for missing, synchronous, malformed, throwing, or mismatched dependencies.",
+      "test_refs": [
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_mutation_requires_human_local_admin_before_service_lookup",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_patch_accepts_only_one_json_media_type",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_03_missing_malformed_and_failing_executors_fail_closed",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py::test_api_03_service_defense_allows_viewers_and_requires_human_local_admin"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-03-instance-configuration",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_03_instance_configuration.py",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/catalog/test_dom_05_instance_deployment_boundary.py",
+        "tests/catalog/test_del_02_validated_catalog_release.py",
+                "tests/integration/db/test_arch_03_portable_database.py",
+                "tests/integration/db/test_orch_09_audited_step_state.py::test_api_03_runless_instance_configuration_audit_round_trips_globally",
+                "tests/unit/architecture/test_arch_05_framework_boundaries.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/security/test_orch_09_audit_redaction.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "deployment-only-schema-and-update",
+        "durable-reseed-safe-configuration",
+        "atomic-optimistic-audited-revision",
+        "effective-read-and-etag-coherence",
+        "authorized-safe-mutation-boundary"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/services/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/instance_configuration_seed.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py"
+    ],
+    "gate_id": "api-03-instance-configuration"
+  },
+  "limitations": [
+    "DEL-04 still owns Alembic migration files, catalog relational tables and foreign keys, and production bootstrap that migrates then calls the insert-only configuration seed before serving. API-03 proves durability and reseed behavior against tables created from current ORM metadata but does not claim a deployed migration.",
+    "API-09 still owns the unified application/problem+json vocabulary, Origin validation, process-local CSRF token/session contract, and global timeout policy. API-03 requires JSON, a server-issued human local_admin, and a strong If-Match validator but is not yet claimed browser-CSRF-safe.",
+    "Ingress, planner, run snapshot, and scheduler consumption of revised configuration remain with API-04, API-05, ORCH-01, RUN-02, SCHED-01, and related later requirements. Updating schedule configuration does not yet materialize or mutate a scheduler row.",
+    "Only deterministic local mock connector binding IDs are registered in this requirement. Real connector registration and encrypted secret references remain later adapter and deployment scope; secret values are never accepted as configuration fields.",
+    "WEB-03 and DEL-07 still own configuration UI controls, the committed OpenAPI snapshot, generated client, and drift gate. PostgreSQL DDL remains portable, but the optional PostgreSQL runtime driver may be skipped locally and no live PostgreSQL server is exercised."
+  ]
+}

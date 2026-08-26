@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import re
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -15,14 +19,22 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.execution_control import SAFE_ATTEMPT_ERROR_CODES
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
-from marketing_agents.domain.validation import require_digest, require_id, require_utc
+from marketing_agents.domain.validation import (
+    require_digest,
+    require_iana_timezone,
+    require_id,
+    require_utc,
+)
 
-from .redaction import redact
+from .digest_key import DigestKey
+from .redaction import is_sensitive_key, redact
 
 MAX_AUDIT_METADATA_BYTES = 8_192
 MAX_AUDIT_METADATA_DEPTH = 8
 MAX_AUDIT_METADATA_KEYS = 64
 MAX_AUDIT_METADATA_ARRAY = 256
+MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_BYTES = 65_536
+MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_KEYS = 512
 
 _RUN_FIELDS = frozenset({"command"})
 _PLAN_FIELDS = frozenset(
@@ -64,7 +76,16 @@ _SCHEDULE_MISFIRE_FIELDS = _SCHEDULE_OCCURRENCE_FIELDS | frozenset(
         "missed_count",
     }
 )
+_INSTANCE_CONFIGURATION_AUDIT_FIELDS = frozenset(
+    {
+        "new_configuration",
+        "new_revision",
+        "previous_configuration",
+        "previous_revision",
+    }
+)
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
+    "instance.configuration_changed": _INSTANCE_CONFIGURATION_AUDIT_FIELDS,
     "schedule.occurrence_created": _SCHEDULE_OCCURRENCE_FIELDS,
     "schedule.misfire_skipped": _SCHEDULE_MISFIRE_FIELDS,
     "schedule.misfire_run_once": _SCHEDULE_MISFIRE_FIELDS,
@@ -216,6 +237,8 @@ _POSITIVE_INTEGER_FIELDS = frozenset(
         "generation",
         "missed_count",
         "ordinal",
+        "new_revision",
+        "previous_revision",
         "proposal_revision",
         "retry_after_seconds",
         "step_count",
@@ -286,6 +309,36 @@ _CONCLUSIONS = frozenset(
 _ATTEMPT_KINDS = frozenset({"model", "tool"})
 _ATTEMPT_OUTCOMES = frozenset({"succeeded", "transient_failure", "permanent_failure", "cancelled"})
 _DATA_CLASSIFICATIONS = frozenset(item.value for item in DataClassification)
+_DEPLOYMENT_CONFIGURATION_FIELDS = frozenset(
+    {
+        "connector_bindings",
+        "enabled",
+        "schedule",
+        "trigger_bindings",
+        "variant_label",
+    }
+)
+_TRIGGER_BINDING_FIELDS = frozenset(
+    {
+        "cron",
+        "enabled",
+        "event_source",
+        "misfire_grace_seconds",
+        "misfire_policy",
+        "timezone",
+        "type",
+    }
+)
+_CONNECTOR_BINDING_FIELDS = frozenset({"binding_id", "connector_family", "enabled"})
+_SCHEDULE_FIELDS = frozenset({"cron", "misfire_grace_seconds", "misfire_policy", "timezone"})
+_SAFE_CONFIGURATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+_CONNECTOR_FAMILY = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_CONNECTOR_BINDING_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+_AUDIT_CONFIGURATION_TEXT_DOMAIN = b"marketing-agents:audit-configuration-text:hmac-sha256:v1\x00"
+_AUDIT_CONFIGURATION_TEXT_PREFIX = "audit-value-hmac-sha256-v1:"
+_AUDIT_CONFIGURATION_TEXT_PATTERN = re.compile(
+    rf"^{re.escape(_AUDIT_CONFIGURATION_TEXT_PREFIX)}[0-9a-f]{{64}}$"
+)
 
 
 class AuditMetadataError(ValueError):
@@ -296,38 +349,63 @@ class AuditMetadataError(ValueError):
         self.code = code
 
 
-def _measure(value: Any, *, depth: int = 1) -> tuple[int, int]:
+def _measure(
+    value: Any,
+    *,
+    depth: int = 1,
+    maximum_keys: int = MAX_AUDIT_METADATA_KEYS,
+    maximum_array_items: int = MAX_AUDIT_METADATA_ARRAY,
+) -> tuple[int, int]:
     if depth > MAX_AUDIT_METADATA_DEPTH:
         raise AuditMetadataError("metadata_too_deep", "audit metadata nesting is too deep")
     if isinstance(value, Mapping):
-        if len(value) > MAX_AUDIT_METADATA_KEYS:
+        if len(value) > maximum_keys:
             raise AuditMetadataError("metadata_too_many_keys", "audit metadata has too many keys")
         keys = len(value)
         array_items = 0
         for item in value.values():
-            child_keys, child_items = _measure(item, depth=depth + 1)
+            child_keys, child_items = _measure(
+                item,
+                depth=depth + 1,
+                maximum_keys=maximum_keys,
+                maximum_array_items=maximum_array_items,
+            )
             keys += child_keys
             array_items += child_items
-        if keys > MAX_AUDIT_METADATA_KEYS:
+        if keys > maximum_keys:
             raise AuditMetadataError("metadata_too_many_keys", "audit metadata has too many keys")
         return keys, array_items
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        if len(value) > MAX_AUDIT_METADATA_ARRAY:
+        if len(value) > maximum_array_items:
             raise AuditMetadataError(
                 "metadata_array_too_large", "audit metadata array is too large"
             )
         keys = 0
         array_items = len(value)
         for item in value:
-            child_keys, child_items = _measure(item, depth=depth + 1)
+            child_keys, child_items = _measure(
+                item,
+                depth=depth + 1,
+                maximum_keys=maximum_keys,
+                maximum_array_items=maximum_array_items,
+            )
             keys += child_keys
             array_items += child_items
-        if array_items > MAX_AUDIT_METADATA_ARRAY:
+        if array_items > maximum_array_items:
             raise AuditMetadataError(
                 "metadata_array_too_large", "audit metadata array is too large"
             )
         return keys, array_items
     return 0, 0
+
+
+def _metadata_limits(event_type: str) -> tuple[int, int]:
+    if event_type == "instance.configuration_changed":
+        return (
+            MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_KEYS,
+            MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_BYTES,
+        )
+    return MAX_AUDIT_METADATA_KEYS, MAX_AUDIT_METADATA_BYTES
 
 
 def _validate_catalog_hash(value: Any, field_name: str) -> None:
@@ -359,8 +437,414 @@ def _validate_canonical_utc(value: Any, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a canonical UTC timestamp")
 
 
-def _validate_typed_value(field_name: str, value: Any) -> None:
+def _configuration_error(message: str) -> AuditMetadataError:
+    return AuditMetadataError("metadata_value_invalid", message)
+
+
+def _pseudonymize_configuration_text(
+    value: Any,
+    *,
+    field_domain: str,
+    key: DigestKey,
+) -> Any:
+    if type(value) is not str:
+        return value
+    digest = hmac.new(
+        key.bytes_for_digest(),
+        _AUDIT_CONFIGURATION_TEXT_DOMAIN
+        + field_domain.encode("ascii")
+        + b"\x00"
+        + canonical_json_bytes(value),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{_AUDIT_CONFIGURATION_TEXT_PREFIX}{digest}"
+
+
+def _pseudonymize_configuration_snapshot(value: Any, key: DigestKey) -> Any:
+    """Copy one validated deployment snapshot while pseudonymizing operator text."""
+
+    if not isinstance(value, Mapping):
+        return value
+    result = dict(value)
+    if "variant_label" in result:
+        result["variant_label"] = _pseudonymize_configuration_text(
+            result["variant_label"],
+            field_domain="variant_label",
+            key=key,
+        )
+    trigger_bindings = result.get("trigger_bindings")
+    if isinstance(trigger_bindings, Sequence) and not isinstance(
+        trigger_bindings, (str, bytes, bytearray)
+    ):
+        sanitized_triggers: list[Any] = []
+        for binding in trigger_bindings:
+            if not isinstance(binding, Mapping):
+                sanitized_triggers.append(binding)
+                continue
+            sanitized = dict(binding)
+            for field_name in ("event_source", "cron", "timezone"):
+                if field_name in sanitized:
+                    sanitized[field_name] = _pseudonymize_configuration_text(
+                        sanitized[field_name],
+                        field_domain=field_name,
+                        key=key,
+                    )
+            sanitized_triggers.append(sanitized)
+        result["trigger_bindings"] = sanitized_triggers
+    connector_bindings = result.get("connector_bindings")
+    if isinstance(connector_bindings, Mapping):
+        sanitized_connectors: dict[Any, Any] = {}
+        for slot, binding in connector_bindings.items():
+            if not isinstance(binding, Mapping):
+                sanitized_connectors[slot] = binding
+                continue
+            sanitized = dict(binding)
+            for field_name in ("binding_id",):
+                if field_name in sanitized:
+                    sanitized[field_name] = _pseudonymize_configuration_text(
+                        sanitized[field_name],
+                        field_domain=field_name,
+                        key=key,
+                    )
+            sanitized_connectors[slot] = sanitized
+        result["connector_bindings"] = sanitized_connectors
+    schedule = result.get("schedule")
+    if isinstance(schedule, Mapping):
+        sanitized_schedule = dict(schedule)
+        for field_name in ("cron", "timezone"):
+            if field_name in sanitized_schedule:
+                sanitized_schedule[field_name] = _pseudonymize_configuration_text(
+                    sanitized_schedule[field_name],
+                    field_domain=field_name,
+                    key=key,
+                )
+        result["schedule"] = sanitized_schedule
+    return result
+
+
+def _pseudonymize_instance_configuration_metadata(
+    event_type: str,
+    metadata: Mapping[str, Any],
+    key: DigestKey,
+) -> Mapping[str, Any]:
+    if event_type != "instance.configuration_changed":
+        return metadata
+    result = dict(metadata)
+    for field_name in ("previous_configuration", "new_configuration"):
+        if field_name in result:
+            result[field_name] = _pseudonymize_configuration_snapshot(result[field_name], key)
+    return result
+
+
+def _require_exact_configuration_fields(
+    value: Any,
+    expected: frozenset[str],
+    field_name: str,
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or any(type(key) is not str for key in value):
+        raise _configuration_error(f"{field_name} must be a canonical JSON object")
+    actual = set(value)
+    if actual != expected:
+        raise _configuration_error(f"{field_name} must contain only its exact safe fields")
+    if any(is_sensitive_key(key) for key in value):
+        raise _configuration_error(f"{field_name} contains a sensitive field name")
+    return value
+
+
+def _require_bounded_configuration_text(
+    value: Any,
+    field_name: str,
+    *,
+    maximum: int,
+) -> str:
+    if type(value) is not str or not value or value != value.strip() or len(value) > maximum:
+        raise _configuration_error(f"{field_name} must be nonempty, trimmed, and bounded")
+    return value
+
+
+def _require_pseudonymous_configuration_text(
+    value: Any,
+    field_name: str,
+) -> str:
+    if type(value) is not str or _AUDIT_CONFIGURATION_TEXT_PATTERN.fullmatch(value) is None:
+        raise _configuration_error(f"{field_name} must use the keyed audit pseudonym scheme")
+    return value
+
+
+def _require_optional_configuration_text(
+    value: Any,
+    field_name: str,
+    *,
+    maximum: int,
+    stored_representation: bool,
+) -> str | None:
+    if value is None:
+        return None
+    if stored_representation:
+        return _require_pseudonymous_configuration_text(value, field_name)
+    return _require_bounded_configuration_text(value, field_name, maximum=maximum)
+
+
+def _require_configuration_boolean(value: Any, field_name: str) -> None:
+    if type(value) is not bool:
+        raise _configuration_error(f"{field_name} must be boolean")
+
+
+def _require_misfire_grace(value: Any, field_name: str, *, optional: bool) -> None:
+    if value is None and optional:
+        return
+    if type(value) is not int or not 0 <= value <= 86_400:
+        raise _configuration_error(f"{field_name} must be an integer from 0 through 86400")
+
+
+def _validate_trigger_bindings(
+    value: Any,
+    field_name: str,
+    *,
+    stored_representation: bool,
+) -> tuple[Mapping[str, Any], ...]:
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes, bytearray))
+        or len(value) > 16
+    ):
+        raise _configuration_error(f"{field_name} must be a bounded JSON array")
+    validated: list[Mapping[str, Any]] = []
+    for index, item in enumerate(value):
+        item_name = f"{field_name}[{index}]"
+        binding = _require_exact_configuration_fields(
+            item,
+            _TRIGGER_BINDING_FIELDS,
+            item_name,
+        )
+        trigger_type = binding["type"]
+        if trigger_type not in {"manual", "webhook", "schedule"}:
+            raise _configuration_error(f"{item_name}.type is unsupported")
+        _require_configuration_boolean(binding["enabled"], f"{item_name}.enabled")
+        event_source = _require_optional_configuration_text(
+            binding["event_source"],
+            f"{item_name}.event_source",
+            maximum=100,
+            stored_representation=stored_representation,
+        )
+        if (
+            not stored_representation
+            and event_source is not None
+            and _SAFE_CONFIGURATION_ID.fullmatch(event_source) is None
+        ):
+            raise _configuration_error(f"{item_name}.event_source must be a stable safe identifier")
+        _require_optional_configuration_text(
+            binding["cron"],
+            f"{item_name}.cron",
+            maximum=100,
+            stored_representation=stored_representation,
+        )
+        timezone = _require_optional_configuration_text(
+            binding["timezone"],
+            f"{item_name}.timezone",
+            maximum=100,
+            stored_representation=stored_representation,
+        )
+        if not stored_representation and timezone is not None:
+            try:
+                require_iana_timezone(timezone, f"{item_name}.timezone")
+            except (TypeError, ValueError):
+                raise _configuration_error(
+                    f"{item_name}.timezone must be a valid IANA key"
+                ) from None
+        if binding["misfire_policy"] not in {None, "skip", "run_once"}:
+            raise _configuration_error(f"{item_name}.misfire_policy is unsupported")
+        _require_misfire_grace(
+            binding["misfire_grace_seconds"],
+            f"{item_name}.misfire_grace_seconds",
+            optional=True,
+        )
+        schedule_values = (
+            binding["cron"],
+            binding["timezone"],
+            binding["misfire_policy"],
+            binding["misfire_grace_seconds"],
+        )
+        if trigger_type == "manual":
+            if event_source is not None or any(item is not None for item in schedule_values):
+                raise _configuration_error(f"{item_name} manual trigger has forbidden parameters")
+        elif trigger_type == "webhook":
+            if event_source is None or any(item is not None for item in schedule_values):
+                raise _configuration_error(f"{item_name} webhook trigger has invalid parameters")
+        else:
+            if event_source is not None:
+                raise _configuration_error(
+                    f"{item_name} schedule trigger has a forbidden event source"
+                )
+            supplied_schedule_values = sum(item is not None for item in schedule_values)
+            if binding["enabled"] is True and supplied_schedule_values != len(schedule_values):
+                raise _configuration_error(
+                    f"{item_name} enabled schedule trigger requires complete parameters"
+                )
+            if binding["enabled"] is False and supplied_schedule_values != 0:
+                raise _configuration_error(
+                    f"{item_name} disabled schedule trigger retains parameters"
+                )
+        validated.append(binding)
+    trigger_types = tuple(binding["type"] for binding in validated)
+    if len(trigger_types) != len(set(trigger_types)):
+        raise _configuration_error(f"{field_name} trigger types must be unique")
+    return tuple(validated)
+
+
+def _validate_connector_bindings(
+    value: Any,
+    field_name: str,
+    *,
+    stored_representation: bool,
+) -> None:
+    if not isinstance(value, Mapping) or len(value) > 16:
+        raise _configuration_error(f"{field_name} must be a bounded JSON object")
+    for slot, item in value.items():
+        if type(slot) is not str or _SAFE_CONFIGURATION_ID.fullmatch(slot) is None:
+            raise _configuration_error(f"{field_name} contains an unsafe binding slot")
+        item_name = f"{field_name}.{slot}"
+        binding = _require_exact_configuration_fields(
+            item,
+            _CONNECTOR_BINDING_FIELDS,
+            item_name,
+        )
+        family = _require_bounded_configuration_text(
+            binding["connector_family"],
+            f"{item_name}.connector_family",
+            maximum=100,
+        )
+        if _CONNECTOR_FAMILY.fullmatch(family) is None:
+            raise _configuration_error(f"{item_name}.connector_family is invalid")
+        if slot != family:
+            raise _configuration_error(f"{item_name}.connector_family must match its binding key")
+        if stored_representation:
+            binding_id = _require_pseudonymous_configuration_text(
+                binding["binding_id"],
+                f"{item_name}.binding_id",
+            )
+        else:
+            binding_id = _require_bounded_configuration_text(
+                binding["binding_id"],
+                f"{item_name}.binding_id",
+                maximum=120,
+            )
+        if not stored_representation and _CONNECTOR_BINDING_ID.fullmatch(binding_id) is None:
+            raise _configuration_error(f"{item_name}.binding_id must be a stable safe identifier")
+        _require_configuration_boolean(binding["enabled"], f"{item_name}.enabled")
+
+
+def _validate_schedule(
+    value: Any,
+    field_name: str,
+    *,
+    stored_representation: bool,
+) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    schedule = _require_exact_configuration_fields(value, _SCHEDULE_FIELDS, field_name)
+    cron = schedule["cron"]
+    timezone = schedule["timezone"]
+    if stored_representation:
+        _require_pseudonymous_configuration_text(cron, f"{field_name}.cron")
+        _require_pseudonymous_configuration_text(timezone, f"{field_name}.timezone")
+    else:
+        _require_bounded_configuration_text(cron, f"{field_name}.cron", maximum=100)
+        _require_bounded_configuration_text(timezone, f"{field_name}.timezone", maximum=100)
+        try:
+            require_iana_timezone(timezone, f"{field_name}.timezone")
+        except (TypeError, ValueError):
+            raise _configuration_error(f"{field_name}.timezone must be a valid IANA key") from None
+    if schedule["misfire_policy"] not in {"skip", "run_once"}:
+        raise _configuration_error(f"{field_name}.misfire_policy is unsupported")
+    _require_misfire_grace(
+        schedule["misfire_grace_seconds"],
+        f"{field_name}.misfire_grace_seconds",
+        optional=False,
+    )
+    return schedule
+
+
+def _validate_deployment_configuration(
+    value: Any,
+    field_name: str,
+    *,
+    stored_representation: bool,
+) -> None:
+    configuration = _require_exact_configuration_fields(
+        value,
+        _DEPLOYMENT_CONFIGURATION_FIELDS,
+        field_name,
+    )
+    _require_configuration_boolean(configuration["enabled"], f"{field_name}.enabled")
+    variant_label = _require_optional_configuration_text(
+        configuration["variant_label"],
+        f"{field_name}.variant_label",
+        maximum=100,
+        stored_representation=stored_representation,
+    )
+    if (
+        not stored_representation
+        and variant_label is not None
+        and unicodedata.normalize("NFC", variant_label) != variant_label
+    ):
+        raise _configuration_error(f"{field_name}.variant_label must use NFC normalization")
+    triggers = _validate_trigger_bindings(
+        configuration["trigger_bindings"],
+        f"{field_name}.trigger_bindings",
+        stored_representation=stored_representation,
+    )
+    _validate_connector_bindings(
+        configuration["connector_bindings"],
+        f"{field_name}.connector_bindings",
+        stored_representation=stored_representation,
+    )
+    schedule = _validate_schedule(
+        configuration["schedule"],
+        f"{field_name}.schedule",
+        stored_representation=stored_representation,
+    )
+    schedule_triggers = tuple(item for item in triggers if item["type"] == "schedule")
+    enabled_schedule = len(schedule_triggers) == 1 and schedule_triggers[0]["enabled"] is True
+    if (schedule is not None) is not enabled_schedule:
+        raise _configuration_error(
+            f"{field_name} schedule and enabled schedule trigger must appear together"
+        )
+    if enabled_schedule:
+        trigger = schedule_triggers[0]
+        assert schedule is not None
+        if (
+            trigger["cron"] != schedule["cron"]
+            or trigger["timezone"] != schedule["timezone"]
+            or trigger["misfire_policy"] != schedule["misfire_policy"]
+            or trigger["misfire_grace_seconds"] != schedule["misfire_grace_seconds"]
+        ):
+            raise _configuration_error(
+                f"{field_name} schedule trigger parameters must match the schedule"
+            )
+    try:
+        canonical = canonical_json_bytes(configuration)
+        redacted = canonical_json_bytes(redact(configuration))
+    except (TypeError, ValueError) as exc:
+        raise _configuration_error(f"{field_name} must be canonical JSON") from exc
+    if stored_representation and canonical != redacted:
+        raise _configuration_error(f"{field_name} contains material requiring redaction")
+
+
+def _validate_typed_value(
+    field_name: str,
+    value: Any,
+    *,
+    stored_configuration: bool = False,
+) -> None:
     validator: Callable[[Any, str], None]
+    if field_name in {"new_configuration", "previous_configuration"}:
+        _validate_deployment_configuration(
+            value,
+            f"audit metadata {field_name}",
+            stored_representation=stored_configuration,
+        )
+        return
     if field_name in _DIGEST_FIELDS:
         validator = require_digest
     elif field_name == "catalog_content_hash":
@@ -472,6 +956,7 @@ def seal_audit_metadata(
     occurred_at: datetime,
     classification: DataClassification = DataClassification.INTERNAL,
     retention_policy: RetentionPolicy | None = None,
+    configuration_pseudonym_key: DigestKey | None = None,
 ) -> SealedAuditMetadata:
     """Type-check, redact, bound, and recursively freeze one event metadata object."""
 
@@ -492,12 +977,28 @@ def seal_audit_metadata(
     else:
         for field_name, value in metadata.items():
             _validate_typed_value(field_name, value)
-        redacted = redact(metadata)
+        if event_type == "instance.configuration_changed":
+            if type(configuration_pseudonym_key) is not DigestKey:
+                raise AuditMetadataError(
+                    "metadata_pseudonym_key_missing",
+                    "instance configuration audit requires an installation pseudonym key",
+                )
+            pseudonymized = _pseudonymize_instance_configuration_metadata(
+                event_type,
+                metadata,
+                configuration_pseudonym_key,
+            )
+        else:
+            pseudonymized = metadata
+        for field_name, value in pseudonymized.items():
+            _validate_typed_value(field_name, value, stored_configuration=True)
+        redacted = redact(pseudonymized)
         if not isinstance(redacted, Mapping):  # pragma: no cover - source is a mapping
             raise AssertionError("central redactor changed audit object shape")
         safe = redacted
-    _measure(safe)
-    if len(canonical_json_bytes(safe)) > MAX_AUDIT_METADATA_BYTES:
+    maximum_keys, maximum_bytes = _metadata_limits(event_type)
+    _measure(safe, maximum_keys=maximum_keys)
+    if len(canonical_json_bytes(safe)) > maximum_bytes:
         raise AuditMetadataError("metadata_too_large", "audit metadata exceeds its byte limit")
     policy = retention_policy or RetentionPolicy()
     expires_at = policy.expires_at(
@@ -545,12 +1046,13 @@ def hydrate_audit_metadata(
         )
     else:
         for field_name, value in stored_values.items():
-            _validate_typed_value(field_name, value)
+            _validate_typed_value(field_name, value, stored_configuration=True)
         if redact(stored_values) != dict(stored_values):
             raise AuditMetadataError(
                 "metadata_redaction_invalid", "persisted audit metadata is not safely redacted"
             )
-    _measure(stored_values)
-    if len(canonical_json_bytes(stored_values)) > MAX_AUDIT_METADATA_BYTES:
+    maximum_keys, maximum_bytes = _metadata_limits(event_type)
+    _measure(stored_values, maximum_keys=maximum_keys)
+    if len(canonical_json_bytes(stored_values)) > maximum_bytes:
         raise AuditMetadataError("metadata_too_large", "audit metadata exceeds its byte limit")
     return _issue_sealed_audit_metadata(stored_values, classification, expires_at)

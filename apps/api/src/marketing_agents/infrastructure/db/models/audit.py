@@ -129,7 +129,11 @@ class AuditEventRecord(Base):
             "((aggregate_type IN ('schedule','schedule_occurrence') AND "
             "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NOT NULL AND "
             "occurrence_id IS NOT NULL) OR "
-            "(aggregate_type NOT IN ('schedule','schedule_occurrence') AND "
+            "(aggregate_type = 'agent_instance_configuration' AND "
+            "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NULL AND "
+            "occurrence_id IS NULL) OR "
+            "(aggregate_type NOT IN "
+            "('schedule','schedule_occurrence','agent_instance_configuration') AND "
             "run_id IS NOT NULL AND run_sequence IS NOT NULL AND schedule_id IS NULL AND "
             "occurrence_id IS NULL))",
             name="ck_audit_events_timeline_scope",
@@ -167,6 +171,19 @@ class AuditEventRecord(Base):
             "action_attempt_number IS NULL AND receipt_id IS NULL AND "
             "approval_request_id IS NULL AND approval_decision_id IS NULL AND "
             "artifact_id IS NULL AND attempt_id IS NULL) OR "
+            "(aggregate_type = 'agent_instance_configuration' AND "
+            "event_type = 'instance.configuration_changed' AND "
+            "aggregate_id LIKE 'inst.%' AND outcome = 'accepted' AND "
+            "mutation_version IS NOT NULL AND expected_version IS NOT NULL AND "
+            "observed_version IS NOT NULL AND mutation_version >= 2 AND expected_version >= 1 AND "
+            "observed_version = expected_version AND "
+            "mutation_version = expected_version + 1 AND "
+            "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
+            "step_id IS NULL AND action_id IS NULL AND action_attempt_number IS NULL AND "
+            "receipt_id IS NULL AND approval_request_id IS NULL AND "
+            "approval_decision_id IS NULL AND artifact_id IS NULL AND attempt_id IS NULL AND "
+            "attempted_command IS NULL AND observed_state IS NULL AND requested_state IS NULL AND "
+            "previous_state IS NULL AND new_state IS NULL AND reason_code IS NULL) OR "
             "(aggregate_type = 'run' AND event_type IN "
             "('run.received','run.transitioned','run.plan_recorded') AND "
             "aggregate_id = run_id AND outcome = 'accepted' AND mutation_version IS NOT NULL "
@@ -350,7 +367,13 @@ class AuditEventRecord(Base):
         ),
         CheckConstraint(
             "(aggregate_type = 'run_attempt') OR "
-            "(attempted_command IS NULL AND expected_version IS NULL AND "
+            "(aggregate_type = 'agent_instance_configuration' AND "
+            "attempted_command IS NULL AND expected_version IS NOT NULL AND "
+            "observed_version IS NOT NULL AND observed_version = expected_version AND "
+            "observed_state IS NULL AND "
+            "requested_state IS NULL) OR "
+            "(aggregate_type NOT IN ('run_attempt','agent_instance_configuration') AND "
+            "attempted_command IS NULL AND expected_version IS NULL AND "
             "observed_version IS NULL AND observed_state IS NULL AND requested_state IS NULL)",
             name="ck_audit_events_attempt_observations",
         ),

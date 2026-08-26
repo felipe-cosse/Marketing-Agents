@@ -34,6 +34,7 @@ from marketing_agents.application.services import (
     RunStepLifecycleService,
     RunStepLifecycleServiceError,
 )
+from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext, AuditOutcome
 from marketing_agents.domain.entities import Run
@@ -73,6 +74,7 @@ from marketing_agents.infrastructure.db.models import (
 from marketing_agents.infrastructure.db.repositories import SQLAlchemyWorkRepository
 from marketing_agents.security.digest_key import DigestKey
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.support.execution_control import execution_control_repository
@@ -969,5 +971,76 @@ async def test_orch_09_plan_replay_rejects_missing_initial_step_history(
             )
         assert counter == len(before)
         assert audit_count == len(before) - 1
+    finally:
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_03_runless_instance_configuration_audit_round_trips_globally(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "instance-configuration-audit.db")
+    event = AuditEventFactory(
+        AuditContext.authenticated_user(
+            "local-operator",
+            authentication_method="local_fixed",
+            correlation_id="request.api-03.configuration.persistence",
+        ),
+        configuration_pseudonym_key=_key(),
+    ).instance_configuration_changed(
+        instance_id="inst.email.newsletter.newsletter-subscriber.01",
+        previous_configuration={
+            "enabled": True,
+            "variant_label": None,
+            "trigger_bindings": [],
+            "connector_bindings": {},
+            "schedule": None,
+        },
+        new_configuration={
+            "enabled": False,
+            "variant_label": None,
+            "trigger_bindings": [],
+            "connector_bindings": {},
+            "schedule": None,
+        },
+        previous_revision=1,
+        new_revision=2,
+        occurred_at=NOW,
+    )
+    try:
+        async with runtime.session_factory() as session, session.begin():
+            repository = SQLAlchemyAuditRepository(session)
+            persisted = await repository.append_global(event)
+            assert persisted.run_id is None
+            assert persisted.run_sequence is None
+
+        async with runtime.session_factory() as session:
+            repository = SQLAlchemyAuditRepository(session)
+            restored = await repository.get(event.id)
+            by_mutation = await repository.get_mutation_event(
+                "agent_instance_configuration",
+                event.aggregate_id,
+                2,
+            )
+            row = (
+                await session.execute(
+                    select(AuditEventRecord).where(AuditEventRecord.id == event.id)
+                )
+            ).scalar_one()
+        assert restored == persisted
+        assert by_mutation == persisted
+        assert row.run_id is row.run_sequence is None
+        assert row.schedule_id is row.occurrence_id is None
+        assert row.expected_version == row.observed_version == 1
+        assert row.mutation_version == 2
+
+        async with runtime.session_factory() as session:
+            with pytest.raises(IntegrityError):
+                await session.execute(
+                    update(AuditEventRecord)
+                    .where(AuditEventRecord.id == event.id)
+                    .values(observed_version=None)
+                )
+                await session.commit()
     finally:
         await runtime.dispose()

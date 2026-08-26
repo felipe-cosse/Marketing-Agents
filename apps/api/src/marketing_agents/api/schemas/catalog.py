@@ -162,6 +162,7 @@ class AgentInstanceView(CatalogApiModel):
     connector_bindings: dict[str, ConnectorBindingView]
     schedule: ScheduleBindingView | None
     configuration_revision: int = Field(ge=1)
+    configuration_etag: str = Field(pattern=r'^"instance-configuration-v1-[1-9][0-9]*"$')
 
 
 class CatalogResponse(CatalogApiModel):
@@ -274,6 +275,7 @@ class AgentInstanceDetailResponse(CatalogApiModel):
     output_schema: dict[str, Any]
     template_source_references: tuple[str, ...]
     template_implementation_notes: str
+    configuration_schema: str
 
 
 class CatalogProblem(CatalogApiModel):
