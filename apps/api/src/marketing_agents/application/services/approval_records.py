@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from marketing_agents.application.orchestration.dependencies import (
@@ -60,6 +60,7 @@ class RegisteredApprovalSet:
 class RenewedApprovalRequest:
     expired: StoredActionApprovalRequest
     replacement: StoredActionApprovalRequest
+    created: bool = field(default=True, compare=False)
 
 
 def _approval_semantics(request: ActionApprovalRequest) -> tuple[object, ...]:
@@ -828,6 +829,7 @@ class ApprovalRecordService:
         expected_version: int,
         expected_action_hash: str,
         audit_context: AuditContext,
+        requested_by: str | None = None,
     ) -> RenewedApprovalRequest:
         if type(expected_version) is not int or expected_version < 1:
             raise ApprovalRecordServiceError(
@@ -837,6 +839,8 @@ class ApprovalRecordService:
         try:
             require_id(request_id, "approval request ID")
             require_digest(expected_action_hash, "approval action hash")
+            if requested_by is not None:
+                require_id(requested_by, "approval renewal requester ID")
         except (TypeError, ValueError):
             raise ApprovalRecordServiceError(
                 "approval_request_invalid", "approval renewal identity is invalid"
@@ -904,6 +908,7 @@ class ApprovalRecordService:
                 return RenewedApprovalRequest(
                     expired=current,
                     replacement=replacement,
+                    created=False,
                 )
             try:
                 renewal = renew_expired_request(
@@ -912,6 +917,7 @@ class ApprovalRecordService:
                     exact_action=action.proposal,
                     now=self._dependencies.utc_now(),
                     expected_client_hash=expected_action_hash,
+                    requested_by=requested_by,
                 )
             except ApprovalIntegrityError as exc:
                 raise ApprovalRecordServiceError(exc.code, str(exc)) from None

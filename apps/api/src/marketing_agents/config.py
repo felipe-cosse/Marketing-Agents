@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     )
     local_identity_scopes: tuple[str, ...] = (
         "approvals:read",
+        "approvals:request",
         "approvals:decide",
         "scope.external-write",
     )

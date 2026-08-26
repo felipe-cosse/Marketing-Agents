@@ -500,6 +500,10 @@ class ApprovalDecisionRecord(Base):
             name="ck_approval_decision_reason",
         ),
         CheckConstraint(
+            "reason IS NULL OR (length(reason) BETWEEN 1 AND 500 AND reason = trim(reason))",
+            name="ck_approval_decision_optional_reason",
+        ),
+        CheckConstraint(
             "proposal_revision >= 1 AND length(action_hash) = 64 AND length(plan_hash) = 64 "
             "AND length(integrity_digest) = 64",
             name="ck_approval_decision_binding_shape",
@@ -523,6 +527,7 @@ class ApprovalDecisionRecord(Base):
     authority_roles: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     authority_scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     decided_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     integrity_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 

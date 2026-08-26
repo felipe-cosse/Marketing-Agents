@@ -39,6 +39,23 @@ from marketing_agents.domain.validation import require_digest, require_id, requi
 MAX_APPROVAL_REASON_LENGTH = 500
 
 
+def validate_approval_reason(value: str) -> None:
+    """Reject database-invalid and log-hostile control text before persistence."""
+
+    require_text(
+        value,
+        "approval decision reason",
+        maximum=MAX_APPROVAL_REASON_LENGTH,
+    )
+    if any(
+        ord(character) < 0x20
+        or 0x7F <= ord(character) <= 0x9F
+        or 0xD800 <= ord(character) <= 0xDFFF
+        for character in value
+    ):
+        raise ValueError("approval decision reason contains unsupported characters")
+
+
 class ApprovalDecisionServiceError(ValueError):
     """Stable, non-sensitive decision failure for later API problem mapping."""
 
@@ -66,11 +83,7 @@ class ApprovalDecisionCommand:
         if type(self.decision) is not ApprovalDecisionKind:
             raise ValueError("approval decision must use the exact decision enum")
         if self.reason is not None:
-            require_text(
-                self.reason,
-                "approval decision reason",
-                maximum=MAX_APPROVAL_REASON_LENGTH,
-            )
+            validate_approval_reason(self.reason)
         require_id(self.correlation_id, "approval correlation ID")
 
 
@@ -275,6 +288,7 @@ class ApprovalDecisionService:
             authority_scopes=authority.matched_scopes,
             reason_code=reason_code,
             decided_at=decided_at,
+            reason=command.reason,
         )
         try:
             inserted = await unit_of_work.approvals.record_decision(

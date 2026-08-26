@@ -21,6 +21,7 @@ from marketing_agents.domain.validation import (
     require_digest,
     require_id,
     require_json_pointers,
+    require_text,
     require_utc,
 )
 
@@ -564,6 +565,7 @@ class ActionApprovalRequest:
 
 
 _DECISION_REASON_CODES = frozenset({"approval_granted", "approval_rejected"})
+_MAX_DECISION_REASON_LENGTH = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -588,6 +590,7 @@ class ApprovalDecision:
     authority_scopes: frozenset[str] = field(repr=False)
     reason_code: str
     decided_at: datetime
+    reason: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for value, name in (
@@ -624,6 +627,19 @@ class ApprovalDecision:
         )
         if self.reason_code != expected_reason or self.reason_code not in _DECISION_REASON_CODES:
             raise ValueError("approval decision reason must match the decision")
+        if self.reason is not None:
+            require_text(
+                self.reason,
+                "approval decision reason",
+                maximum=_MAX_DECISION_REASON_LENGTH,
+            )
+            if any(
+                ord(character) < 0x20
+                or 0x7F <= ord(character) <= 0x9F
+                or 0xD800 <= ord(character) <= 0xDFFF
+                for character in self.reason
+            ):
+                raise ValueError("approval decision reason contains unsupported characters")
         require_utc(self.decided_at, "approval decision time")
 
 
@@ -868,7 +884,6 @@ class ApprovalRenewal:
             or new.redacted_destination != old.redacted_destination
             or new.redacted_projection != old.redacted_projection
             or new.policy != old.policy
-            or new.requested_by != old.requested_by
         ):
             raise ValueError("approval renewal must retain one exact action leaf and set epoch")
 

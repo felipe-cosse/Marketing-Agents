@@ -49,7 +49,12 @@ async def test_run_10_default_local_identity_is_fixed_and_bearer_is_not_a_fallba
             "actor_id": "local-operator",
             "authentication_method": "local_fixed",
             "roles": ["approver", "local_admin", "operator", "viewer"],
-            "scopes": ["approvals:decide", "approvals:read", "scope.external-write"],
+            "scopes": [
+                "approvals:decide",
+                "approvals:read",
+                "approvals:request",
+                "scope.external-write",
+            ],
         }
         token = "transport-secret-canary"
         rejected = await client.get(

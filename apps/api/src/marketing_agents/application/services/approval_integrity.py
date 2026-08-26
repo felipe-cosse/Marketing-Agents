@@ -78,6 +78,7 @@ def renew_expired_request(
     exact_action: ProposedExternalAction,
     now: datetime,
     expected_client_hash: str,
+    requested_by: str | None = None,
 ) -> ApprovalRenewal:
     """Replace only an expired request leaf for the unchanged action/set epoch."""
 
@@ -117,7 +118,7 @@ def renew_expired_request(
         request_id=replacement_request_id,
         proposed_action=exact_action,
         policy=request.policy,
-        requested_by=request.requested_by,
+        requested_by=request.requested_by if requested_by is None else requested_by,
         requested_at=now,
         generation=request.generation + 1,
     )
