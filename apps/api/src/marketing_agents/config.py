@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, ge=1, le=65535)
     marketing_agents_digest_key_path: Path = Path("data/digest.key")
     real_llm_api_key: SecretStr | None = None
+    webhook_hmac_secret: SecretStr | None = None
     retention_admitted_payload_days: int = Field(default=7, ge=1, le=3650)
     retention_external_action_payload_days: int = Field(default=7, ge=1, le=3650)
     retention_approval_detail_days: int = Field(default=7, ge=1, le=3650)

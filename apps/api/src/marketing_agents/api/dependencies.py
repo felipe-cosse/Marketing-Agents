@@ -45,6 +45,10 @@ from marketing_agents.application.services.manual_work_intake import (
     ManualDryRunCommand,
     ManualDryRunResult,
 )
+from marketing_agents.application.services.webhook_intake import (
+    WebhookAdmissionCommand,
+    WebhookAdmissionResult,
+)
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
 
@@ -118,6 +122,10 @@ class ManualDryRunExecutor(Protocol):
     ) -> ManualDryRunResult: ...
 
 
+class WebhookAdmissionExecutor(Protocol):
+    async def submit(self, command: WebhookAdmissionCommand) -> WebhookAdmissionResult: ...
+
+
 def get_readiness_probe(request: Request) -> ReadinessProbe | None:
     """Resolve the optional probe without trusting falsey or malformed objects."""
 
@@ -184,6 +192,23 @@ def get_manual_dry_run_executor(request: Request) -> ManualDryRunExecutor:
             detail="manual dry-run service unavailable",
         )
     return cast(ManualDryRunExecutor, executor)
+
+
+def get_webhook_admission_executor(request: Request) -> WebhookAdmissionExecutor:
+    """Resolve only the dedicated async signature-authenticated webhook seam."""
+
+    try:
+        executor = getattr(request.app.state, "webhook_admission_service", None)
+        submit = getattr(executor, "submit", None)
+    except Exception:
+        executor = None
+        submit = None
+    if executor is None or not callable(submit) or not inspect.iscoroutinefunction(submit):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="webhook admission service unavailable",
+        )
+    return cast(WebhookAdmissionExecutor, executor)
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:

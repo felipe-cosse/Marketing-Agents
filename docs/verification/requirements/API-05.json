@@ -1,0 +1,221 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-05",
+  "matrix_statement_sha256": "d577d8d1a52f838b51669ecef9873d5c7b8c2bde8b9db4b84a966fe90c8a73ba",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      ".env.example",
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/webhooks.py",
+      "apps/api/src/marketing_agents/api/schemas/webhooks.py",
+      "apps/api/src/marketing_agents/application/ports/__init__.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/ports/webhook_admission.py",
+      "apps/api/src/marketing_agents/application/ports/webhook_sources.py",
+      "apps/api/src/marketing_agents/application/ports/webhooks.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/webhook_intake.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/identity.py",
+      "apps/api/src/marketing_agents/domain/webhook.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/identity.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/webhook.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/work.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/webhook.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_ingress.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_signatures.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_sources.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "apps/api/src/marketing_agents/security/webhook_digest.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-05.json",
+      "docs/verification/requirements/API-05.md",
+      "tests/integration/api/test_api_05_webhooks.py",
+      "tests/integration/db/test_api_05_webhook_intake.py",
+      "tests/integration/db/test_api_05_webhook_receipts.py",
+      "tests/unit/application/test_api_05_webhook_admission_service.py",
+      "tests/unit/application/test_api_05_webhook_audit_events.py",
+      "tests/unit/webhooks/test_api_05_body_digest.py",
+      "tests/unit/webhooks/test_api_05_hmac_verifier.py",
+      "tests/unit/webhooks/test_api_05_input_mapping.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/webhooks.py",
+          "apps/api/src/marketing_agents/application/services/webhook_intake.py",
+          "apps/api/src/marketing_agents/infrastructure/webhook_signatures.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/webhook.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_05_webhooks.py",
+          "tests/integration/db/test_api_05_webhook_intake.py",
+          "tests/integration/db/test_api_05_webhook_receipts.py",
+          "tests/unit/application/test_api_05_webhook_admission_service.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-raw-authenticated-transport",
+      "type": "contract",
+      "statement": "POST /api/v1/webhooks/{source}/{trigger_id} preserves exact unencoded JSON bytes and duplicate authentication headers for application verification, rejects malformed or oversized transport before service invocation, bypasses local browser identity, bounds the service wait to five seconds, and returns non-cacheable typed 202 fan-out receipts or fixed non-reflective errors without claiming execution.",
+      "test_refs": [
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_preserves_exact_body_and_headers_without_local_identity",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_returns_typed_202_fan_out_without_claiming_execution",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_maps_service_errors_to_non_reflective_stable_problems",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_requires_one_unencoded_application_json_transport",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_raw_body_limit_accepts_boundary_and_rejects_buffered_and_chunked_excess",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_timeout_cancels_executor_and_returns_bounded_503",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_05_openapi_exposes_only_exact_webhook_transport_contract"
+      ]
+    },
+    {
+      "id": "signature-before-mapping-and-server-routing",
+      "type": "negative_control",
+      "statement": "The HMAC-SHA256 adapter resolves only an opaque environment secret reference, authenticates a bounded timestamp plus exact raw bytes, and issues sealed source-trigger authority before mapping. The registry enforces one trigger, secret reference, and verifier per source plus a mapper-owned version. The strict mapper accepts only eventId and input; the compiled resolver selects enabled explicit source targets, so payload text, local identity, and registration alone cannot choose a target.",
+      "test_refs": [
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py::test_api_05_verifies_exact_raw_bytes_and_issues_exact_service_authority",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py::test_api_05_rejects_missing_and_case_insensitive_duplicate_auth_headers",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py::test_api_05_freshness_and_future_skew_boundaries_are_inclusive",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py::test_api_05_secret_resolution_is_reference_only_and_fails_closed",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py::test_api_05_settings_and_example_never_expose_or_ship_a_webhook_secret",
+        "tests/unit/webhooks/test_api_05_input_mapping.py::test_api_05_mapper_accepts_only_event_id_and_input_without_routing_authority",
+        "tests/unit/webhooks/test_api_05_input_mapping.py::test_api_05_mapper_rejects_ambiguous_or_noncanonical_envelopes",
+        "tests/unit/webhooks/test_api_05_input_mapping.py::test_api_05_source_definition_binds_the_mapper_implementation_version",
+        "tests/unit/webhooks/test_api_05_input_mapping.py::test_api_05_registry_rejects_shared_source_or_secret_authority",
+        "tests/unit/webhooks/test_api_05_input_mapping.py::test_api_05_registry_rejects_reusing_one_verifier_authority",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_signature_rejection_precedes_json_mapping_and_work_resolution",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_invalid_verifier_output_is_adapter_unavailable_not_auth_denial",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_registered_source_without_explicit_instance_binding_is_forbidden"
+      ]
+    },
+    {
+      "id": "keyed-exact-body-idempotency",
+      "type": "positive",
+      "statement": "A domain-separated keyed body digest and its key-version label bind exact authenticated bytes without persisting or exposing the raw body. The unique source-event receipt records its trigger and mapper version, exact replay returns the authoritative original aggregate across restart and later configuration drift, and a valid signature over changed bytes for the same event commits only a collision witness with no new target work.",
+      "test_refs": [
+        "tests/unit/webhooks/test_api_05_body_digest.py::test_api_05_body_digest_is_restart_stable_exact_byte_sensitive_and_redacted",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_exact_replay_returns_original_links_without_resolving_work",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_authenticated_same_event_different_body_commits_collision_only",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_exact_replay_ignores_later_binding_configuration_drift",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_restart_replay_survives_configuration_drift_and_changed_body_collides"
+      ]
+    },
+    {
+      "id": "atomic-durable-fan-out-receipt",
+      "type": "positive",
+      "statement": "One transaction creates one source-event receipt and one immutable delivery per bound instance. Composite foreign keys bind each WorkItem to its instance and each Run to its WorkItem; transactional validation requires the initial transition. Real fan-out and concurrent submissions converge, and lock waiters re-read the receipt before orphan checks. Partial fan-out, cross-link reuse, more than 43 targets, absent commit, and post-audit faults leave no partial receipt.",
+      "test_refs": [
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_fan_out_uses_one_uow_and_one_receipt_for_every_binding",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_partial_fan_out_failure_never_commits_receipt_or_audit",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_rechecks_receipt_after_serialization_lock_wait",
+        "tests/unit/application/test_api_05_webhook_admission_service.py::test_api_05_receipt_bound_matches_the_fixed_43_instance_catalog",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_authenticated_intake_creates_two_target_receipt_without_audit_leaks",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_concurrent_exact_replay_creates_one_complete_fanout",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_fault_after_webhook_audit_flush_rolls_back_complete_fanout",
+        "tests/integration/db/test_api_05_webhook_receipts.py::test_api_05_complete_fanout_round_trips_and_replays_authoritative_receipt",
+        "tests/integration/db/test_api_05_webhook_receipts.py::test_api_05_receipt_rolls_back_without_an_explicit_outer_commit",
+        "tests/integration/db/test_api_05_webhook_receipts.py::test_api_05_unrelated_work_or_run_reuse_fails_without_partial_receipt",
+        "tests/integration/db/test_api_05_webhook_receipts.py::test_api_05_database_rejects_contradictory_delivery_links",
+        "tests/integration/db/test_api_05_webhook_receipts.py::test_api_05_database_rejects_cross_linked_run_and_work_pairs"
+      ]
+    },
+    {
+      "id": "ordered-redacted-webhook-audit",
+      "type": "negative_control",
+      "statement": "Rejected signatures are witnessed only under the pre-verification system identity; authenticated validation, receipt creation, duplicate suppression, collision, and schema rejection use the sealed webhook service identity. Durable assertions prove exact event families and rollback behavior while raw bodies, event IDs, signatures, secrets, secret references, body and admission digests, and digest key versions remain absent from audit metadata.",
+      "test_refs": [
+        "tests/unit/application/test_api_05_webhook_audit_events.py::test_api_05_signature_audits_preserve_the_pre_and_post_verification_boundary",
+        "tests/unit/application/test_api_05_webhook_audit_events.py::test_api_05_receipt_events_have_exact_bounded_dispositions",
+        "tests/unit/application/test_api_05_webhook_audit_events.py::test_api_05_webhook_metadata_rejects_all_raw_or_secret_material",
+        "tests/unit/application/test_api_05_webhook_audit_events.py::test_api_05_public_audit_methods_expose_no_raw_or_secret_parameter_seams",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_invalid_signature_precedes_mapper_and_business_persistence",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_signed_input_schema_rejection_creates_no_receipt_or_target_work",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_authenticated_intake_creates_two_target_receipt_without_audit_leaks",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_05_fault_after_webhook_audit_flush_rolls_back_complete_fanout"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-05-webhook-admission",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_05_webhooks.py",
+        "tests/integration/db/test_api_05_webhook_intake.py",
+        "tests/integration/db/test_api_05_webhook_receipts.py",
+        "tests/unit/application/test_api_05_webhook_admission_service.py",
+        "tests/unit/application/test_api_05_webhook_audit_events.py",
+        "tests/unit/webhooks/test_api_05_body_digest.py",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py",
+        "tests/unit/webhooks/test_api_05_input_mapping.py",
+        "tests/integration/db/test_api_04_manual_work_persistence.py",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py",
+        "tests/integration/db/test_run_04_work_idempotency.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/security/test_run_06_input_redaction.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/network/test_safe_11_network_isolation.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "bounded-raw-authenticated-transport",
+        "signature-before-mapping-and-server-routing",
+        "keyed-exact-body-idempotency",
+        "atomic-durable-fan-out-receipt",
+        "ordered-redacted-webhook-audit"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/routes/webhooks.py",
+      "apps/api/src/marketing_agents/application/services/webhook_intake.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_ingress.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_signatures.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_sources.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/webhook.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/webhook.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py"
+    ],
+    "gate_id": "api-05-webhook-admission"
+  },
+  "limitations": [
+    "API-09 still owns the process-wide application/problem+json vocabulary, browser Origin and CSRF controls, per-source admission rate limiting, and global timeout and retry policy. API-05 has route-local fixed errors, a five-second transport wait, signature freshness bounds, and compiled per-template runtime limits, but does not claim the complete API-09 boundary.",
+    "API-05 authenticates one registered HMAC-SHA256 source definition backed by an opaque environment secret reference and a static in-process registry. Secret provisioning, rotation orchestration, multiple provider-specific signature schemes, and operational source administration remain deployment work rather than capabilities claimed by this requirement.",
+    "The webhook receipt acknowledges durable WorkItem and primary Run admission only; it does not claim inline workflow execution or external delivery. API-07 still owns the run-detail resource behind each runUrl, and later orchestration, approval, and connector requirements own execution after the received transition.",
+    "DEL-04 still owns migrations and repeatable insert-only seed bootstrap. API-05 proves ORM constraints, foreign keys, hydration validation, and real SQLite persistence using test-created metadata. PostgreSQL schema portability is source-inspected but unexecuted: the generic optional driver test may skip and is not evidence of API-05 DDL or runtime behavior, and this gate claims neither an Alembic migration nor a live PostgreSQL database.",
+    "DEL-05 still owns runnable default startup and service composition. The route is installed and fails closed without an asynchronous executor, while the API and database integration witnesses inject the real verifier, source registry, compiled resolver, digest key, repositories, and webhook unit of work; they do not claim the default process constructs or configures those dependencies yet.",
+    "The SQLite webhook unit of work takes write intent before source-event lookup and serializes the default-timeout race; aggressive lock timeouts can exhaust bounded retries with a safe unavailable result. PostgreSQL uses deterministic configuration-row locks and re-reads the receipt after a waiter acquires them. A focused service test covers that branch, but this local gate has no live PostgreSQL concurrency run.",
+    "New-source resolution currently locks the fixed 43-row configuration set to obtain one coherent fan-out snapshot. That bounded v1 design favors correctness over cross-source write concurrency; a future indexed trigger projection can narrow the lock set without changing the receipt contract."
+  ]
+}

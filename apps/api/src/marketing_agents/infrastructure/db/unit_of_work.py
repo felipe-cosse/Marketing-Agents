@@ -24,6 +24,7 @@ from marketing_agents.application.ports.repositories import (
     RunRepository,
     RunStepRepository,
     ScheduleRepository,
+    WebhookReceiptRepository,
     WorkRepository,
 )
 
@@ -58,6 +59,7 @@ class RepositoryBundle:
     execution_control: ExecutionControlRepository | None = None
     artifacts: ArtifactRepository | None = None
     schedules: ScheduleRepository | None = None
+    webhook_receipts: WebhookReceiptRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,12 +75,16 @@ class SQLAlchemyRepositoryFactories:
     execution_control: Callable[[AsyncSession], ExecutionControlRepository] | None = None
     artifacts: Callable[[AsyncSession], ArtifactRepository] | None = None
     schedules: Callable[[AsyncSession], ScheduleRepository] | None = None
+    webhook_receipts: Callable[[AsyncSession], WebhookReceiptRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
             works=self.works(session),
             runs=self.runs(session),
             audits=self.audits(session),
+            webhook_receipts=(
+                None if self.webhook_receipts is None else self.webhook_receipts(session)
+            ),
             configurations=(None if self.configurations is None else self.configurations(session)),
             approvals=None if self.approvals is None else self.approvals(session),
             run_steps=None if self.run_steps is None else self.run_steps(session),
@@ -128,6 +134,13 @@ class SQLAlchemyUnitOfWork:
     @property
     def works(self) -> WorkRepository:
         return self._require_repositories().works
+
+    @property
+    def webhook_receipts(self) -> WebhookReceiptRepository:
+        repository = self._require_repositories().webhook_receipts
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("webhook receipt repository is not configured")
+        return repository
 
     @property
     def configurations(self) -> InstanceConfigurationRepository:
@@ -266,6 +279,21 @@ class SQLAlchemyUnitOfWorkFactory:
 @dataclass(frozen=True, slots=True)
 class SQLAlchemyManualAdmissionUnitOfWorkFactory:
     """Serialize SQLite manual admissions before their configuration snapshot read."""
+
+    session_factory: async_sessionmaker[AsyncSession]
+    repository_factories: SQLAlchemyRepositoryFactories
+
+    def __call__(self) -> SQLAlchemyUnitOfWork:
+        return SQLAlchemyUnitOfWork(
+            self.session_factory,
+            self.repository_factories,
+            sqlite_write_intent=True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SQLAlchemyWebhookAdmissionUnitOfWorkFactory:
+    """Serialize SQLite source-event receipts before fan-out admission."""
 
     session_factory: async_sessionmaker[AsyncSession]
     repository_factories: SQLAlchemyRepositoryFactories

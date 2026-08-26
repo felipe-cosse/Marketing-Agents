@@ -16,6 +16,11 @@ class WorkItemRecord(Base):
     __tablename__ = "work_items"
     __table_args__ = (
         UniqueConstraint(
+            "id",
+            "agent_instance_id",
+            name="uq_work_items_id_instance",
+        ),
+        UniqueConstraint(
             "source",
             "event_id",
             "agent_instance_id",

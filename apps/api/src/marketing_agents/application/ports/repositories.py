@@ -61,6 +61,7 @@ from marketing_agents.domain.step_lifecycle import (
     StepTransitionResult,
 )
 from marketing_agents.domain.validation import require_digest, require_id
+from marketing_agents.domain.webhook import WebhookReceipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,37 @@ class WorkRepository(Protocol):
     async def add(self, work_item: WorkItem) -> None: ...
 
     async def add_or_get(self, work_item: WorkItem) -> WorkInsertResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookReceiptInsertResult:
+    """Outcome of one atomic source-event receipt insertion."""
+
+    receipt: WebhookReceipt
+    inserted: bool
+
+
+class WebhookReceiptRepositoryConflict(RuntimeError):
+    """Stable fail-closed webhook receipt persistence or hydration conflict."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class WebhookReceiptRepository(Protocol):
+    async def get(self, receipt_id: str) -> WebhookReceipt | None: ...
+
+    async def get_by_source_event(
+        self,
+        source: str,
+        event_id: str,
+    ) -> WebhookReceipt | None: ...
+
+    async def add_or_get(
+        self,
+        receipt: WebhookReceipt,
+    ) -> WebhookReceiptInsertResult: ...
 
 
 @dataclass(frozen=True, slots=True)

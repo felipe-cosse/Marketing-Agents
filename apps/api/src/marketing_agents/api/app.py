@@ -15,6 +15,7 @@ from marketing_agents.api.dependencies import (
     ApprovalDecisionExecutor,
     InstanceConfigurationExecutor,
     ManualDryRunExecutor,
+    WebhookAdmissionExecutor,
 )
 from marketing_agents.api.errors import safe_request_validation_error
 from marketing_agents.api.routes.approvals import router as approvals_router
@@ -25,6 +26,8 @@ from marketing_agents.api.routes.instance_configuration import (
 )
 from marketing_agents.api.routes.manual_work import ManualWorkRequestBoundsMiddleware
 from marketing_agents.api.routes.manual_work import router as manual_work_router
+from marketing_agents.api.routes.webhooks import WebhookRequestBoundsMiddleware
+from marketing_agents.api.routes.webhooks import router as webhooks_router
 from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
@@ -40,6 +43,7 @@ def create_app(
     catalog_query_service: CatalogQueryExecutor | None = None,
     instance_configuration_service: InstanceConfigurationExecutor | None = None,
     manual_dry_run_service: ManualDryRunExecutor | None = None,
+    webhook_admission_service: WebhookAdmissionExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -57,6 +61,7 @@ def create_app(
     application.state.approval_decision_service = approval_decision_service
     application.state.instance_configuration_service = instance_configuration_service
     application.state.manual_dry_run_service = manual_dry_run_service
+    application.state.webhook_admission_service = webhook_admission_service
     application.state.catalog_query_service = (
         catalog_query_service
         if catalog_query_service is not None
@@ -73,12 +78,14 @@ def create_app(
         safe_request_validation_error,
     )
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
+    application.add_middleware(WebhookRequestBoundsMiddleware)
     application.add_middleware(
         TrustedHostMiddleware, allowed_hosts=list(active_settings.trusted_hosts)
     )
     application.include_router(health_router)
     application.include_router(instance_configuration_router)
     application.include_router(manual_work_router)
+    application.include_router(webhooks_router)
     application.include_router(catalog_router)
     application.include_router(approvals_router)
     return application

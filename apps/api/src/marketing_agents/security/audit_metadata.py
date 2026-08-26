@@ -107,9 +107,27 @@ _SCHEMA_REJECTION_AUDIT_FIELDS = frozenset(
         "workflow_id",
     }
 )
+_WEBHOOK_SIGNATURE_AUDIT_FIELDS = frozenset({"source", "trigger_id", "webhook_attempt_id"})
+_WEBHOOK_RECEIPT_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | frozenset(
+    {"receipt_disposition", "target_count", "webhook_receipt_id"}
+)
+_WEBHOOK_SCHEMA_REJECTION_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | frozenset(
+    {
+        "configuration_revision",
+        "instance_id",
+        "rejection_code",
+        "workflow_id",
+    }
+)
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "ingress.manual_received": _MANUAL_WORK_AUDIT_FIELDS,
     "ingress.schema_rejected": _SCHEMA_REJECTION_AUDIT_FIELDS,
+    "webhook.signature_validated": _WEBHOOK_SIGNATURE_AUDIT_FIELDS,
+    "webhook.signature_rejected": _WEBHOOK_SIGNATURE_AUDIT_FIELDS,
+    "webhook.received": _WEBHOOK_RECEIPT_AUDIT_FIELDS,
+    "webhook.duplicate_suppressed": _WEBHOOK_RECEIPT_AUDIT_FIELDS,
+    "webhook.idempotency_collision": _WEBHOOK_RECEIPT_AUDIT_FIELDS,
+    "webhook.schema_rejected": _WEBHOOK_SCHEMA_REJECTION_AUDIT_FIELDS,
     "work.created": _MANUAL_WORK_AUDIT_FIELDS,
     "work.duplicate_returned": _MANUAL_WORK_AUDIT_FIELDS,
     "work.idempotency_collision": _MANUAL_WORK_AUDIT_FIELDS,
@@ -270,6 +288,7 @@ _POSITIVE_INTEGER_FIELDS = frozenset(
         "proposal_revision",
         "retry_after_seconds",
         "step_count",
+        "target_count",
         "workflow_version",
     }
 )
@@ -951,6 +970,11 @@ def _validate_typed_value(
             "metadata_value_invalid",
             "schedule missed count exceeds its safe bound",
         )
+    if field_name == "target_count" and value > 64:
+        raise AuditMetadataError(
+            "metadata_value_invalid",
+            "webhook target count exceeds its safe bound",
+        )
     if field_name == "disposition" and value not in _SCHEDULE_DISPOSITIONS:
         raise AuditMetadataError(
             "metadata_value_invalid",
@@ -959,7 +983,7 @@ def _validate_typed_value(
     if field_name == "receipt_disposition" and value not in _MANUAL_RECEIPT_DISPOSITIONS:
         raise AuditMetadataError(
             "metadata_value_invalid",
-            "manual receipt disposition is not an allowlisted value",
+            "work receipt disposition is not an allowlisted value",
         )
     if field_name == "mode" and value not in _MANUAL_WORK_MODES:
         raise AuditMetadataError(
