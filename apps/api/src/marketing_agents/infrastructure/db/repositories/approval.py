@@ -54,6 +54,7 @@ from marketing_agents.domain.enums import (
     StepState,
 )
 from marketing_agents.domain.runtime_policy import effective_call_timeout_seconds
+from marketing_agents.domain.validation import require_id, require_utc
 from marketing_agents.infrastructure.db.models.action import (
     ExternalActionDispatchAttemptRecord,
     ExternalActionRecord,
@@ -196,6 +197,7 @@ def _decision_record_material(record: ApprovalDecisionRecord) -> dict[str, Any]:
         "authority_roles": record.authority_roles,
         "authority_scopes": record.authority_scopes,
         "reason_code": record.reason_code,
+        "reason": record.reason,
         "decided_at": _integrity_time(record.decided_at, "decision time"),
     }
 
@@ -454,6 +456,7 @@ def _decision_to_record(
         authority_roles=sorted(decision.authority_roles),
         authority_scopes=sorted(decision.authority_scopes),
         reason_code=decision.reason_code,
+        reason=decision.reason,
         decided_at=decision.decided_at,
     )
     _seal_decision_record(record, key)
@@ -604,6 +607,7 @@ def _decision_from_record(record: ApprovalDecisionRecord, key: DigestKey) -> App
         authority_scopes=frozenset(_strict_strings(record.authority_scopes, "decision scopes")),
         reason_code=record.reason_code,
         decided_at=record.decided_at,
+        reason=record.reason,
     )
 
 
@@ -1213,16 +1217,104 @@ class SQLAlchemyApprovalRepository:
             ) from None
 
     async def get(self, request_id: str) -> StoredActionApprovalRequest | None:
-        record = await self._session.get(ApprovalRequestRecord, request_id)
-        if record is None:
+        stored = await self.get_inspectable(request_id)
+        if stored is None:
             return None
-        stored = await self._hydrate(record)
         await self.list_current_set(
             stored.request.run_id,
             stored.request.plan_hash,
             stored.request.proposal_revision,
         )
         return stored
+
+    async def get_inspectable(
+        self,
+        request_id: str,
+    ) -> StoredActionApprovalRequest | None:
+        """Hydrate one immutable resource without requiring its epoch to remain current."""
+
+        require_id(request_id, "approval request ID")
+        record = await self._session.get(ApprovalRequestRecord, request_id)
+        if record is None:
+            return None
+        return await self._hydrate(record)
+
+    async def list_requests(
+        self,
+        *,
+        status: ApprovalStatus | None,
+        run_id: str | None,
+        action_id: str | None,
+        before_requested_at: datetime | None,
+        before_request_id: str | None,
+        limit: int,
+    ) -> tuple[StoredActionApprovalRequest, ...]:
+        """Return one stable keyset page after validating every selected aggregate."""
+
+        if status is not None and type(status) is not ApprovalStatus:
+            raise ValueError("approval status filter must use the exact enum")
+        for value, name in ((run_id, "approval run filter"), (action_id, "approval action filter")):
+            if value is not None:
+                require_id(value, name)
+        if (before_requested_at is None) != (before_request_id is None):
+            raise ValueError("approval cursor boundary must be complete")
+        if before_requested_at is not None:
+            require_utc(before_requested_at, "approval cursor time")
+            require_id(cast(str, before_request_id), "approval cursor request ID")
+        if type(limit) is not int or not 1 <= limit <= 101:
+            raise ValueError("approval page limit must be from 1 through 101")
+
+        statement = select(ApprovalRequestRecord)
+        if status is not None:
+            statement = statement.where(ApprovalRequestRecord.status == status.value)
+        if run_id is not None:
+            statement = statement.where(ApprovalRequestRecord.run_id == run_id)
+        if action_id is not None:
+            statement = statement.where(ApprovalRequestRecord.action_id == action_id)
+        if before_requested_at is not None:
+            assert before_request_id is not None
+            statement = statement.where(
+                (ApprovalRequestRecord.requested_at < before_requested_at)
+                | (
+                    (ApprovalRequestRecord.requested_at == before_requested_at)
+                    & (ApprovalRequestRecord.id < before_request_id)
+                )
+            )
+        statement = statement.order_by(
+            ApprovalRequestRecord.requested_at.desc(),
+            ApprovalRequestRecord.id.desc(),
+        ).limit(limit)
+        records = tuple((await self._session.execute(statement)).scalars())
+        return tuple([await self._hydrate(record) for record in records])
+
+    async def list_for_action(
+        self,
+        action_id: str,
+    ) -> tuple[StoredActionApprovalRequest, ...]:
+        """Return the exact validated generation chain for one current-set action."""
+
+        require_id(action_id, "approval action ID")
+        statement = (
+            select(ApprovalRequestRecord)
+            .where(ApprovalRequestRecord.action_id == action_id)
+            .order_by(ApprovalRequestRecord.generation)
+        )
+        records = tuple((await self._session.execute(statement)).scalars())
+        if not records:
+            return ()
+        first = records[0]
+        history = await self.list_set_history(
+            first.run_id,
+            first.plan_hash,
+            first.proposal_revision,
+        )
+        chain = tuple(item for item in history if item.request.action_id == action_id)
+        if tuple(item.request.id for item in chain) != tuple(record.id for record in records):
+            raise ApprovalPersistenceConflict(
+                "approval_generation_chain_corrupt",
+                "approval action history differs from its validated authorization set",
+            )
+        return chain
 
     async def _all_for_set(
         self,

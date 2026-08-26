@@ -18,6 +18,16 @@ from .approval_records import (
     RegisteredApprovalSet,
     RenewedApprovalRequest,
 )
+from .approval_resources import (
+    ApprovalListQuery,
+    ApprovalPage,
+    ApprovalRequestCommand,
+    ApprovalRequestDisposition,
+    ApprovalRequestResult,
+    ApprovalResource,
+    ApprovalResourceService,
+    ApprovalResourceServiceError,
+)
 from .cancellation import (
     RunCancellationCoordinator,
     RunCancellationCoordinatorError,
@@ -138,8 +148,16 @@ __all__ = [
     "ApprovalDecisionCommand",
     "ApprovalDecisionService",
     "ApprovalDecisionServiceError",
+    "ApprovalListQuery",
+    "ApprovalPage",
     "ApprovalRecordService",
     "ApprovalRecordServiceError",
+    "ApprovalRequestCommand",
+    "ApprovalRequestDisposition",
+    "ApprovalRequestResult",
+    "ApprovalResource",
+    "ApprovalResourceService",
+    "ApprovalResourceServiceError",
     "AuditedPlanPersistenceService",
     "AuthorizedApprovalDecision",
     "CampaignBriefPolicy",

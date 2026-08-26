@@ -899,6 +899,27 @@ class ApprovalRepositoryConflict(RuntimeError):
 class ApprovalRepository(Protocol):
     async def get(self, request_id: str) -> StoredActionApprovalRequest | None: ...
 
+    async def get_inspectable(
+        self,
+        request_id: str,
+    ) -> StoredActionApprovalRequest | None: ...
+
+    async def list_requests(
+        self,
+        *,
+        status: ApprovalStatus | None,
+        run_id: str | None,
+        action_id: str | None,
+        before_requested_at: datetime | None,
+        before_request_id: str | None,
+        limit: int,
+    ) -> tuple[StoredActionApprovalRequest, ...]: ...
+
+    async def list_for_action(
+        self,
+        action_id: str,
+    ) -> tuple[StoredActionApprovalRequest, ...]: ...
+
     async def list_current_set(
         self,
         run_id: str,

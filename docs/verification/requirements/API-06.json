@@ -1,0 +1,196 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-06",
+  "matrix_statement_sha256": "c6a0e2cd43ce989ece448f440b8f047520e8eea83b15f6a436c5650f37c1a4ab",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/schemas/__init__.py",
+      "apps/api/src/marketing_agents/api/schemas/approvals.py",
+      "apps/api/src/marketing_agents/application/policies/__init__.py",
+      "apps/api/src/marketing_agents/application/policies/approval_resource_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/approval_integrity.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/approval_resources.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-06.json",
+      "docs/verification/requirements/API-06.md",
+      "tests/integration/api/test_api_06_approvals.py",
+      "tests/integration/api/test_run_10_identity_dependency.py",
+      "tests/integration/db/test_api_06_approval_repository.py",
+      "tests/unit/application/test_api_06_approval_resources.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/approvals.py",
+          "apps/api/src/marketing_agents/application/services/approval_resources.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_06_approvals.py",
+          "tests/integration/db/test_api_06_approval_repository.py",
+          "tests/unit/application/test_api_06_approval_resources.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "authenticated-bounded-inspection",
+      "type": "contract",
+      "statement": "GET /api/v1/approvals and GET /api/v1/approvals/{approval_id} require an intact authenticated human read role plus approvals:read before repository access. Lists select and exact-hydrate at most limit + 1 rows with filter-bound opaque keyset cursors, omit payload and hash, and issue no count query. Detail uses the historical inspectable seam and exposes only the authorized safe projection and links.",
+      "test_refs": [
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_list_and_detail_are_bounded_safe_private_projections",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_every_human_read_role_requires_the_read_scope",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_read_role_scope_matrix_denies_before_executor",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_missing_identity_is_unauthorized_before_resource_lookup",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_non_ascii_cursor_digest_is_a_safe_input_error",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_keyset_pages_are_bounded_deterministic_and_filter_exactly",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_read_authorization_happens_before_lookup_or_clock",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_read_uses_historical_inspection_not_mutation_lookup",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_safe_projection_and_filter_bound_cursor_validation"
+      ]
+    },
+    {
+      "id": "immutable-exact-action-requests",
+      "type": "negative_control",
+      "statement": "POST /api/v1/external-actions/{action_id}/approval-requests requires a human operator with approvals:read and approvals:request and accepts only an expected generation and exact action hash. Generation zero replays an existing current request; positive generations renew only an expired unchanged action. The winning actor becomes the replacement requester, and retries or race losers converge on the linked winner.",
+      "test_refs": [
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_request_role_scope_matrix_denies_before_executor",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_existing_and_renewed_requests_return_authoritative_location",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_request_result_must_bind_reusable_lifecycle_and_requester",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_mutation_authority_fields_are_rejected_without_reflection",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_request_authorization_happens_before_action_lookup",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_generation_zero_reuses_exact_current_request_without_renewal",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_expired_request_renews_once_and_exact_replay_returns_winner",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_renewal_replay_created_false_returns_existing_winner",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_renewal_conflict_rereads_and_returns_exact_concurrent_winner",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_missing_initial_chain_fails_closed_before_clock_or_renewal",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_renewal_restart_replay_hydrates_one_exact_action_chain"
+      ]
+    },
+    {
+      "id": "authorized-one-winner-decisions",
+      "type": "positive",
+      "statement": "Approve and reject preserve the authenticated all-of policy and one-winner conditional boundary, cross-bind the executor result to client preconditions and reason, and retain the narrow response when an optional authoritative reread is absent or invalid. Trimmed, control-free reasons up to 500 characters are integrity-sealed and exposed only through authorized detail. No decision response claims or triggers connector execution.",
+      "test_refs": [
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_decisions_preserve_run_10_shape_and_optionally_embed_authoritative_state",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_decision_errors_remain_private_and_do_not_reflect_reason",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_decision_reason_rejects_control_and_surrogate_text_before_executor",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_coherent_executor_result_must_bind_the_client_reason",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_invalid_optional_authoritative_state_is_omitted",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_decision_reason_rejects_controls_in_command_and_domain",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_decision_reason_round_trips_and_is_covered_by_keyed_integrity"
+      ]
+    },
+    {
+      "id": "keyed-lifecycle-integrity",
+      "type": "negative_control",
+      "statement": "Bounded list/detail reads exact-hydrate selected rows against keyed action, step, policy, projection, and lifecycle authority, while renewal and mutation paths validate full current-set generation history. Historical linked generations remain inspectable. Restart replay preserves one exact chain; missing generations, resealed projection disagreement, or raw decision-reason tampering fail closed.",
+      "test_refs": [
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_renewal_restart_replay_hydrates_one_exact_action_chain",
+        "tests/unit/application/test_api_06_approval_resources.py::test_api_06_read_uses_historical_inspection_not_mutation_lookup",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_resealed_request_projection_tamper_fails_action_hydration",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_decision_reason_round_trips_and_is_covered_by_keyed_integrity",
+        "tests/integration/db/test_api_06_approval_repository.py::test_api_06_missing_generation_in_persisted_chain_fails_closed"
+      ]
+    },
+    {
+      "id": "private-nonreflective-http-contract",
+      "type": "contract",
+      "statement": "All five typed operations have stable operation IDs and documented 200/201, error, private, and Location contracts. Mutations require one application/json media type and are bounded to 8,192 raw bytes and JSON depth 16 before execution. Invalid input and malformed executors fail non-reflectively. Every approval response is no-store and preserves Vary while adding Authorization.",
+      "test_refs": [
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_mutations_require_one_application_json_media_type",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_mutation_body_limit_rejects_declared_and_streamed_oversize",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_excessively_deep_json_is_rejected_before_executor",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_mutation_authority_fields_are_rejected_without_reflection",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_service_errors_are_stable_private_and_non_reflective",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_malformed_primary_resource_fails_closed",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_ambiguous_and_invalid_queries_fail_without_lookup_or_reflection",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_untrusted_host_rejection_remains_private",
+        "tests/integration/api/test_api_06_approvals.py::test_api_06_openapi_declares_all_typed_approval_routes"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-06-approval-resources",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_06_approvals.py",
+        "tests/integration/db/test_api_06_approval_repository.py",
+        "tests/unit/application/test_api_06_approval_resources.py",
+        "tests/integration/api/test_run_10_approval_routes.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+        "tests/unit/application/test_run_10_authorized_approval_actor.py",
+        "tests/integration/db/test_run_08_approval_persistence.py",
+        "tests/unit/application/test_run_09_approval_invalidation.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/integration/db/test_orch_08_authorization_storage.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/security/test_run_06_input_redaction.py",
+        "tests/network/test_safe_11_network_isolation.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "authenticated-bounded-inspection",
+        "immutable-exact-action-requests",
+        "authorized-one-winner-decisions",
+        "keyed-lifecycle-integrity",
+        "private-nonreflective-http-contract"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/schemas/approvals.py",
+      "apps/api/src/marketing_agents/application/policies/approval_resource_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/approval_decisions.py",
+      "apps/api/src/marketing_agents/application/services/approval_integrity.py",
+      "apps/api/src/marketing_agents/application/services/approval_records.py",
+      "apps/api/src/marketing_agents/application/services/approval_resources.py",
+      "apps/api/src/marketing_agents/domain/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/approval.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/approval.py"
+    ],
+    "gate_id": "api-06-approval-resources"
+  },
+  "limitations": [
+    "API-09 still owns the process-wide application/problem+json vocabulary, shared correlation middleware, browser Origin, CSRF and Fetch-Metadata enforcement, trusted proxy policy, and global timeout and retry controls. API-06 supplies route-local JSON-only mutations, fixed safe errors, private response headers, and server-generated correlation IDs but does not claim that larger boundary.",
+    "Normal planning creates generation-one requests atomically with the complete authorization set. The explicit route therefore treats generation zero as ensure/replay and fails closed when that initial complete set is absent; it never inserts one isolated approval leaf. Positive generations are expiry-only renewals of the unchanged action and set epoch.",
+    "The authenticated renewal winner becomes the replacement generation's immutable requester and audit actor, so a no-self-approval policy applies to that generation's creator. First-generation planner requester provenance remains a pre-existing intake and planning-boundary concern.",
+    "DEL-04 owns Alembic migrations and upgrade/bootstrap behavior. API-06 adds the bounded optional decision-reason ORM field and proves metadata-created SQLite persistence and keyed-integrity validation, but does not claim a migration or live PostgreSQL DDL/runtime execution; the optional PostgreSQL portability test may skip when its driver is absent.",
+    "DEL-05 owns default runnable service composition. The routes are installed and fail closed without complete asynchronous executors; API-06 integration injects the real decision/resource services and durable unit of work rather than claiming the default process constructs them.",
+    "API-07 owns the run, step, action, template, and instance detail resources referenced by returned links. API-06 returns stable reserved URLs but does not claim those target resources are implemented yet.",
+    "The decision service retains RUN-10's isolated-fixture allowance for a parent Run in received state. Normal persisted write plans enter awaiting_approval before public decisions; API-06 does not claim that the legacy received-state allowance is a substitute for composed workflow sequencing."
+  ]
+}

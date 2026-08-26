@@ -13,6 +13,11 @@ from marketing_agents.application.policies.approval_authorization import (
     ApprovalAuthorizationError,
     authorize_approval_principal,
 )
+from marketing_agents.application.policies.approval_resource_authorization import (
+    ApprovalResourceAuthorizationError,
+    authorize_approval_reader,
+    authorize_approval_requester,
+)
 from marketing_agents.application.policies.catalog_authorization import (
     CatalogAuthorizationError,
     authorize_catalog_reader,
@@ -34,6 +39,13 @@ from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionCommand,
     AuthorizedApprovalDecision,
+)
+from marketing_agents.application.services.approval_resources import (
+    ApprovalListQuery,
+    ApprovalPage,
+    ApprovalRequestCommand,
+    ApprovalRequestResult,
+    ApprovalResource,
 )
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSchema,
@@ -82,6 +94,29 @@ class ApprovalDecisionExecutor(Protocol):
         *,
         principal: AuthenticatedPrincipal,
     ) -> AuthorizedApprovalDecision: ...
+
+
+class ApprovalResourceExecutor(Protocol):
+    async def list(
+        self,
+        query: ApprovalListQuery,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ApprovalPage: ...
+
+    async def read(
+        self,
+        approval_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ApprovalResource: ...
+
+    async def request(
+        self,
+        command: ApprovalRequestCommand,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ApprovalRequestResult: ...
 
 
 class InstanceConfigurationExecutor(Protocol):
@@ -223,12 +258,48 @@ def get_identity_provider(request: Request) -> IdentityProvider:
 
 def get_approval_decision_executor(request: Request) -> ApprovalDecisionExecutor:
     executor = getattr(request.app.state, "approval_decision_service", None)
-    if executor is None or not callable(getattr(executor, "decide", None)):
+    decide = getattr(executor, "decide", None)
+    if executor is None or not callable(decide) or not inspect.iscoroutinefunction(decide):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="approval service unavailable",
         )
     return cast(ApprovalDecisionExecutor, executor)
+
+
+def _resolve_approval_resource_executor(request: Request) -> ApprovalResourceExecutor | None:
+    try:
+        executor = getattr(request.app.state, "approval_resource_service", None)
+        methods = tuple(getattr(executor, name, None) for name in ("list", "read", "request"))
+    except Exception:
+        return None
+    if (
+        executor is None
+        or len(methods) != 3
+        or any(
+            not callable(method) or not inspect.iscoroutinefunction(method) for method in methods
+        )
+    ):
+        return None
+    return cast(ApprovalResourceExecutor, executor)
+
+
+def get_approval_resource_executor(request: Request) -> ApprovalResourceExecutor:
+    executor = _resolve_approval_resource_executor(request)
+    if executor is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="approval resource service unavailable",
+        )
+    return executor
+
+
+def get_optional_approval_resource_executor(
+    request: Request,
+) -> ApprovalResourceExecutor | None:
+    """Permit RUN-10's narrow decision seam while API-06 composition returns full state."""
+
+    return _resolve_approval_resource_executor(request)
 
 
 def authentication_evidence(request: Request) -> AuthenticationEvidence:
@@ -362,5 +433,37 @@ async def require_approval_principal(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="approval decision is forbidden",
+        ) from None
+    return principal
+
+
+async def require_approval_reader_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    try:
+        authorize_approval_reader(principal)
+    except ApprovalResourceAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="approval read is forbidden",
+        ) from None
+    return principal
+
+
+async def require_approval_requester_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    try:
+        authorize_approval_requester(principal)
+    except ApprovalResourceAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="approval request creation is forbidden",
         ) from None
     return principal

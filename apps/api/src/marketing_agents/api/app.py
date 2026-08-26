@@ -13,11 +13,16 @@ from marketing_agents.api.catalog_queries import (
 )
 from marketing_agents.api.dependencies import (
     ApprovalDecisionExecutor,
+    ApprovalResourceExecutor,
     InstanceConfigurationExecutor,
     ManualDryRunExecutor,
     WebhookAdmissionExecutor,
 )
 from marketing_agents.api.errors import safe_request_validation_error
+from marketing_agents.api.routes.approvals import (
+    ApprovalPrivateResponseMiddleware,
+)
+from marketing_agents.api.routes.approvals import action_router as approval_actions_router
 from marketing_agents.api.routes.approvals import router as approvals_router
 from marketing_agents.api.routes.catalog import router as catalog_router
 from marketing_agents.api.routes.health import router as health_router
@@ -39,6 +44,7 @@ def create_app(
     settings: Settings | None = None,
     identity_provider: IdentityProvider | None = None,
     approval_decision_service: ApprovalDecisionExecutor | None = None,
+    approval_resource_service: ApprovalResourceExecutor | None = None,
     readiness_probe: ReadinessProbe | None = None,
     catalog_query_service: CatalogQueryExecutor | None = None,
     instance_configuration_service: InstanceConfigurationExecutor | None = None,
@@ -59,6 +65,7 @@ def create_app(
         else LocalIdentityProvider(active_settings)
     )
     application.state.approval_decision_service = approval_decision_service
+    application.state.approval_resource_service = approval_resource_service
     application.state.instance_configuration_service = instance_configuration_service
     application.state.manual_dry_run_service = manual_dry_run_service
     application.state.webhook_admission_service = webhook_admission_service
@@ -82,10 +89,12 @@ def create_app(
     application.add_middleware(
         TrustedHostMiddleware, allowed_hosts=list(active_settings.trusted_hosts)
     )
+    application.add_middleware(ApprovalPrivateResponseMiddleware)
     application.include_router(health_router)
     application.include_router(instance_configuration_router)
     application.include_router(manual_work_router)
     application.include_router(webhooks_router)
     application.include_router(catalog_router)
     application.include_router(approvals_router)
+    application.include_router(approval_actions_router)
     return application
