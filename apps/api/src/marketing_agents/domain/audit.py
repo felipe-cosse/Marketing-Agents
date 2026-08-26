@@ -29,6 +29,8 @@ _ACTOR_PSEUDONYM_DOMAIN = b"marketing-agents:audit-actor:v1\x00"
 _CORRELATION_PSEUDONYM_DOMAIN = b"marketing-agents:audit-correlation:v1\x00"
 _RUNTIME_CONTROL_DENIAL_ID_DOMAIN = b"marketing-agents:audit-runtime-control-denial-id:v1\x00"
 _RUNTIME_CONTROL_DENIAL_ID_PREFIX = "runtime-control-denial-v1:"
+_MANUAL_AUDIT_AGGREGATE_ID_DOMAIN = b"marketing-agents:audit-manual-ingress-id:v1\x00"
+_MANUAL_AUDIT_AGGREGATE_ID_PREFIX = "manual-audit-v1:"
 RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     {
         "adapter_contract_drift",
@@ -54,6 +56,7 @@ RUNTIME_CONTROL_DENIAL_CODES = frozenset(
         "delivery_reservation_conflict",
         "delivery_step_fence_invalid",
         "delivery_time_invalid",
+        "dry_run_external_effect_forbidden",
         "execution_control_integrity_corrupt",
         "execution_control_missing",
         "execution_not_started",
@@ -95,6 +98,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
         "delivery_contract_drift",
         "delivery_contract_invalid",
         "delivery_contract_unavailable",
+        "dry_run_external_effect_forbidden",
         "input_field_too_large",
         "input_payload_too_large",
         "model_budget_exhausted",
@@ -107,6 +111,11 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     }
 )
 _EVENT_AGGREGATES = {
+    "ingress.manual_received": "manual_ingress",
+    "ingress.schema_rejected": "manual_ingress_rejection",
+    "work.created": "work_item",
+    "work.duplicate_returned": "manual_ingress",
+    "work.idempotency_collision": "manual_ingress",
     "instance.configuration_changed": "agent_instance_configuration",
     "schedule.occurrence_created": "schedule_occurrence",
     "schedule.misfire_skipped": "schedule_occurrence",
@@ -148,9 +157,70 @@ _EVENT_OUTCOMES = {
     **{event_type: "accepted" for event_type in _EVENT_AGGREGATES},
     "run.transition_rejected": "rejected",
     "runtime.control_denied": "rejected",
+    "work.idempotency_collision": "rejected",
+    "ingress.schema_rejected": "rejected",
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
+    "ingress.manual_received": frozenset(
+        {
+            "configuration_revision",
+            "instance_id",
+            "manual_attempt_id",
+            "mode",
+            "receipt_disposition",
+            "trigger_id",
+            "work_item_id",
+            "workflow_id",
+        }
+    ),
+    "ingress.schema_rejected": frozenset(
+        {
+            "configuration_revision",
+            "instance_id",
+            "manual_attempt_id",
+            "mode",
+            "rejection_code",
+            "trigger_id",
+            "workflow_id",
+        }
+    ),
+    "work.created": frozenset(
+        {
+            "configuration_revision",
+            "instance_id",
+            "manual_attempt_id",
+            "mode",
+            "receipt_disposition",
+            "trigger_id",
+            "work_item_id",
+            "workflow_id",
+        }
+    ),
+    "work.duplicate_returned": frozenset(
+        {
+            "configuration_revision",
+            "instance_id",
+            "manual_attempt_id",
+            "mode",
+            "receipt_disposition",
+            "trigger_id",
+            "work_item_id",
+            "workflow_id",
+        }
+    ),
+    "work.idempotency_collision": frozenset(
+        {
+            "configuration_revision",
+            "instance_id",
+            "manual_attempt_id",
+            "mode",
+            "receipt_disposition",
+            "trigger_id",
+            "work_item_id",
+            "workflow_id",
+        }
+    ),
     "instance.configuration_changed": frozenset(
         {
             "new_configuration",
@@ -426,6 +496,8 @@ _SAFE_AUDIT_REASONS = frozenset(
         "execution_incomplete",
         "failure_phase_mismatch",
         "input_validated",
+        "idempotency_conflict",
+        "schema_rejected",
         "invalid_cancellation_effects",
         "invalid_transition",
         "non_monotonic_time",
@@ -460,6 +532,33 @@ def normalize_audit_reason_code(value: str | None) -> str | None:
     if value is None or value in _SAFE_AUDIT_REASONS:
         return value
     return "unclassified_failure"
+
+
+def _manual_audit_aggregate_id(
+    *,
+    manual_attempt_id: str,
+    event_type: str,
+) -> str:
+    """Derive one event-family aggregate without retaining retry-key material."""
+
+    require_id(manual_attempt_id, "manual audit attempt ID")
+    if event_type not in {
+        "ingress.manual_received",
+        "ingress.schema_rejected",
+        "work.duplicate_returned",
+        "work.idempotency_collision",
+    }:
+        raise ValueError("manual audit event type is unsupported")
+    identity = {
+        "event_type": event_type,
+        "manual_attempt_id": manual_attempt_id,
+    }
+    return (
+        _MANUAL_AUDIT_AGGREGATE_ID_PREFIX
+        + hashlib.sha256(
+            _MANUAL_AUDIT_AGGREGATE_ID_DOMAIN + canonical_json_bytes(identity)
+        ).hexdigest()
+    )
 
 
 def _runtime_control_denial_aggregate_id(
@@ -895,9 +994,10 @@ class AuditEventDraft:
         for required_identifier, name in identifiers:
             require_id(required_identifier, name)
         scheduler_aggregate = self.aggregate_type in {"schedule", "schedule_occurrence"}
-        runless_aggregate = scheduler_aggregate or self.aggregate_type == (
-            "agent_instance_configuration"
-        )
+        runless_aggregate = scheduler_aggregate or self.aggregate_type in {
+            "agent_instance_configuration",
+            "manual_ingress_rejection",
+        }
         if runless_aggregate:
             if self.run_id is not None:
                 raise ValueError("runless audit events must use the global timeline")
@@ -1058,6 +1158,39 @@ class AuditEventDraft:
                 or self.outcome is not AuditOutcome.ACCEPTED
             ):
                 raise ValueError("instance configuration audit has invalid subject links")
+        elif self.aggregate_type in {"manual_ingress", "manual_ingress_rejection", "work_item"}:
+            if (
+                self.schedule_id is not None
+                or self.occurrence_id is not None
+                or self.step_id is not None
+                or self.action_id is not None
+                or self.action_attempt_number is not None
+                or self.receipt_id is not None
+                or self.approval_request_id is not None
+                or self.approval_decision_id is not None
+                or self.artifact_id is not None
+                or self.attempt_id is not None
+                or self.transition_sequence is not None
+                or self.previous_state is not None
+                or self.new_state is not None
+                or self.expected_version is not None
+                or self.observed_version is not None
+                or self.observed_state is not None
+                or self.requested_state is not None
+                or self.attempted_command is not None
+            ):
+                raise ValueError("manual work audit has invalid subject links")
+            rejection = self.event_type == "ingress.schema_rejected"
+            collision = self.event_type == "work.idempotency_collision"
+            if (
+                (collision or rejection) != (self.outcome is AuditOutcome.REJECTED)
+                or collision != (self.reason_code == "idempotency_conflict")
+                or rejection != (self.reason_code == "schema_rejected")
+                or (collision or rejection) != (self.mutation_version is None)
+                or (not collision and not rejection and self.reason_code is not None)
+                or (not collision and not rejection and self.mutation_version != 1)
+            ):
+                raise ValueError("manual work audit has an invalid outcome shape")
         elif self.aggregate_type == "step":
             if (
                 self.step_id is None
@@ -1357,7 +1490,38 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
-    if draft.event_type == "instance.configuration_changed":
+    if draft.event_type in {
+        "ingress.manual_received",
+        "ingress.schema_rejected",
+        "work.created",
+        "work.duplicate_returned",
+        "work.idempotency_collision",
+    }:
+        expected_disposition = {
+            "work.created": "created",
+            "work.duplicate_returned": "replayed",
+            "work.idempotency_collision": "collision",
+        }.get(draft.event_type)
+        if expected_disposition is not None and (
+            metadata["receipt_disposition"] != expected_disposition
+        ):
+            raise ValueError("manual work audit disposition does not match its event type")
+        if draft.event_type == "ingress.schema_rejected":
+            if metadata["rejection_code"] != "schema_rejected":
+                raise ValueError("schema rejection audit code is invalid")
+        elif draft.event_type == "ingress.manual_received" and metadata[
+            "receipt_disposition"
+        ] not in {"created", "replayed", "collision"}:
+            raise ValueError("manual ingress audit disposition is unsupported")
+        if draft.event_type == "work.created":
+            if draft.aggregate_id != metadata["work_item_id"]:
+                raise ValueError("work-created audit aggregate does not match its WorkItem")
+        elif draft.aggregate_id != _manual_audit_aggregate_id(
+            manual_attempt_id=metadata["manual_attempt_id"],
+            event_type=draft.event_type,
+        ):
+            raise ValueError("manual ingress audit aggregate identity does not match")
+    elif draft.event_type == "instance.configuration_changed":
         previous_revision = metadata["previous_revision"]
         new_revision = metadata["new_revision"]
         if (

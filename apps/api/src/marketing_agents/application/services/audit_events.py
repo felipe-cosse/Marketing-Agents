@@ -12,6 +12,7 @@ from marketing_agents.application.policies.approval_authorization import (
     APPROVAL_DECIDE_SCOPE,
     APPROVER_ROLE,
 )
+from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.approval import (
     ApprovalDecision,
     ApprovalRenewal,
@@ -24,6 +25,7 @@ from marketing_agents.domain.audit import (
     AuditEventDraft,
     AuditOutcome,
     _issue_audit_event_draft,
+    _manual_audit_aggregate_id,
     _runtime_control_denial_aggregate_id,
     normalize_audit_reason_code,
 )
@@ -37,6 +39,7 @@ from marketing_agents.domain.entities import (
     Schedule,
     ScheduleClaim,
     ScheduleOccurrence,
+    WorkItem,
 )
 from marketing_agents.domain.enums import (
     ApprovalDecisionKind,
@@ -66,6 +69,65 @@ from marketing_agents.security.digest_key import DigestKey
 _AUDIT_EVENT_ID_DOMAIN = b"marketing-agents:audit-event-id:v1\x00"
 _AUDIT_ATTEMPT_ID_DOMAIN = b"marketing-agents:audit-run-attempt-id:v1\x00"
 _SCHEDULE_CLAIM_FINGERPRINT_DOMAIN = b"marketing-agents:schedule-claim:v1\x00"
+
+
+def _manual_work_metadata(
+    work_item: WorkItem,
+    run: Run,
+    *,
+    manual_attempt_id: str,
+    disposition: str,
+) -> Mapping[str, Any]:
+    if type(work_item) is not WorkItem or type(run) is not Run:
+        raise ValueError("manual audit requires exact WorkItem and Run resources")
+    replace(work_item)
+    replace(run)
+    if (
+        work_item.source != "manual"
+        or run.work_item_id != work_item.id
+        or run.configuration_revision != work_item.configuration_revision
+    ):
+        raise ValueError("manual audit resources are incoherent")
+    if disposition not in {"created", "replayed", "collision"}:
+        raise ValueError("manual audit disposition is unsupported")
+    return {
+        "configuration_revision": work_item.configuration_revision,
+        "instance_id": work_item.instance_id,
+        "manual_attempt_id": manual_attempt_id,
+        "mode": work_item.mode.value,
+        "receipt_disposition": disposition,
+        "trigger_id": work_item.trigger_id,
+        "work_item_id": work_item.id,
+        "workflow_id": work_item.workflow_id,
+    }
+
+
+def _manual_envelope_metadata(
+    envelope: AdmissionEnvelope,
+    *,
+    manual_attempt_id: str,
+    rejection_code: str | None = None,
+    work_item_id: str | None = None,
+    disposition: str | None = None,
+) -> Mapping[str, Any]:
+    if type(envelope) is not AdmissionEnvelope:
+        raise ValueError("manual audit requires the exact admission envelope")
+    metadata: dict[str, Any] = {
+        "configuration_revision": envelope.configuration_revision,
+        "instance_id": envelope.instance_id,
+        "manual_attempt_id": manual_attempt_id,
+        "mode": envelope.mode.value,
+        "trigger_id": envelope.trigger_id,
+        "workflow_id": envelope.workflow_id,
+    }
+    if rejection_code is not None:
+        metadata["rejection_code"] = rejection_code
+    else:
+        if work_item_id is None or disposition is None:
+            raise ValueError("manual collision audit requires authoritative linkage")
+        metadata["receipt_disposition"] = disposition
+        metadata["work_item_id"] = work_item_id
+    return metadata
 
 
 def _schedule_claim_fingerprint(claim: ScheduleClaim) -> str:
@@ -116,6 +178,179 @@ class AuditEventFactory:
         ):
             raise ValueError("configuration audit pseudonym key must use the exact key type")
         self._configuration_pseudonym_key = configuration_pseudonym_key
+
+    def manual_received(
+        self,
+        work_item: WorkItem,
+        run: Run,
+        *,
+        attempted_envelope: AdmissionEnvelope | None = None,
+        manual_attempt_id: str,
+        disposition: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one authorized manual request without retaining its raw input or key."""
+
+        if attempted_envelope is None:
+            metadata = _manual_work_metadata(
+                work_item,
+                run,
+                manual_attempt_id=manual_attempt_id,
+                disposition=disposition,
+            )
+        else:
+            _manual_work_metadata(
+                work_item,
+                run,
+                manual_attempt_id=manual_attempt_id,
+                disposition=disposition,
+            )
+            if work_item.source_idempotency_key != attempted_envelope.source_key:
+                raise ValueError("manual received audit source key is incoherent")
+            metadata = _manual_envelope_metadata(
+                attempted_envelope,
+                manual_attempt_id=manual_attempt_id,
+                disposition=disposition,
+                work_item_id=work_item.id,
+            )
+        return self._build(
+            run_id=run.id,
+            event_type="ingress.manual_received",
+            aggregate_type="manual_ingress",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id,
+                event_type="ingress.manual_received",
+            ),
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=1,
+        )
+
+    def manual_schema_rejected(
+        self,
+        envelope: AdmissionEnvelope,
+        *,
+        manual_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness an authorized input rejection without retaining caller content."""
+
+        return self._build(
+            run_id=None,
+            event_type="ingress.schema_rejected",
+            aggregate_type="manual_ingress_rejection",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id,
+                event_type="ingress.schema_rejected",
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=_manual_envelope_metadata(
+                envelope,
+                manual_attempt_id=manual_attempt_id,
+                rejection_code="schema_rejected",
+            ),
+            mutation_version=None,
+            reason_code="schema_rejected",
+        )
+
+    def work_created(
+        self,
+        work_item: WorkItem,
+        run: Run,
+        *,
+        manual_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one newly created manual WorkItem on its primary Run timeline."""
+
+        metadata = _manual_work_metadata(
+            work_item,
+            run,
+            manual_attempt_id=manual_attempt_id,
+            disposition="created",
+        )
+        return self._build(
+            run_id=run.id,
+            event_type="work.created",
+            aggregate_type="work_item",
+            aggregate_id=work_item.id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=1,
+        )
+
+    def work_duplicate_returned(
+        self,
+        work_item: WorkItem,
+        run: Run,
+        *,
+        manual_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness one exact retry returning its authoritative original resources."""
+
+        metadata = _manual_work_metadata(
+            work_item,
+            run,
+            manual_attempt_id=manual_attempt_id,
+            disposition="replayed",
+        )
+        return self._build(
+            run_id=run.id,
+            event_type="work.duplicate_returned",
+            aggregate_type="manual_ingress",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id,
+                event_type="work.duplicate_returned",
+            ),
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=1,
+        )
+
+    def work_idempotency_collision(
+        self,
+        work_item: WorkItem,
+        run: Run,
+        *,
+        attempted_envelope: AdmissionEnvelope,
+        manual_attempt_id: str,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness a retry-key collision using only the existing authoritative receipt."""
+
+        _manual_work_metadata(
+            work_item,
+            run,
+            manual_attempt_id=manual_attempt_id,
+            disposition="collision",
+        )
+        if work_item.source_idempotency_key != attempted_envelope.source_key:
+            raise ValueError("manual collision audit source key is incoherent")
+        metadata = _manual_envelope_metadata(
+            attempted_envelope,
+            manual_attempt_id=manual_attempt_id,
+            disposition="collision",
+            work_item_id=work_item.id,
+        )
+        return self._build(
+            run_id=run.id,
+            event_type="work.idempotency_collision",
+            aggregate_type="manual_ingress",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id,
+                event_type="work.idempotency_collision",
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=None,
+            reason_code="idempotency_conflict",
+        )
 
     def instance_configuration_changed(
         self,

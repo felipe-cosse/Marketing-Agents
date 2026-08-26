@@ -64,6 +64,12 @@ from .incoming_work_validation import (
     WorkflowAdmissionDefinition,
     WorkflowAdmissionSnapshot,
 )
+from .manual_work_intake import (
+    ManualDryRunCommand,
+    ManualDryRunResult,
+    ManualDryRunService,
+    ManualDryRunServiceError,
+)
 from .plan_persistence import (
     AuditedPlanPersistenceService,
     PersistedRunPlan,
@@ -157,6 +163,10 @@ __all__ = [
     "IdempotentWorkRunReceiptService",
     "IncomingWorkValidationError",
     "IncomingWorkValidator",
+    "ManualDryRunCommand",
+    "ManualDryRunResult",
+    "ManualDryRunService",
+    "ManualDryRunServiceError",
     "PersistedRunPlan",
     "PlanPersistenceError",
     "ReadExecutionClassification",

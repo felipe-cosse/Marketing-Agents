@@ -1,0 +1,184 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-04",
+  "matrix_statement_sha256": "0d5f51a240396c275b8d60a59901b21c79057b5c9d20b1517d1474fa1737903c",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/manual_work.py",
+      "apps/api/src/marketing_agents/api/schemas/manual_work.py",
+      "apps/api/src/marketing_agents/application/policies/manual_work_authorization.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+      "apps/api/src/marketing_agents/application/ports/__init__.py",
+      "apps/api/src/marketing_agents/application/ports/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/ports/manual_work.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/__init__.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/incoming_work_validation.py",
+      "apps/api/src/marketing_agents/application/services/manual_work_intake.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/connector_families.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/registry.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py",
+      "apps/api/src/marketing_agents/infrastructure/manual_work.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-04.json",
+      "docs/verification/requirements/API-04.md",
+      "tests/integration/api/test_api_04_manual_dry_runs.py",
+      "tests/integration/db/test_api_04_dry_run_external_effect_fence.py",
+      "tests/integration/db/test_api_04_manual_work_audit.py",
+      "tests/integration/db/test_api_04_manual_work_persistence.py",
+      "tests/unit/application/test_api_04_manual_work_intake.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/manual_work.py",
+          "apps/api/src/marketing_agents/application/services/manual_work_intake.py",
+          "apps/api/src/marketing_agents/infrastructure/manual_work.py",
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_04_manual_dry_runs.py",
+          "tests/integration/db/test_api_04_manual_work_audit.py",
+          "tests/integration/db/test_api_04_manual_work_persistence.py",
+          "tests/integration/db/test_api_04_dry_run_external_effect_fence.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "authorized-typed-asynchronous-transport",
+      "type": "contract",
+      "statement": "POST /api/v1/agent-instances/{instance_id}/dry-runs bounds raw body bytes and JSON depth before framework buffering or recursive parsing, requires an intact server-authenticated human operator at transport and application boundaries, accepts only typed non-authoritative JSON plus an optional bounded opaque retry key, maps dry_run and mock_execute explicitly, and returns a non-cacheable 202 accepted receipt with authoritative work and run identities without executing inline.",
+      "test_refs": [
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_accepts_default_dry_run_and_retains_only_server_authority",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_body_is_alias_only_and_cannot_supply_authority",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_requires_a_human_operator_before_executor_resolution",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_rejects_deep_json_before_recursive_command_normalization",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_rejects_raw_body_over_common_limit_even_when_excess_is_whitespace",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_rejects_python_equal_but_json_distinct_result_payload",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_returns_only_service_sanitized_input_schema_pointers",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_04_openapi_is_exact_typed_and_never_accepts_authority_fields",
+        "tests/unit/application/test_api_04_manual_work_intake.py::test_api_04_command_depth_guard_is_iterative_and_stable"
+      ]
+    },
+    {
+      "id": "trusted-effective-admission-resolution",
+      "type": "negative_control",
+      "statement": "The application resolves server-owned trigger and workflow identities from the compiled catalog and one transaction-locked effective instance configuration, validates the exact compiled input schema and template budgets, honors configuration revision and enablement, permits mock execution only under an injected active-mock policy, and rejects unregistered campaign briefs or demo scenarios before receipt.",
+      "test_refs": [
+        "tests/unit/application/test_api_04_manual_work_intake.py::test_api_04_submit_uses_one_uow_trusted_binding_validator_receipt_and_commit",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_effective_revision_virtual_manual_and_disablement_are_enforced",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_compiled_input_schema_rejects_before_receipt",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_mock_mode_and_unregistered_resource_policies_fail_closed"
+      ]
+    },
+    {
+      "id": "durable-idempotent-atomic-receipt",
+      "type": "positive",
+      "statement": "A caller retry key is transformed into a non-reversible restart-stable event identity; exact and changed simultaneous submissions serialize before their configuration snapshot so an exact retry replays the single original WorkItem and primary Run while semantic drift conflicts, an absent key creates fresh work, and WorkItem, Run, initial transition, and audit are committed or rolled back together.",
+      "test_refs": [
+        "tests/unit/application/test_api_04_manual_work_intake.py::test_api_04_keyed_event_is_stable_non_reversible_and_absent_key_is_fresh",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_keyed_receipt_replays_after_restart_and_conflicts_on_drift",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_same_key_conflicts_after_effective_configuration_revision_changes",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_concurrent_same_key_serializes_replay_and_changed_conflict",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_fault_after_audit_flush_rolls_back_the_complete_receipt"
+      ]
+    },
+    {
+      "id": "ordered-redacted-manual-audit",
+      "type": "negative_control",
+      "statement": "Every authorized schema-valid manual attempt appends a bounded ingress witness and exactly one created, duplicate-returned, or idempotency-collision outcome to the authoritative Run timeline in the receipt transaction; an authorized schema or bound rejection commits one runless ingress.schema_rejected witness, collision commits no new work or run and records the current attempted trusted routing, and retry keys and payload content are absent from audit metadata and aggregate identities.",
+      "test_refs": [
+        "tests/unit/application/test_api_04_manual_work_intake.py::test_api_04_schema_rejection_preserves_only_safe_input_pointer",
+        "tests/unit/application/test_api_04_manual_work_intake.py::test_api_04_collision_commits_only_a_redacted_authoritative_witness",
+        "tests/integration/db/test_api_04_manual_work_audit.py::test_api_04_create_replay_and_collision_append_exact_redacted_timeline",
+        "tests/integration/db/test_api_04_manual_work_audit.py::test_api_04_schema_rejection_is_a_runless_atomic_redacted_witness",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_fault_after_audit_flush_rolls_back_the_complete_receipt"
+      ]
+    },
+    {
+      "id": "durable-dry-run-external-effect-fence",
+      "type": "negative_control",
+      "statement": "The final external-action dispatch boundary resolves and cross-checks the authoritative Run and WorkItem before connector contract lookup, claim, call-start, or execution; dry_run is terminally denied and audited with zero connector calls, dispatch attempts, or receipts, while mock_execution retains the controlled connector path.",
+      "test_refs": [
+        "tests/integration/db/test_api_04_dry_run_external_effect_fence.py::test_api_04_dry_run_is_terminally_denied_before_any_connector_boundary",
+        "tests/integration/db/test_api_04_dry_run_external_effect_fence.py::test_api_04_mock_execution_preserves_the_durable_connector_path",
+        "tests/integration/db/test_api_04_dry_run_external_effect_fence.py::test_api_04_dispatch_fails_closed_on_missing_or_mismatched_parent_context"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-04-manual-dry-run",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_04_manual_dry_runs.py",
+        "tests/unit/application/test_api_04_manual_work_intake.py",
+        "tests/integration/db/test_api_04_manual_work_persistence.py",
+        "tests/integration/db/test_api_04_manual_work_audit.py",
+        "tests/integration/db/test_api_04_dry_run_external_effect_fence.py",
+        "tests/unit/application/test_orch_02_incoming_work_validation.py",
+        "tests/integration/db/test_orch_07_idempotent_receipts.py",
+        "tests/integration/db/test_run_04_work_idempotency.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/security/test_run_06_input_redaction.py",
+        "tests/security/test_safe_01_default_mock_mode.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "authorized-typed-asynchronous-transport",
+        "trusted-effective-admission-resolution",
+        "durable-idempotent-atomic-receipt",
+        "ordered-redacted-manual-audit",
+        "durable-dry-run-external-effect-fence"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/routes/manual_work.py",
+      "apps/api/src/marketing_agents/application/services/manual_work_intake.py",
+      "apps/api/src/marketing_agents/infrastructure/manual_work.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py"
+    ],
+    "gate_id": "api-04-manual-dry-run"
+  },
+  "limitations": [
+    "API-09 still owns the process-wide application/problem+json vocabulary, browser Origin and CSRF controls, and global timeout and retry policy. API-04 has a bounded transport wait, JSON-only input, operator authorization, safe fixed errors, and non-cacheable application responses but does not claim the complete API-09 boundary.",
+    "Campaign-brief and demo-scenario registries are not implemented yet. The typed optional identifiers are retained in the transport contract, but every non-null value fails closed as an unregistered resource rather than inventing a revision or scenario.",
+    "API-07 still owns the run-detail resource behind runUrl, while WEB-04 and DEL-07 own the schema-generated form, committed OpenAPI artifact, generated client, and drift gate. API-04 returns workId separately and does not emit a nonexistent workUrl.",
+    "DEL-04 still owns database migrations and insert-only seed bootstrap, while DEL-05 owns runnable default startup and service composition. API-04 proves the real HTTP route, service, compiled resolver, and durable unit of work when dependency-injected into the application factory, but does not claim that the default process constructs them yet.",
+    "The SQLite manual-admission unit of work obtains write intent before reading effective configuration and retries only bounded recognized lock conflicts; a deterministic one-millisecond-busy-timeout test proves simultaneous exact retries converge and changed submissions split into one creation and one conflict. Generic SQLite transactions and PostgreSQL behavior are unchanged; no live PostgreSQL service or optional PostgreSQL driver is required by this local gate."
+  ]
+}

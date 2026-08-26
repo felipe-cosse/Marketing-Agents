@@ -21,6 +21,10 @@ from marketing_agents.application.policies.instance_configuration_authorization 
     InstanceConfigurationAuthorizationError,
     authorize_instance_configuration_admin,
 )
+from marketing_agents.application.policies.manual_work_authorization import (
+    ManualWorkAuthorizationError,
+    authorize_manual_work_operator,
+)
 from marketing_agents.application.ports.identity import (
     AuthenticationEvidence,
     IdentityAuthenticationError,
@@ -36,6 +40,10 @@ from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSnapshot,
     InstanceConfigurationUpdateResult,
     UpdateInstanceConfigurationCommand,
+)
+from marketing_agents.application.services.manual_work_intake import (
+    ManualDryRunCommand,
+    ManualDryRunResult,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
@@ -101,6 +109,15 @@ class InstanceConfigurationExecutor(Protocol):
     ) -> InstanceConfigurationUpdateResult: ...
 
 
+class ManualDryRunExecutor(Protocol):
+    async def submit(
+        self,
+        command: ManualDryRunCommand,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ManualDryRunResult: ...
+
+
 def get_readiness_probe(request: Request) -> ReadinessProbe | None:
     """Resolve the optional probe without trusting falsey or malformed objects."""
 
@@ -150,6 +167,23 @@ def get_instance_configuration_executor(request: Request) -> InstanceConfigurati
             detail="instance configuration service unavailable",
         )
     return cast(InstanceConfigurationExecutor, executor)
+
+
+def get_manual_dry_run_executor(request: Request) -> ManualDryRunExecutor:
+    """Resolve only an asynchronous manual-admission application seam."""
+
+    try:
+        executor = getattr(request.app.state, "manual_dry_run_service", None)
+        submit = getattr(executor, "submit", None)
+    except Exception:
+        executor = None
+        submit = None
+    if executor is None or not callable(submit) or not inspect.iscoroutinefunction(submit):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="manual dry-run service unavailable",
+        )
+    return cast(ManualDryRunExecutor, executor)
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:
@@ -267,6 +301,24 @@ async def require_instance_configuration_admin_principal(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="instance configuration mutation is forbidden",
+        ) from None
+    return principal
+
+
+async def require_manual_work_operator_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    """Require one intact human operator before resolving manual-work services."""
+
+    try:
+        authorize_manual_work_operator(principal)
+    except ManualWorkAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="manual dry-run creation is forbidden",
         ) from None
     return principal
 

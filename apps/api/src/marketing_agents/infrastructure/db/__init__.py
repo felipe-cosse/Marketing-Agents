@@ -59,6 +59,7 @@ from .session import DatabaseRuntime, create_database_runtime
 from .types import UTCDateTime
 from .unit_of_work import (
     RepositoryBundle,
+    SQLAlchemyManualAdmissionUnitOfWorkFactory,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyUnitOfWork,
     SQLAlchemyUnitOfWorkError,
@@ -113,6 +114,7 @@ __all__ = [
     "SQLAlchemyExecutionControlRepository",
     "SQLAlchemyExternalActionRepository",
     "SQLAlchemyInstanceConfigurationRepository",
+    "SQLAlchemyManualAdmissionUnitOfWorkFactory",
     "SQLAlchemyRepositoryFactories",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",

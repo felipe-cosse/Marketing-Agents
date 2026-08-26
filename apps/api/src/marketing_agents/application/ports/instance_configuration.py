@@ -61,6 +61,10 @@ class RegisteredBindingProvider(Protocol):
 class InstanceConfigurationRepository(Protocol):
     async def get(self, instance_id: str) -> InstanceConfiguration | None: ...
 
+    async def get_for_update(self, instance_id: str) -> InstanceConfiguration | None:
+        """Lock one configuration snapshot for a same-transaction dependent mutation."""
+        ...
+
     async def list_all(self) -> tuple[InstanceConfiguration, ...]: ...
 
     async def insert_missing(self, configuration: InstanceConfiguration) -> bool:

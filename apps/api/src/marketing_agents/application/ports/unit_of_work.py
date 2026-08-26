@@ -5,6 +5,9 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Protocol
 
+from marketing_agents.application.ports.instance_configuration import (
+    InstanceConfigurationRepository,
+)
 from marketing_agents.application.ports.repositories import (
     ApprovalRepository,
     ArtifactRepository,
@@ -22,6 +25,9 @@ from marketing_agents.application.ports.repositories import (
 class UnitOfWork(Protocol):
     @property
     def works(self) -> WorkRepository: ...
+
+    @property
+    def configurations(self) -> InstanceConfigurationRepository: ...
 
     @property
     def runs(self) -> RunRepository: ...

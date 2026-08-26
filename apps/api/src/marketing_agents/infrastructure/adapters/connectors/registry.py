@@ -44,23 +44,14 @@ from marketing_agents.application.ports.connector_families import (
     UpsertContactCommand,
 )
 from marketing_agents.application.ports.connectors import ConnectorWriteResult
+from marketing_agents.domain.connector_families import (
+    EXTERNAL_CONNECTOR_FAMILIES,
+    NON_CONNECTOR_FAMILIES,
+)
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import Effect
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 
-EXTERNAL_CONNECTOR_FAMILIES = frozenset(
-    {
-        "social",
-        "newsletter",
-        "crm",
-        "cms",
-        "events",
-        "community",
-        "spreadsheet",
-        "fulfillment",
-    }
-)
-NON_CONNECTOR_FAMILIES = frozenset({"model", "artifact"})
 DISABLED_V1_CAPABILITIES = frozenset({"cap.email.send-message", "cap.spreadsheet.update-rows"})
 
 
