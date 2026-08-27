@@ -1,4 +1,4 @@
-"""FastAPI identity, catalog-query, and approval-decision dependency seams."""
+"""FastAPI identity and application-query dependency seams."""
 
 from __future__ import annotations
 
@@ -30,6 +30,10 @@ from marketing_agents.application.policies.manual_work_authorization import (
     ManualWorkAuthorizationError,
     authorize_manual_work_operator,
 )
+from marketing_agents.application.policies.runtime_resource_authorization import (
+    RuntimeResourceAuthorizationError,
+    authorize_runtime_resource_reader,
+)
 from marketing_agents.application.ports.identity import (
     AuthenticationEvidence,
     IdentityAuthenticationError,
@@ -47,6 +51,15 @@ from marketing_agents.application.services.approval_resources import (
     ApprovalRequestResult,
     ApprovalResource,
 )
+from marketing_agents.application.services.artifact_resources import (
+    ArtifactListQuery,
+    ArtifactPage,
+    ArtifactResource,
+)
+from marketing_agents.application.services.audit_resources import (
+    AuditListQuery,
+    AuditPage,
+)
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSchema,
     InstanceConfigurationSnapshot,
@@ -56,6 +69,16 @@ from marketing_agents.application.services.instance_configuration import (
 from marketing_agents.application.services.manual_work_intake import (
     ManualDryRunCommand,
     ManualDryRunResult,
+)
+from marketing_agents.application.services.run_resources import (
+    ExternalActionResource,
+    InstanceStatusSummary,
+    RunListQuery,
+    RunPage,
+    RunResource,
+    RunStepResource,
+    RunTimelinePage,
+    RunTimelineQuery,
 )
 from marketing_agents.application.services.webhook_intake import (
     WebhookAdmissionCommand,
@@ -161,6 +184,91 @@ class WebhookAdmissionExecutor(Protocol):
     async def submit(self, command: WebhookAdmissionCommand) -> WebhookAdmissionResult: ...
 
 
+class RunResourceExecutor(Protocol):
+    async def list(
+        self,
+        query: RunListQuery,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> RunPage: ...
+
+    async def read(
+        self,
+        run_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> RunResource: ...
+
+    async def read_timeline(
+        self,
+        run_id: str,
+        query: RunTimelineQuery,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> RunTimelinePage: ...
+
+    async def read_step(
+        self,
+        run_id: str,
+        step_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> RunStepResource: ...
+
+    async def read_external_action(
+        self,
+        action_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ExternalActionResource: ...
+
+    async def read_instance_status_summary(
+        self,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceStatusSummary: ...
+
+    async def read_instance_statuses(
+        self,
+        instance_ids: tuple[str, ...],
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> InstanceStatusSummary: ...
+
+    async def list_recent_instance_runs(
+        self,
+        instance_id: str,
+        *,
+        limit: int = 5,
+        principal: AuthenticatedPrincipal,
+    ) -> tuple[RunResource, ...]: ...
+
+
+class ArtifactResourceExecutor(Protocol):
+    async def list_for_run(
+        self,
+        query: ArtifactListQuery,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ArtifactPage: ...
+
+    async def read(
+        self,
+        artifact_id: str,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> ArtifactResource: ...
+
+
+class AuditResourceExecutor(Protocol):
+    async def list(
+        self,
+        query: AuditListQuery,
+        *,
+        principal: AuthenticatedPrincipal,
+    ) -> AuditPage: ...
+
+
 def get_readiness_probe(request: Request) -> ReadinessProbe | None:
     """Resolve the optional probe without trusting falsey or malformed objects."""
 
@@ -244,6 +352,46 @@ def get_webhook_admission_executor(request: Request) -> WebhookAdmissionExecutor
             detail="webhook admission service unavailable",
         )
     return cast(WebhookAdmissionExecutor, executor)
+
+
+def require_unambiguous_api07_query(request: Request) -> None:
+    """Reject repeated query keys before resolving any API-07 executor."""
+
+    if any(len(request.query_params.getlist(name)) != 1 for name in request.query_params):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "runtime_query_ambiguous",
+                "message": "runtime query parameters must be unique",
+            },
+        )
+
+
+def _resolve_complete_async_executor(
+    request: Request,
+    *,
+    state_name: str,
+    method_names: tuple[str, ...],
+    detail: str,
+) -> object:
+    try:
+        executor = getattr(request.app.state, state_name, None)
+        methods = tuple(getattr(executor, name, None) for name in method_names)
+    except Exception:
+        executor = None
+        methods = ()
+    if (
+        executor is None
+        or len(methods) != len(method_names)
+        or any(
+            not callable(method) or not inspect.iscoroutinefunction(method) for method in methods
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    return executor
 
 
 def get_identity_provider(request: Request) -> IdentityProvider:
@@ -467,3 +615,126 @@ async def require_approval_requester_principal(
             detail="approval request creation is forbidden",
         ) from None
     return principal
+
+
+async def require_runtime_resource_reader_principal(
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_authenticated_principal),
+    ],
+) -> AuthenticatedPrincipal:
+    """Authorize a human control-plane reader before resolving runtime resources."""
+
+    try:
+        authorize_runtime_resource_reader(principal)
+    except RuntimeResourceAuthorizationError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="runtime resource read is forbidden",
+        ) from None
+    return principal
+
+
+def _optional_run_resource_executor(request: Request) -> RunResourceExecutor | None:
+    try:
+        executor = _resolve_complete_async_executor(
+            request,
+            state_name="run_resource_service",
+            method_names=(
+                "list",
+                "read",
+                "read_timeline",
+                "read_step",
+                "read_external_action",
+                "read_instance_status_summary",
+                "read_instance_statuses",
+                "list_recent_instance_runs",
+            ),
+            detail="run resource service unavailable",
+        )
+    except HTTPException:
+        return None
+    return cast(RunResourceExecutor, executor)
+
+
+def get_optional_run_resource_executor(request: Request) -> RunResourceExecutor | None:
+    """Return runtime enrichment only when a complete async executor is composed."""
+
+    try:
+        configured = getattr(request.app.state, "run_resource_service", None)
+    except Exception:
+        configured = object()
+    if configured is None:
+        return None
+    executor = _optional_run_resource_executor(request)
+    if executor is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="run resource service unavailable",
+            headers={
+                "Cache-Control": "no-store",
+                "Vary": "Authorization",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    return executor
+
+
+def get_run_resource_executor(
+    request: Request,
+    _principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_runtime_resource_reader_principal),
+    ],
+    _query: Annotated[None, Depends(require_unambiguous_api07_query)],
+) -> RunResourceExecutor:
+    """Resolve only after authentication, authorization, and query disambiguation."""
+
+    del _principal, _query
+    executor = _optional_run_resource_executor(request)
+    if executor is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="run resource service unavailable",
+        )
+    return executor
+
+
+def get_artifact_resource_executor(
+    request: Request,
+    _principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_runtime_resource_reader_principal),
+    ],
+    _query: Annotated[None, Depends(require_unambiguous_api07_query)],
+) -> ArtifactResourceExecutor:
+    """Resolve only after authentication, authorization, and query disambiguation."""
+
+    del _principal, _query
+    executor = _resolve_complete_async_executor(
+        request,
+        state_name="artifact_resource_service",
+        method_names=("list_for_run", "read"),
+        detail="artifact resource service unavailable",
+    )
+    return cast(ArtifactResourceExecutor, executor)
+
+
+def get_audit_resource_executor(
+    request: Request,
+    _principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_runtime_resource_reader_principal),
+    ],
+    _query: Annotated[None, Depends(require_unambiguous_api07_query)],
+) -> AuditResourceExecutor:
+    """Resolve only after authentication, authorization, and query disambiguation."""
+
+    del _principal, _query
+    executor = _resolve_complete_async_executor(
+        request,
+        state_name="audit_resource_service",
+        method_names=("list",),
+        detail="audit resource service unavailable",
+    )
+    return cast(AuditResourceExecutor, executor)

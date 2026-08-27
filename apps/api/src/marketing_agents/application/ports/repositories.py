@@ -19,6 +19,7 @@ from marketing_agents.domain.approval import (
     authorization_set_release_hash,
 )
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
+from marketing_agents.domain.data_classification import highest_classification
 from marketing_agents.domain.entities import (
     ActionReservationSnapshot,
     ConnectorActionReceipt,
@@ -220,6 +221,26 @@ class ArtifactInsertResult:
     inserted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class InspectableArtifact:
+    """Exact artifact envelope plus its persisted producer-step policy snapshot."""
+
+    artifact: ArtifactEnvelope
+    step: RunStep
+
+    def __post_init__(self) -> None:
+        if type(self.artifact) is not ArtifactEnvelope or type(self.step) is not RunStep:
+            raise ValueError("inspectable artifact requires exact persisted contracts")
+        provenance = self.artifact.provenance
+        if provenance.run_id != self.step.run_id or provenance.step_id != self.step.id:
+            raise ValueError("inspectable artifact must bind its exact producer step")
+        if provenance.classification is not highest_classification(
+            provenance.classification,
+            self.step.data_classification,
+        ):
+            raise ValueError("artifact classification cannot be lower than its producer step")
+
+
 class ArtifactRepositoryConflict(RuntimeError):
     """Stable fail-closed artifact persistence or hydration conflict."""
 
@@ -231,7 +252,18 @@ class ArtifactRepositoryConflict(RuntimeError):
 class ArtifactRepository(Protocol):
     async def get(self, artifact_id: str) -> ArtifactEnvelope | None: ...
 
+    async def get_inspectable(self, artifact_id: str) -> InspectableArtifact | None: ...
+
     async def list_for_run(self, run_id: str) -> tuple[ArtifactEnvelope, ...]: ...
+
+    async def list_for_run_page(
+        self,
+        run_id: str,
+        *,
+        after_created_at: datetime | None,
+        after_artifact_id: str | None,
+        limit: int,
+    ) -> tuple[InspectableArtifact, ...]: ...
 
     async def add_or_get(self, artifact: ArtifactEnvelope) -> ArtifactInsertResult: ...
 
@@ -244,8 +276,47 @@ class RunInsertResult:
     inserted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class InspectableRun:
+    """Run aggregate whose complete persisted lifecycle history was verified."""
+
+    run: Run
+    work_item: WorkItem
+    transitions: tuple[RunStateTransition, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.run) is not Run
+            or type(self.work_item) is not WorkItem
+            or type(self.transitions) is not tuple
+        ):
+            raise ValueError("inspectable Run requires exact persisted contracts")
+        if self.run.work_item_id != self.work_item.id:
+            raise ValueError("inspectable Run must bind its exact admitted WorkItem")
+        if not self.transitions or any(
+            type(transition) is not RunStateTransition or transition.run_id != self.run.id
+            for transition in self.transitions
+        ):
+            raise ValueError("inspectable Run history must bind one Run")
+
+
 class RunRepository(Protocol):
     async def get(self, run_id: str) -> Run | None: ...
+
+    async def get_inspectable(self, run_id: str) -> InspectableRun | None: ...
+
+    async def list_inspectable(
+        self,
+        *,
+        state: RunState | None,
+        instance_id: str | None,
+        workflow_id: str | None,
+        created_at_from: datetime | None,
+        created_at_to: datetime | None,
+        before_created_at: datetime | None,
+        before_run_id: str | None,
+        limit: int,
+    ) -> tuple[InspectableRun, ...]: ...
 
     async def get_by_work_item_id(self, work_item_id: str) -> Run | None: ...
 
@@ -999,10 +1070,41 @@ class RunStepPlanInsertResult:
     inserted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class InspectableRunPlan:
+    """Complete sealed execution-plan snapshot exposed through a public read seam."""
+
+    plan: RunPlanSnapshot
+    selected_instances: tuple[RunPlanSelectedInstance, ...]
+    assignments: tuple[RunPlanRoutingAssignment, ...]
+    steps: tuple[RunStep, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.plan) is not RunPlanSnapshot:
+            raise ValueError("inspectable plan requires the exact plan snapshot")
+        for values, expected_type, name in (
+            (self.selected_instances, RunPlanSelectedInstance, "selected instances"),
+            (self.assignments, RunPlanRoutingAssignment, "routing assignments"),
+            (self.steps, RunStep, "steps"),
+        ):
+            if type(values) is not tuple or any(
+                type(value) is not expected_type for value in values
+            ):
+                raise ValueError(f"inspectable plan {name} must use exact immutable contracts")
+        if any(value.run_id != self.plan.run_id for value in self.selected_instances):
+            raise ValueError("inspectable selected instances must bind the plan Run")
+        if any(value.run_id != self.plan.run_id for value in self.assignments):
+            raise ValueError("inspectable assignments must bind the plan Run")
+        if any(value.run_id != self.plan.run_id for value in self.steps):
+            raise ValueError("inspectable steps must bind the plan Run")
+
+
 class RunStepRepository(Protocol):
     async def get(self, step_id: str) -> RunStep | None: ...
 
     async def get_plan(self, run_id: str) -> RunPlanSnapshot | None: ...
+
+    async def get_inspectable_plan(self, run_id: str) -> InspectableRunPlan | None: ...
 
     async def add_plan(
         self,
@@ -1028,6 +1130,36 @@ class RunStepRepository(Protocol):
     ) -> bool: ...
 
     async def list_transitions(self, step_id: str) -> tuple[StepStateTransition, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class AuditFeedPage:
+    """One fixed-high-watermark page from the immutable public audit feed."""
+
+    high_watermark: int
+    events: tuple[AuditEvent, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.high_watermark, int)
+            or isinstance(self.high_watermark, bool)
+            or self.high_watermark < 0
+        ):
+            raise ValueError("audit feed high watermark must be nonnegative")
+        if type(self.events) is not tuple or any(
+            type(event) is not AuditEvent for event in self.events
+        ):
+            raise ValueError("audit feed page must contain exact persisted events")
+        optional_sequences = tuple(event.feed_sequence for event in self.events)
+        if any(sequence is None for sequence in optional_sequences):
+            raise ValueError("audit feed event has no public feed sequence")
+        sequences = optional_sequences
+        if any(sequence > self.high_watermark for sequence in sequences):
+            raise ValueError("audit feed event exceeds its fixed high watermark")
+        if sequences != tuple(sorted(sequences, reverse=True)) or len(sequences) != len(
+            set(sequences)
+        ):
+            raise ValueError("audit feed events must have unique descending sequence")
 
 
 class AuditRepository(Protocol):
@@ -1060,3 +1192,18 @@ class AuditRepository(Protocol):
         after_sequence: int = 0,
         limit: int = 100,
     ) -> tuple[AuditEvent, ...]: ...
+
+    async def list_feed(
+        self,
+        *,
+        high_watermark: int | None,
+        before_feed_sequence: int | None,
+        run_id: str | None,
+        step_id: str | None,
+        action_id: str | None,
+        approval_id: str | None,
+        event_type: str | None,
+        occurred_at_from: datetime | None,
+        occurred_at_to: datetime | None,
+        limit: int,
+    ) -> AuditFeedPage: ...

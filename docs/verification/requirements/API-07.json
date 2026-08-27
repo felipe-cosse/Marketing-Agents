@@ -1,0 +1,239 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-07",
+  "matrix_statement_sha256": "aed6c082b4d5cf47193bc7d39d74db7b2668c7be28f7e0562d5d4ad9b4e48871",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/artifacts.py",
+      "apps/api/src/marketing_agents/api/routes/audit_events.py",
+      "apps/api/src/marketing_agents/api/routes/catalog.py",
+      "apps/api/src/marketing_agents/api/routes/runs.py",
+      "apps/api/src/marketing_agents/api/schemas/artifacts.py",
+      "apps/api/src/marketing_agents/api/schemas/audit_events.py",
+      "apps/api/src/marketing_agents/api/schemas/catalog.py",
+      "apps/api/src/marketing_agents/api/schemas/runs.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_resource_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/artifact_resources.py",
+      "apps/api/src/marketing_agents/application/services/audit_resources.py",
+      "apps/api/src/marketing_agents/application/services/connector_output_projection.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_resources.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/artifact.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/step.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-07.json",
+      "docs/verification/requirements/API-07.md",
+      "tests/integration/api/test_api_02_catalog_hierarchy.py",
+      "tests/integration/api/test_api_07_runtime_contracts.py",
+      "tests/integration/db/test_api_07_audit_feed.py",
+      "tests/integration/db/test_api_07_inspection_repositories.py",
+      "tests/integration/db/test_run_06_artifact_persistence.py",
+      "tests/security/test_orch_09_audit_redaction.py",
+      "tests/unit/application/test_api_05_webhook_audit_events.py",
+      "tests/unit/application/test_api_07_artifact_resources.py",
+      "tests/unit/application/test_api_07_audit_resources.py",
+      "tests/unit/application/test_api_07_run_resources.py",
+      "tests/unit/domain/test_dom_01_core_entities.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/runs.py",
+          "apps/api/src/marketing_agents/application/services/run_resources.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_07_runtime_contracts.py",
+          "tests/integration/db/test_api_07_audit_feed.py",
+          "tests/unit/application/test_api_07_run_resources.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "authenticated-bounded-runtime-inspection",
+      "type": "contract",
+      "statement": "Every API-07 read requires an intact authenticated human viewer-equivalent role at transport and application boundaries before executor or repository access. Run and artifact lists use documented 25-item defaults, 100-item maxima, filter-bound opaque keyset cursors, deterministic secondary IDs, and bounded limit + 1 repository selection without count queries.",
+      "test_refs": [
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_human_read_role_matrix",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_authentication_and_authorization_precede_executor_resolution",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_duplicate_queries_are_rejected_before_executor_resolution",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_list_filters_and_malformed_executor_results_fail_closed",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_run_authorization_precedes_repository_access",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_run_cursor_is_filter_bound_and_opaque",
+        "tests/unit/application/test_api_07_artifact_resources.py::test_api_07_artifact_authorization_precedes_repository_access",
+        "tests/integration/db/test_api_07_inspection_repositories.py::test_api_07_repository_page_limits_and_cursor_pairs_are_bounded"
+      ]
+    },
+    {
+      "id": "coherent-run-plan-action-and-status-resources",
+      "type": "negative_control",
+      "statement": "Run detail exact-hydrates the bound WorkItem and complete transition history. It reads bounded plan, control, approval, action, and artifact projections, rereads the parent Run to detect its drift, and separately validates child lineage; this is not a database-wide repeatable-read claim. The single-installation 43-instance status preserves catalog order; its strong ETag covers latest Run creation and update times, and dynamic instance detail rejects drift.",
+      "test_refs": [
+        "tests/integration/db/test_api_07_inspection_repositories.py::test_api_07_run_page_binds_work_and_validates_complete_history",
+        "tests/integration/db/test_api_07_inspection_repositories.py::test_api_07_sealed_plan_and_artifact_keyset_page_fail_closed",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_status_preserves_injected_catalog_order_and_is_stable",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_status_etag_covers_latest_run_created_at",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_composite_run_detail_projects_bounded_control_approval_and_artifact",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_composite_run_detail_fails_closed_on_coherence_drift",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_unknown_run_timeline_returns_not_found_before_audit_lookup",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_step_uses_inspectable_plan_and_action_mismatch_fails_closed",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_run_child_resources_are_path_and_cross_scope_bound",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_dynamic_instance_detail_is_coherent_and_revalidated",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_configured_malformed_runtime_enrichment_fails_after_auth",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_status_summary_has_private_strong_revalidation",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_status_summary_preserves_all_43_catalog_ordered_items"
+      ]
+    },
+    {
+      "id": "safe-artifact-inspection",
+      "type": "contract",
+      "statement": "Artifact list summaries omit payload and hashes. Detail revalidates payload fingerprint, producer lineage, and classification at least as restrictive as the producer; applies persisted JSON-pointer plus conservative secret-field redaction; and returns a keyed pseudonymous digest, not the stored hash. SECRET artifacts fail closed as non-retainable. OpenAPI limits detail/source classifications to retainable public, internal, personal, and sensitive values; JSON remains inert data.",
+      "test_refs": [
+        "tests/unit/application/test_api_07_artifact_resources.py::test_api_07_artifact_detail_uses_persisted_redaction_and_keyed_digest",
+        "tests/unit/application/test_api_07_artifact_resources.py::test_api_07_secret_artifact_detail_fails_closed",
+        "tests/unit/application/test_api_07_artifact_resources.py::test_api_07_artifact_classification_cannot_be_lower_than_producer_step",
+        "tests/integration/db/test_api_07_inspection_repositories.py::test_api_07_sealed_plan_and_artifact_keyset_page_fail_closed",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_path_and_exact_result_types_are_validated",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_artifact_detail_exposes_only_redacted_json_and_keyed_digest",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_openapi_has_all_required_read_operations_and_no_mutation"
+      ]
+    },
+    {
+      "id": "sealed-external-action-inspection",
+      "type": "negative_control",
+      "statement": "Action and Run detail rebind every action to its sealed WRITE step, effective timeout, delivery contract, and approval snapshot. Succeeded results exactly match authoritative receipt identity/status, internally validated bounded output projection, and receipt/result/action timestamps. Proposal payload is re-redacted. Result metadata is never exposed: application and OpenAPI are null-only, and transport rejects non-null executor values.",
+      "test_refs": [
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_external_action_projection_re_redacts_persisted_payload",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_action_and_run_detail_require_exact_succeeded_receipt",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_action_and_run_detail_revalidate_sealed_write_step",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_action_payload_is_redacted_and_result_metadata_rejected",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_openapi_has_all_required_read_operations_and_no_mutation"
+      ]
+    },
+    {
+      "id": "stable-redacted-audit-ordering",
+      "type": "negative_control",
+      "statement": "Per-run timelines retain database-enforced run_sequence order. All four audit append entry points allocate immutable feed_sequence through one transactionally serialized counter; global_sequence remains internal. Global pages retain one fixed high watermark across filter-bound cursors, exact-hydrate selected rows, and reject non-ASCII decoded filters before UoW plus counter drift, selected gaps, or canonical fingerprint disagreement.",
+      "test_refs": [
+        "tests/integration/db/test_api_07_audit_feed.py::test_api_07_feed_allocation_is_serialized_and_rollback_safe",
+        "tests/integration/db/test_api_07_audit_feed.py::test_api_07_feed_pages_use_one_fixed_high_watermark_and_filters",
+        "tests/integration/db/test_api_07_audit_feed.py::test_api_07_feed_detects_counter_drift_selected_gaps_and_tampering",
+        "tests/unit/application/test_api_07_audit_resources.py::test_api_07_audit_cursor_binds_endpoint_filters_and_high_watermark",
+        "tests/unit/application/test_api_07_audit_resources.py::test_api_07_audit_projection_hides_internal_identity_and_expires_metadata",
+        "tests/unit/application/test_api_07_run_resources.py::test_api_07_timeline_projects_pseudonyms_expiry_and_only_live_links",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_audit_feed_exposes_fixed_watermark_and_rechecks_filters"
+      ]
+    },
+    {
+      "id": "private-read-only-http-contract",
+      "type": "contract",
+      "statement": "Typed GET routes expose runs, timeline, steps, external actions, run artifacts, artifact detail, audit events, instance status, and dynamic recent runs with stable operation IDs. Exact result types and path/filter bindings are revalidated before serialization. Successful status and enriched instance detail use strong private revalidation; failures are private, no-store, nosniff, and non-reflective. API-07 adds no Run mutation or cancellation endpoint.",
+      "test_refs": [
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_path_and_exact_result_types_are_validated",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_run_child_resources_are_path_and_cross_scope_bound",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_private_headers_cover_trusted_host_and_trailing_slash_errors",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_openapi_has_all_required_read_operations_and_no_mutation",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_dynamic_instance_detail_is_coherent_and_revalidated",
+        "tests/integration/api/test_api_07_runtime_contracts.py::test_api_07_configured_malformed_runtime_enrichment_fails_after_auth"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-07-runtime-inspection",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_07_runtime_contracts.py",
+        "tests/integration/db/test_api_07_inspection_repositories.py",
+        "tests/integration/db/test_api_07_audit_feed.py",
+        "tests/unit/application/test_api_07_run_resources.py",
+        "tests/unit/application/test_api_07_artifact_resources.py",
+        "tests/unit/application/test_api_07_audit_resources.py",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py",
+        "tests/integration/api/test_api_06_approvals.py",
+        "tests/integration/db/test_run_06_artifact_persistence.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/unit/application/test_api_05_webhook_audit_events.py",
+        "tests/unit/domain/test_dom_01_core_entities.py",
+        "tests/network/test_safe_11_network_isolation.py",
+        "tests/integration/db/test_arch_03_portable_database.py",
+        "tests/unit/architecture/test_arch_05_framework_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "authenticated-bounded-runtime-inspection",
+        "coherent-run-plan-action-and-status-resources",
+        "safe-artifact-inspection",
+        "sealed-external-action-inspection",
+        "stable-redacted-audit-ordering",
+        "private-read-only-http-contract"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/catalog_queries.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/routes/artifacts.py",
+      "apps/api/src/marketing_agents/api/routes/audit_events.py",
+      "apps/api/src/marketing_agents/api/routes/catalog.py",
+      "apps/api/src/marketing_agents/api/routes/runs.py",
+      "apps/api/src/marketing_agents/api/schemas/artifacts.py",
+      "apps/api/src/marketing_agents/api/schemas/audit_events.py",
+      "apps/api/src/marketing_agents/api/schemas/catalog.py",
+      "apps/api/src/marketing_agents/api/schemas/runs.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_resource_authorization.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/artifact_resources.py",
+      "apps/api/src/marketing_agents/application/services/audit_resources.py",
+      "apps/api/src/marketing_agents/application/services/connector_output_projection.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_resources.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/artifact.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/run.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/step.py"
+    ],
+    "gate_id": "api-07-runtime-inspection"
+  },
+  "limitations": [
+    "API-07 is scoped to one local installation. Runtime authorization accepts authenticated human viewer, operator, approver, or admin roles, and the 43-instance status projection explicitly reports scope single-local-installation; this is not tenant isolation or a multi-installation authorization claim.",
+    "API-07 is read-only. It exposes persisted cancellation metadata when present but does not implement POST /api/v1/runs/{run_id}/cancel, create a cancellation mutation seam, or claim worker cancellation behavior.",
+    "DEL-04 owns Alembic migrations, bootstrap, upgrade, and historical backfill. API-07 adds feed_sequence and its counter to ORM metadata and proves metadata-created SQLite behavior; it does not claim migration or live PostgreSQL DDL/runtime parity, and the optional PostgreSQL driver test may skip when unavailable.",
+    "DEL-05 owns default runnable composition. API-07 installs typed routes and fails closed when complete asynchronous resource executors are absent; tests inject real services or bounded fakes rather than claiming the default process constructs every repository, digest key, and catalog-backed service.",
+    "Run detail reads bounded children in one unit of work, cross-validates their bindings, and rereads the parent Run to detect parent drift. API-07 does not claim that a default READ COMMITTED transaction gives a portable repeatable-read snapshot of every child row; deployment isolation and composition still require DEL-04 and DEL-05 verification.",
+    "DEL-07 owns the committed OpenAPI snapshot, generated TypeScript client, and drift gate. API-07 verifies the live FastAPI document, stable operation IDs, typed schemas, and absence of a Run mutation, but does not claim generated client artifacts.",
+    "API-09 still owns the process-wide application/problem+json vocabulary, shared correlation middleware, browser Origin, CSRF and Fetch-Metadata enforcement, trusted proxy policy, and global timeout and retry controls. API-07 supplies fixed route-local failures and private read-response headers but does not claim that larger boundary.",
+    "API-07 conservatively re-redacts proposal payload fields, but the opaque destination summary and proposal values under neutral keys still rely on the producer's persisted redacted-projection contract. result_safe_metadata is omitted, not claimed safe; no privacy claim is made for arbitrary connector metadata.",
+    "No live model provider, connector dispatch, repair, or retention-deletion job is exercised or claimed. Metadata expiry and unkeyed canonical fingerprints plus bounded sequence/coherence checks detect covered disagreement, but a trusted database administrator can rewrite rows and recompute those fingerprints. This evidence makes no tamper-proof persistence claim.",
+    "The global feed integrity check is bounded to its authoritative counter/tail and the selected page. It detects a selected interior gap and exact-hydration tampering; historical filtered-out rows outside that bounded selection are not revalidated on each request."
+  ]
+}

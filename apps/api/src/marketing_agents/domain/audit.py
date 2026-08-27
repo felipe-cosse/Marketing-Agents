@@ -2228,11 +2228,12 @@ def _issue_audit_event_draft(**values: Any) -> AuditEventDraft:
 
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
-    """Persisted event with a global identity and optional stable per-Run order."""
+    """Persisted event with internal identity plus public feed and per-Run order."""
 
     draft: AuditEventDraft
     global_sequence: int
     run_sequence: int | None
+    feed_sequence: int
 
     def __post_init__(self) -> None:
         if type(self.draft) is not AuditEventDraft:
@@ -2252,6 +2253,12 @@ class AuditEvent:
             or self.run_sequence < 1
         ):
             raise ValueError("run audit sequence must be positive")
+        if (
+            not isinstance(self.feed_sequence, int)
+            or isinstance(self.feed_sequence, bool)
+            or self.feed_sequence < 1
+        ):
+            raise ValueError("public audit feed sequence must be positive")
 
     def __getattr__(self, name: str) -> Any:
         """Expose immutable draft fields without duplicating the persisted contract."""

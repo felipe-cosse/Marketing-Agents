@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -67,6 +66,7 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 
+from .connector_output_projection import bounded_connector_output_projection
 from .terminal_execution_cleanup import TerminalExecutionCleanupService
 
 _SAFE_FAILURE_CODES = frozenset(
@@ -82,8 +82,6 @@ _SAFE_FAILURE_CODES = frozenset(
         "schema_mismatch",
     }
 )
-
-_OUTPUT_PROJECTION_OMITTED = {"omitted": "output_payload_too_large"}
 
 
 class ExternalActionDispatchError(RuntimeError):
@@ -213,7 +211,7 @@ class ExternalActionDispatcher:
         # boundary merely because the provider call already succeeded.
         response_receipt_id = connector_result.receipt_id
         response_status = connector_result.status
-        _bounded_output_projection(connector_result.safe_metadata, max_output_bytes)
+        bounded_connector_output_projection(connector_result.safe_metadata, max_output_bytes)
         del connector_result
 
         async with self._dependencies.unit_of_work() as unit_of_work:
@@ -239,7 +237,7 @@ class ExternalActionDispatcher:
             result = ExternalActionResultSnapshot(
                 receipt_id=receipt.receipt_id,
                 status=receipt.status,
-                safe_metadata=_bounded_output_projection(
+                safe_metadata=bounded_connector_output_projection(
                     receipt.safe_metadata,
                     step.runtime_policy.budget.max_output_bytes,
                 ),
@@ -1085,7 +1083,7 @@ class ExternalActionDispatcher:
                 result = ExternalActionResultSnapshot(
                     receipt_id=receipt.receipt_id,
                     status=receipt.status,
-                    safe_metadata=_bounded_output_projection(
+                    safe_metadata=bounded_connector_output_projection(
                         receipt.safe_metadata,
                         step.runtime_policy.budget.max_output_bytes,
                     ),
@@ -1153,7 +1151,7 @@ class ExternalActionDispatcher:
             result = ExternalActionResultSnapshot(
                 receipt_id=receipt.receipt_id,
                 status=receipt.status,
-                safe_metadata=_bounded_output_projection(
+                safe_metadata=bounded_connector_output_projection(
                     receipt.safe_metadata,
                     step.runtime_policy.budget.max_output_bytes,
                 ),
@@ -1236,28 +1234,6 @@ async def _sealed_write_step(unit_of_work: UnitOfWork, action: ExternalAction) -
             "external action output differs from its sealed WRITE step",
         )
     return step
-
-
-def _bounded_output_projection(
-    safe_metadata: object,
-    max_output_bytes: int,
-) -> Mapping[str, object]:
-    """Retain metadata only when its canonical projection fits the sealed limit."""
-
-    if isinstance(safe_metadata, Mapping):
-        try:
-            if canonical_payload_size_bytes(safe_metadata) <= max_output_bytes:
-                return safe_metadata
-        except Exception:
-            # Connector result objects are outside the trust boundary. Treat an
-            # uncanonicalizable projection exactly like an oversized projection
-            # and never expose provider data through the error path.
-            pass
-    if canonical_payload_size_bytes(_OUTPUT_PROJECTION_OMITTED) <= max_output_bytes:
-        return _OUTPUT_PROJECTION_OMITTED
-    # Empty metadata is the domain's representation of no retained output
-    # payload. Receipt identity and status remain exact control-plane evidence.
-    return {}
 
 
 def _terminal_dispatch_result(action: ExternalAction) -> ExternalActionDispatchResult:

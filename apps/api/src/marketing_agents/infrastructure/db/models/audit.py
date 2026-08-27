@@ -21,10 +21,29 @@ from marketing_agents.infrastructure.db.base import Base
 from marketing_agents.infrastructure.db.types import UTCDateTime
 
 
+class AuditFeedSequenceRecord(Base):
+    """Singleton transactional allocator for immutable public audit-feed order."""
+
+    __tablename__ = "audit_feed_sequence"
+    __table_args__ = (
+        CheckConstraint("singleton_id = 1", name="ck_audit_feed_sequence_singleton"),
+        CheckConstraint("last_sequence >= 0", name="ck_audit_feed_sequence_nonnegative"),
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_sequence: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+
 class AuditEventRecord(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
         UniqueConstraint("id", name="uq_audit_events_id"),
+        UniqueConstraint("feed_sequence", name="uq_audit_events_feed_sequence"),
         UniqueConstraint("run_id", "run_sequence", name="uq_audit_events_run_sequence"),
         UniqueConstraint(
             "run_id",
@@ -494,6 +513,10 @@ class AuditEventRecord(Base):
             name="ck_audit_events_fingerprint_lengths",
         ),
         CheckConstraint(
+            "feed_sequence >= 1",
+            name="ck_audit_events_feed_sequence_positive",
+        ),
+        CheckConstraint(
             "metadata_expires_at > occurred_at",
             name="ck_audit_events_metadata_expiry",
         ),
@@ -512,9 +535,20 @@ class AuditEventRecord(Base):
             "id",
         ),
         Index("ix_audit_events_global_time", "occurred_at", "global_sequence"),
+        Index("ix_audit_events_run_feed", "run_id", "feed_sequence"),
+        Index("ix_audit_events_step_feed", "step_id", "feed_sequence"),
+        Index("ix_audit_events_action_feed", "action_id", "feed_sequence"),
+        Index(
+            "ix_audit_events_approval_feed",
+            "approval_request_id",
+            "feed_sequence",
+        ),
+        Index("ix_audit_events_type_feed", "event_type", "feed_sequence"),
+        Index("ix_audit_events_time_feed", "occurred_at", "feed_sequence"),
     )
 
     global_sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feed_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     id: Mapped[str] = mapped_column(String(80), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     run_id: Mapped[str | None] = mapped_column(

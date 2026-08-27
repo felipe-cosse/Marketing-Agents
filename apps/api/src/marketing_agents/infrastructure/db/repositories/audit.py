@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from marketing_agents.application.ports.repositories import AuditFeedPage
 from marketing_agents.domain.audit import (
     AuditActorSource,
     AuditEvent,
@@ -17,7 +19,11 @@ from marketing_agents.domain.audit import (
     _issue_audit_event_draft,
 )
 from marketing_agents.domain.data_classification import DataClassification
-from marketing_agents.infrastructure.db.models.audit import AuditEventRecord
+from marketing_agents.domain.validation import require_id, require_utc
+from marketing_agents.infrastructure.db.models.audit import (
+    AuditEventRecord,
+    AuditFeedSequenceRecord,
+)
 from marketing_agents.infrastructure.db.models.run import RunRecord
 from marketing_agents.security.audit_metadata import hydrate_audit_metadata
 
@@ -29,6 +35,15 @@ class AuditPersistenceInvariantError(RuntimeError):
 
 
 def _record_to_domain_unchecked(record: AuditEventRecord) -> AuditEvent:
+    if (
+        not isinstance(record.feed_sequence, int)
+        or isinstance(record.feed_sequence, bool)
+        or record.feed_sequence < 1
+    ):
+        raise AuditPersistenceInvariantError(
+            "audit_feed_sequence_corrupt",
+            "persisted audit event has no valid public feed sequence",
+        )
     metadata = hydrate_audit_metadata(
         record.event_type,
         record.safe_metadata,
@@ -93,6 +108,7 @@ def _record_to_domain_unchecked(record: AuditEventRecord) -> AuditEvent:
         draft=draft,
         global_sequence=record.global_sequence,
         run_sequence=record.run_sequence,
+        feed_sequence=record.feed_sequence,
     )
 
 
@@ -111,8 +127,10 @@ def _record_to_domain(record: AuditEventRecord) -> AuditEvent:
 def _draft_to_record(
     draft: AuditEventDraft,
     run_sequence: int | None,
+    feed_sequence: int,
 ) -> AuditEventRecord:
     return AuditEventRecord(
+        feed_sequence=feed_sequence,
         id=draft.id,
         schema_version=draft.schema_version,
         run_id=draft.run_id,
@@ -174,6 +192,57 @@ class SQLAlchemyAuditRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _allocate_feed_sequences(self, count: int) -> int:
+        if type(count) is not int or isinstance(count, bool) or not 1 <= count <= 128:
+            raise ValueError("audit feed allocation count must be from 1 through 128")
+        allocation = (
+            update(AuditFeedSequenceRecord)
+            .where(AuditFeedSequenceRecord.singleton_id == 1)
+            .values(last_sequence=AuditFeedSequenceRecord.last_sequence + count)
+            .returning(AuditFeedSequenceRecord.last_sequence)
+            .execution_options(synchronize_session=False)
+        )
+        end_sequence = (await self._session.execute(allocation)).scalar_one_or_none()
+        if end_sequence is None:
+            existing_event = (
+                await self._session.execute(select(AuditEventRecord.global_sequence).limit(1))
+            ).first()
+            if existing_event is not None:
+                raise AuditPersistenceInvariantError(
+                    "audit_feed_counter_missing",
+                    "persisted audit events exist without their public feed counter",
+                )
+            try:
+                async with self._session.begin_nested():
+                    self._session.add(AuditFeedSequenceRecord(singleton_id=1, last_sequence=0))
+                    await self._session.flush()
+            except IntegrityError:
+                pass
+            end_sequence = (await self._session.execute(allocation)).scalar_one_or_none()
+        if end_sequence is None:
+            raise AuditPersistenceInvariantError(
+                "audit_feed_counter_missing",
+                "public audit feed counter could not be initialized",
+            )
+        first_sequence = end_sequence - count + 1
+        if first_sequence < 1:
+            raise AuditPersistenceInvariantError(
+                "audit_feed_counter_corrupt",
+                "public audit feed counter is not monotonic",
+            )
+        maximum_sequence = (
+            await self._session.execute(select(func.max(AuditEventRecord.feed_sequence)))
+        ).scalar_one()
+        expected_previous = first_sequence - 1
+        if (expected_previous == 0 and maximum_sequence is not None) or (
+            expected_previous > 0 and maximum_sequence != expected_previous
+        ):
+            raise AuditPersistenceInvariantError(
+                "audit_feed_not_contiguous",
+                "public audit feed counter disagrees with its committed tail",
+            )
+        return first_sequence
 
     async def append(self, event: AuditEventDraft) -> AuditEvent:
         return (await self.append_many((event,)))[0]
@@ -245,8 +314,14 @@ class SQLAlchemyAuditRepository:
                 "audit_timeline_not_contiguous",
                 "audit append cannot extend a missing or corrupt per-run timeline",
             )
+        first_feed_sequence = await self._allocate_feed_sequences(len(events))
         records = tuple(
-            _draft_to_record(event, first_sequence + offset) for offset, event in enumerate(events)
+            _draft_to_record(
+                event,
+                first_sequence + offset,
+                first_feed_sequence + offset,
+            )
+            for offset, event in enumerate(events)
         )
         self._session.add_all(records)
         try:
@@ -338,7 +413,11 @@ class SQLAlchemyAuditRepository:
             raise ValueError("global audit append batch event IDs must be unique")
         for event in events:
             event.verify_integrity()
-        records = tuple(_draft_to_record(event, None) for event in events)
+        first_feed_sequence = await self._allocate_feed_sequences(len(events))
+        records = tuple(
+            _draft_to_record(event, None, first_feed_sequence + offset)
+            for offset, event in enumerate(events)
+        )
         self._session.add_all(records)
         try:
             await self._session.flush()
@@ -453,6 +532,164 @@ class SQLAlchemyAuditRepository:
                 "persisted per-run audit timeline contains a sequence gap",
             )
         return tuple(_record_to_domain(row) for row in rows)
+
+    async def list_feed(
+        self,
+        *,
+        high_watermark: int | None,
+        before_feed_sequence: int | None,
+        run_id: str | None,
+        step_id: str | None,
+        action_id: str | None,
+        approval_id: str | None,
+        event_type: str | None,
+        occurred_at_from: datetime | None,
+        occurred_at_to: datetime | None,
+        limit: int,
+    ) -> AuditFeedPage:
+        for value, name in (
+            (run_id, "audit Run filter"),
+            (step_id, "audit step filter"),
+            (action_id, "audit action filter"),
+            (approval_id, "audit approval filter"),
+            (event_type, "audit event-type filter"),
+        ):
+            if value is not None:
+                require_id(value, name)
+        for time_value, name in (
+            (occurred_at_from, "audit time lower bound"),
+            (occurred_at_to, "audit time upper bound"),
+        ):
+            if time_value is not None:
+                require_utc(time_value, name)
+        if (
+            occurred_at_from is not None
+            and occurred_at_to is not None
+            and occurred_at_from > occurred_at_to
+        ):
+            raise ValueError("audit time range is inverted")
+        if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 101:
+            raise ValueError("audit feed page limit must be from 1 through 101")
+
+        counter = (
+            await self._session.execute(
+                select(AuditFeedSequenceRecord)
+                .where(AuditFeedSequenceRecord.singleton_id == 1)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if counter is None:
+            existing_event = (
+                await self._session.execute(select(AuditEventRecord.global_sequence).limit(1))
+            ).first()
+            if existing_event is not None:
+                raise AuditPersistenceInvariantError(
+                    "audit_feed_counter_missing",
+                    "persisted audit events exist without their public feed counter",
+                )
+            current_watermark = 0
+        else:
+            current_watermark = counter.last_sequence
+            if (
+                not isinstance(current_watermark, int)
+                or isinstance(current_watermark, bool)
+                or current_watermark < 0
+            ):
+                raise AuditPersistenceInvariantError(
+                    "audit_feed_counter_corrupt",
+                    "public audit feed counter is invalid",
+                )
+        maximum_sequence = (
+            await self._session.execute(select(func.max(AuditEventRecord.feed_sequence)))
+        ).scalar_one()
+        if (current_watermark == 0 and maximum_sequence is not None) or (
+            current_watermark > 0 and maximum_sequence != current_watermark
+        ):
+            raise AuditPersistenceInvariantError(
+                "audit_feed_not_contiguous",
+                "public audit feed counter disagrees with its committed tail",
+            )
+        if high_watermark is None:
+            selected_watermark = current_watermark
+        else:
+            if (
+                not isinstance(high_watermark, int)
+                or isinstance(high_watermark, bool)
+                or high_watermark < 0
+                or high_watermark > current_watermark
+            ):
+                raise AuditPersistenceInvariantError(
+                    "audit_feed_watermark_invalid",
+                    "audit feed high watermark exceeds committed history",
+                )
+            selected_watermark = high_watermark
+        if before_feed_sequence is not None and (
+            not isinstance(before_feed_sequence, int)
+            or isinstance(before_feed_sequence, bool)
+            or before_feed_sequence < 1
+            or before_feed_sequence > selected_watermark + 1
+        ):
+            raise ValueError("audit feed cursor boundary is invalid")
+        if selected_watermark == 0:
+            return AuditFeedPage(high_watermark=0, events=())
+
+        statement = select(AuditEventRecord).where(
+            AuditEventRecord.feed_sequence <= selected_watermark
+        )
+        if before_feed_sequence is not None:
+            statement = statement.where(AuditEventRecord.feed_sequence < before_feed_sequence)
+        if run_id is not None:
+            statement = statement.where(AuditEventRecord.run_id == run_id)
+        if step_id is not None:
+            statement = statement.where(AuditEventRecord.step_id == step_id)
+        if action_id is not None:
+            statement = statement.where(AuditEventRecord.action_id == action_id)
+        if approval_id is not None:
+            statement = statement.where(AuditEventRecord.approval_request_id == approval_id)
+        if event_type is not None:
+            statement = statement.where(AuditEventRecord.event_type == event_type)
+        if occurred_at_from is not None:
+            statement = statement.where(AuditEventRecord.occurred_at >= occurred_at_from)
+        if occurred_at_to is not None:
+            statement = statement.where(AuditEventRecord.occurred_at <= occurred_at_to)
+        statement = statement.order_by(AuditEventRecord.feed_sequence.desc()).limit(limit)
+        rows = tuple((await self._session.execute(statement)).scalars())
+        events = tuple(_record_to_domain(row) for row in rows)
+        sequences = tuple(event.feed_sequence for event in events)
+        if any(sequence is None for sequence in sequences) or sequences != tuple(
+            sorted(sequences, reverse=True)
+        ):
+            raise AuditPersistenceInvariantError(
+                "audit_feed_order_corrupt",
+                "persisted audit feed page is not in immutable sequence order",
+            )
+        filters_active = any(
+            value is not None
+            for value in (
+                run_id,
+                step_id,
+                action_id,
+                approval_id,
+                event_type,
+                occurred_at_from,
+                occurred_at_to,
+            )
+        )
+        if not filters_active:
+            page_top = selected_watermark
+            if before_feed_sequence is not None:
+                page_top = min(page_top, before_feed_sequence - 1)
+            expected_count = min(limit, page_top)
+            expected_sequences = tuple(range(page_top, page_top - expected_count, -1))
+            if sequences != expected_sequences:
+                raise AuditPersistenceInvariantError(
+                    "audit_feed_not_contiguous",
+                    "persisted public audit feed page contains a sequence gap",
+                )
+        return AuditFeedPage(
+            high_watermark=selected_watermark,
+            events=events,
+        )
 
 
 def _validate_cursor(after_sequence: int, limit: int) -> None:

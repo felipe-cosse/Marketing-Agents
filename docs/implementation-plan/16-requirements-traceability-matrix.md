@@ -96,7 +96,7 @@ Allowed status values:
 | API-04 | Manual dry-run endpoint. | 07, 09 | Dry-run route/intake | API + demo tests | verified |
 | API-05 | Webhook with signature hooks/idempotency. | 07, 09 | Webhook route/verifier | Signature/replay tests | verified |
 | API-06 | Create/inspect/approve/reject immutable approval requests with auth. | 06, 09 | Approval routes/services | Approval API suite | verified |
-| API-07 | Inspect runs, artifacts, and audit. | 09 | Run/artifact/audit routes | API/timeline tests | planned |
+| API-07 | Inspect runs, artifacts, and audit. | 09 | Run/artifact/audit routes | API/timeline tests | verified |
 | API-08 | Validate every input and structured output. | 02, 05, 09, 10 | Schema validation boundaries | Negative schema tests | planned |
 | API-09 | Bound retries/timeouts and expose terminal errors. | 05, 09 | Policies/problem responses | Failure tests | planned |
 | WEB-01 | Interactive pan/zoom chart with all 5/12/43. | 12 | OrgChart canvas/layout | UI/browser exact-count tests | planned |

@@ -9,7 +9,10 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from marketing_agents.application.ports.repositories import RunStepPlanInsertResult
+from marketing_agents.application.ports.repositories import (
+    InspectableRunPlan,
+    RunStepPlanInsertResult,
+)
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import (
     RunPlanRoutingAssignment,
@@ -413,6 +416,53 @@ class SQLAlchemyRunStepRepository:
                 "plan_snapshot_corrupt",
                 "persisted run plan snapshot is invalid",
             ) from exc
+
+    async def get_inspectable_plan(self, run_id: str) -> InspectableRunPlan | None:
+        plan = await self.get_plan(run_id)
+        selected_instances = await self._selected_instances(run_id)
+        assignments = await self._assignments(run_id)
+        steps = await self.list_for_run(run_id)
+        if plan is None:
+            if selected_instances or assignments or steps:
+                raise StepPersistenceConflict(
+                    "plan_snapshot_missing",
+                    "Run plan members exist without their sealed plan snapshot",
+                )
+            return None
+        initial_steps = tuple(
+            replace(
+                step,
+                state=StepState.PENDING,
+                updated_at=step.created_at,
+                version=1,
+                terminal_reason_code=None,
+            )
+            for step in steps
+        )
+        initial_transitions = tuple(initial_pending_transition(step) for step in initial_steps)
+        try:
+            self._validate_plan_set(
+                plan,
+                selected_instances,
+                assignments,
+                initial_steps,
+                initial_transitions,
+            )
+        except StepPersistenceConflict:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StepPersistenceConflict(
+                "plan_snapshot_corrupt",
+                "persisted execution plan violates its sealed topology",
+            ) from exc
+        for step in steps:
+            await self._validate_stored_history(step)
+        return InspectableRunPlan(
+            plan=plan,
+            selected_instances=selected_instances,
+            assignments=assignments,
+            steps=steps,
+        )
 
     async def _selected_instances(self, run_id: str) -> tuple[RunPlanSelectedInstance, ...]:
         statement = (
@@ -824,42 +874,13 @@ class SQLAlchemyRunStepRepository:
         return tuple(hydrated)
 
     async def validate_plan_for_execution(self, run_id: str) -> tuple[RunStep, ...]:
-        plan = await self.get_plan(run_id)
-        if plan is None:
+        inspectable = await self.get_inspectable_plan(run_id)
+        if inspectable is None:
             raise StepPersistenceConflict(
                 "plan_snapshot_missing",
                 "Run has no persisted execution plan",
             )
-        steps = await self.list_for_run(run_id)
-        initial_steps = tuple(
-            replace(
-                step,
-                state=StepState.PENDING,
-                updated_at=step.created_at,
-                version=1,
-                terminal_reason_code=None,
-            )
-            for step in steps
-        )
-        initial_transitions = tuple(initial_pending_transition(step) for step in initial_steps)
-        try:
-            self._validate_plan_set(
-                plan,
-                await self._selected_instances(run_id),
-                await self._assignments(run_id),
-                initial_steps,
-                initial_transitions,
-            )
-        except StepPersistenceConflict:
-            raise
-        except (KeyError, TypeError, ValueError) as exc:
-            raise StepPersistenceConflict(
-                "plan_snapshot_corrupt",
-                "persisted execution plan violates its sealed topology",
-            ) from exc
-        for step in steps:
-            await self._validate_stored_history(step)
-        return steps
+        return inspectable.steps
 
     async def apply_transition(
         self,

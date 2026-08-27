@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -276,6 +277,54 @@ class AgentInstanceDetailResponse(CatalogApiModel):
     template_source_references: tuple[str, ...]
     template_implementation_notes: str
     configuration_schema: str
+
+
+InstanceRunState = Literal[
+    "received",
+    "validated",
+    "planned",
+    "awaiting_approval",
+    "executing",
+    "completed",
+    "failed",
+    "rejected",
+    "cancelled",
+]
+
+
+class InstanceRecentRunView(CatalogApiModel):
+    id: str
+    state: InstanceRunState
+    workflow_id: str
+    created_at: datetime
+    updated_at: datetime
+    run_url: str
+
+
+class InstanceRuntimeStatusView(CatalogApiModel):
+    status: Literal[
+        "never_run",
+        "received",
+        "validated",
+        "planned",
+        "awaiting_approval",
+        "executing",
+        "completed",
+        "failed",
+        "rejected",
+        "cancelled",
+    ]
+    latest_run_id: str | None
+    latest_run_state: InstanceRunState | None
+    latest_run_created_at: datetime | None
+    latest_run_updated_at: datetime | None
+    latest_run_url: str | None
+
+
+class AgentInstanceRuntimeDetailResponse(AgentInstanceDetailResponse):
+    runtime_watermark: str = Field(pattern=r"^instance-status-sha256-v1:[0-9a-f]{64}$")
+    runtime_status: InstanceRuntimeStatusView
+    recent_runs: tuple[InstanceRecentRunView, ...] = Field(max_length=5)
 
 
 class CatalogProblem(CatalogApiModel):
