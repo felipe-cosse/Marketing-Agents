@@ -375,6 +375,7 @@ class SQLAlchemyAuditRepository:
         webhook_allowed_sequences = {
             ("webhook.signature_rejected",),
             ("webhook.signature_validated",),
+            ("webhook.signature_validated", "ingress.rate_limited"),
             ("webhook.signature_validated", "webhook.schema_rejected"),
             ("webhook.signature_validated", "webhook.received"),
             ("webhook.signature_validated", "webhook.duplicate_suppressed"),

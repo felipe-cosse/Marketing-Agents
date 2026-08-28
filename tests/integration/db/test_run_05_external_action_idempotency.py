@@ -31,6 +31,7 @@ from marketing_agents.application.ports.id_generator import IdGenerator
 from marketing_agents.application.ports.read_adapter import (
     ReadAdapterRequest,
     ReadAdapterResult,
+    ReadAdapterTransientError,
 )
 from marketing_agents.application.ports.repositories import (
     ExecutionControlRepositoryConflict,
@@ -45,6 +46,7 @@ from marketing_agents.application.services import (
     AuditedPlanPersistenceService,
     ControlledReadCommand,
     ControlledReadExecutor,
+    ControlledReadExecutorError,
     DispatchDisposition,
     ExternalActionDispatcher,
     ExternalActionDispatchError,
@@ -69,6 +71,8 @@ from marketing_agents.domain.enums import (
     StepState,
 )
 from marketing_agents.domain.execution_control import (
+    AttemptCompletionCommand,
+    AttemptOutcome,
     AttemptReservationCommand,
     DeliveryCallPermit,
     DeliveryCallReservationCommand,
@@ -76,6 +80,12 @@ from marketing_agents.domain.execution_control import (
     fixed_window_start,
 )
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
+from marketing_agents.domain.run_lifecycle import (
+    FailureContext,
+    RunFailurePhase,
+    RunLifecycleCommand,
+    transition_run,
+)
 from marketing_agents.domain.runtime_policy import canonical_payload_size_bytes
 from marketing_agents.domain.step_lifecycle import (
     NoStepTransitionContext,
@@ -331,6 +341,12 @@ class _SuccessfulReadAdapter(ExactReadContractAdapter):
         return observation_for(request, {"records": []})
 
 
+class _TransientFailureReadAdapter(_SuccessfulReadAdapter):
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        assert request.input_payload == {"query": "release-write-dependency"}
+        raise ReadAdapterTransientError("temporary_failure", "sanitized transient failure")
+
+
 async def _complete_controlled_read_dependency(
     dependencies: OrchestrationDependencies,
     clock: MutableClock,
@@ -553,6 +569,129 @@ async def _released_parallel_actions(
     assert all(action.state is ExternalActionState.DISPATCH_RESERVED for action in released)
     clock.tick(1)
     return cast(tuple[ExternalAction, ExternalAction, ExternalAction], released)
+
+
+async def _released_mixed_read_write_plan(
+    runtime: DatabaseRuntime,
+    clock: MutableClock,
+    *,
+    seed: int,
+) -> tuple[str, ExternalAction, ExternalAction]:
+    """Release an independent READ and WRITE plus one queued terminal WRITE."""
+
+    dependencies = _dependencies(
+        runtime,
+        clock,
+        ids=IncrementingIds(30_000 + seed * 100),
+    )
+    event_id = f"event.run-05.mixed-read-write.{seed}"
+    validated = await _receive_and_validate(dependencies, event_id=event_id)
+    base = _request(
+        include_write=True,
+        run_id=validated.run.id,
+        write_step=_write_step(
+            key="welcome-a",
+            runtime_step_id=f"runtime-step.mixed-write-a.{seed}",
+        ),
+    )
+    dependency_read = replace(
+        base.steps[0],
+        runtime_step_id=f"runtime-step.mixed-dependency-read.{seed}",
+    )
+    terminal_read = replace(
+        base.steps[0],
+        runtime_step_id=f"runtime-step.mixed-terminal-read.{seed}",
+        step_key="terminal-read",
+    )
+    terminal_write = _write_step(
+        key="welcome-b",
+        runtime_step_id=f"runtime-step.mixed-write-b.{seed}",
+        body="queued private body",
+    )
+    graph = DependencyGraph.build(
+        (
+            TopologyStep("membership", 1),
+            TopologyStep("terminal-read", 2, ("membership",)),
+            TopologyStep("welcome-a", 3, ("membership",)),
+            TopologyStep(
+                "welcome-b",
+                4,
+                ("terminal-read", "welcome-a"),
+                terminal_result=True,
+            ),
+        ),
+        workflow_max_steps=10,
+        global_max_steps=20,
+    )
+    request = replace(
+        base,
+        graph=graph,
+        steps=(dependency_read, terminal_read, base.steps[1], terminal_write),
+    )
+    templates = tuple(
+        item.model_copy(
+            update={"budget_policy": item.budget_policy.model_copy(update={"max_tool_calls": 4})}
+        )
+        if item.id == WORKER_TEMPLATE
+        else item
+        for item in CATALOG.templates
+    )
+    planner, _, _ = _planner(ids=RecordingIds(seed=seed), templates=templates)
+    plan = planner.plan(request)
+    await AuditedPlanPersistenceService(dependencies).persist(
+        plan,
+        graph,
+        cast(RoutingResult, request.routing),
+        expected_run_version=validated.run.version,
+        audit_context=_context(f"{event_id}.persist"),
+    )
+    _, _, _, requests, _ = await _current(dependencies, plan.run_id)
+    assert len(requests) == 2
+    for index, stored in enumerate(requests, start=1):
+        clock.tick(1)
+        await ApprovalDecisionService(dependencies).decide(
+            _decision(
+                stored.request,
+                ApprovalDecisionKind.APPROVE,
+                suffix=f"mixed-read-write.{seed}.{index}",
+            ),
+            principal=_principal(f"mixed-read-write.{seed}.{index}"),
+        )
+    await _complete_controlled_read_dependency(dependencies, clock, plan.run_id)
+    _, current_steps, _, _, _ = await _current(dependencies, plan.run_id)
+    pending_read = next(step for step in current_steps if step.key == "terminal-read")
+    assert pending_read.state is StepState.PENDING
+    clock.tick(1)
+    await RunStepLifecycleService(dependencies).advance(
+        pending_read.id,
+        pending_read.version,
+        StepLifecycleCommand.MARK_READY,
+        NoStepTransitionContext(),
+        audit_context=_context(f"{event_id}.terminal-read-ready"),
+    )
+    run, steps, selected, requests, actions = await _current(dependencies, plan.run_id)
+    step_by_key = {step.key: step for step in steps}
+    action_by_key = {
+        action.envelope.step_key: cast(ExternalAction, action)
+        for action in actions
+        if action is not None
+    }
+    assert run.state is RunState.EXECUTING
+    assert selected.authorization_set.status.value == "released"
+    assert all(request.status is ApprovalStatus.CONSUMED for request in requests)
+    assert step_by_key["membership"].state is StepState.SUCCEEDED
+    assert step_by_key["terminal-read"].state is StepState.READY
+    assert step_by_key["welcome-a"].state is StepState.READY
+    assert set(action_by_key) == {"welcome-a", "welcome-b"}
+    assert all(
+        action.state is ExternalActionState.DISPATCH_RESERVED for action in action_by_key.values()
+    )
+    clock.tick(1)
+    return (
+        step_by_key["terminal-read"].id,
+        action_by_key["welcome-a"],
+        action_by_key["welcome-b"],
+    )
 
 
 async def _release_authority(unit_of_work, action_id: str) -> ReleaseAuthority:  # type: ignore[no-untyped-def]
@@ -875,6 +1014,31 @@ class BlockingFirstGateway:
         return await self.delegate.execute(authorization)
 
 
+class BlockingFirstThenKnownFailureGateway:
+    """Keep one call in flight while a sibling returns a known terminal failure."""
+
+    def __init__(self, delegate: ExternalWriteConnectorGateway) -> None:
+        self.delegate = delegate
+        self.calls = 0
+        self.first_started = asyncio.Event()
+        self.release_first = asyncio.Event()
+
+    def contract_for(self, action: ExternalAction) -> ConnectorDeliveryContract:
+        return self.delegate.contract_for(action)
+
+    async def execute(self, authorization):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self.calls == 1:
+            self.first_started.set()
+            await self.release_first.wait()
+            return await self.delegate.execute(authorization)
+        raise ConnectorDeliveryFailure(
+            "connector_request_rejected",
+            "sanitized known provider failure",
+            request_may_have_left_process=False,
+        )
+
+
 class ReceiptThenBlockingGateway:
     """Commit the provider receipt, then hold its successful response open."""
 
@@ -1063,6 +1227,84 @@ async def _control_and_write_step(
         step = await unit_of_work.run_steps.get(action.step_id)
     assert control is not None and step is not None
     return control, step
+
+
+async def _persist_exhausted_read_attempt_without_parent_cleanup(
+    dependencies: OrchestrationDependencies,
+    clock: MutableClock,
+    *,
+    step_id: str,
+) -> None:
+    """Persist the repository boundary that a restarted reservation must reject."""
+
+    audit_context = _context("api-09.pre-call-exhausted.seed")
+    async with dependencies.unit_of_work() as unit_of_work:
+        step = await unit_of_work.run_steps.get(step_id)
+        assert step is not None and step.state is StepState.READY
+        run = await unit_of_work.runs.get(step.run_id)
+        control = await unit_of_work.execution_control.get(step.run_id)
+        operation = await unit_of_work.execution_control.get_operation(
+            step.id,
+            step.runtime_policy.operation_key,
+        )
+        assert run is not None and run.state is RunState.EXECUTING
+        assert control is not None and operation is not None
+        assert operation.max_attempts == 1
+        reservation = await unit_of_work.execution_control.reserve_attempt(
+            AttemptReservationCommand(
+                attempt_id="execution-attempt.api-09.pre-call-exhausted",
+                run_id=step.run_id,
+                step_id=step.id,
+                operation_key=operation.operation_key,
+                expected_control_version=control.version,
+                expected_step_version=step.version,
+                reserved_at=clock.now(),
+                redacted_input={},
+                input_schema_id=operation.request_schema_id,
+                input_classification=operation.data_classification,
+            )
+        )
+        started = transition_step(
+            step,
+            StepLifecycleCommand.START,
+            NoStepTransitionContext(),
+            clock.now(),
+        )
+        assert await unit_of_work.run_steps.apply_transition(
+            expected_run_version=run.version,
+            expected_run_state=RunState.EXECUTING,
+            expected_version=step.version,
+            expected_state=StepState.READY,
+            result=started,
+        )
+        factory = AuditEventFactory(audit_context)
+        await unit_of_work.audits.append_many(
+            (
+                factory.step_transition(started.step, started.transition),
+                factory.attempt_reserved(reservation.attempt),
+            )
+        )
+        await unit_of_work.commit()
+
+    clock.tick(1)
+    async with dependencies.unit_of_work() as unit_of_work:
+        control = await unit_of_work.execution_control.get(reservation.attempt.run_id)
+        assert control is not None
+        completed = await unit_of_work.execution_control.complete_attempt(
+            AttemptCompletionCommand(
+                attempt_id=reservation.attempt.id,
+                outcome=AttemptOutcome.TRANSIENT_FAILURE,
+                expected_control_version=control.version,
+                completed_at=clock.now(),
+                safe_error_code="temporary_failure",
+            )
+        )
+        assert completed.retry_not_before is None
+        assert completed.attempt.terminal_reason_code == "attempts_exhausted"
+        await unit_of_work.audits.append(
+            AuditEventFactory(audit_context).attempt_completed(completed.attempt)
+        )
+        await unit_of_work.commit()
 
 
 def _execution_control_material(record: RunExecutionControlRecord) -> dict[str, object]:
@@ -1980,6 +2222,13 @@ async def test_run_05_exhausted_pre_call_claim_fails_without_connector_call(
         assert recovered[0].action.terminal_reason_code == "pre_call_attempts_exhausted"
         assert ledger.side_effect_count == 0
         assert await _counts(runtime) == (1, 0)
+        async with _dependencies(runtime, clock).unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(action.run_id)
+            step = await unit_of_work.run_steps.get(action.step_id)
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == "pre_call_attempts_exhausted"
+        assert step is not None and step.state is StepState.FAILED
+        assert step.terminal_reason_code == "pre_call_attempts_exhausted"
     finally:
         await runtime.dispose()
 
@@ -2877,6 +3126,502 @@ async def test_orch_06_terminal_write_denial_closes_mixed_siblings_and_inflight_
         assert terminal[0].action.terminal_reason_code == "runtime_control_denied_after_call_start"
         assert gateway.calls == 1
         assert ledger.side_effect_count == 0
+    finally:
+        gateway.release_first.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_terminal_cleanup_rejects_nonterminal_runtime_control_code() -> None:
+    with pytest.raises(ValueError, match="terminal runtime-control denial code"):
+        await TerminalExecutionCleanupService().fail_runtime_control_in_uow(
+            object(),  # type: ignore[arg-type]
+            run_id="run.api-09.nonterminal-control",
+            denied_step_id="step.api-09.nonterminal-control",
+            plan_hash="a" * 64,
+            denial_code="retry_not_ready",
+            occurred_at=datetime(2026, 8, 28, 21, tzinfo=UTC),
+            audit_context=_context("api-09.nonterminal-control"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_09_terminal_write_failure_closes_only_pre_call_siblings(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-terminal-write-mixed-siblings.db")
+    clock = MutableClock()
+    first, failed, queued = await _released_parallel_actions(runtime, clock, seed=189)
+    permits: list[DeliveryCallPermit] = []
+    dependencies = _permit_recording_dependencies(runtime, clock, permits)
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = BlockingFirstThenKnownFailureGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                first.id,
+                lease_owner="worker.api-09.mixed.first",
+            )
+        )
+        await asyncio.wait_for(gateway.first_started.wait(), timeout=2)
+        assert len(permits) == 1
+
+        terminal = await dispatcher.dispatch_once(
+            failed.id,
+            lease_owner="worker.api-09.mixed.failed",
+        )
+        assert terminal.disposition is DispatchDisposition.FAILED
+        assert terminal.action.terminal_reason_code == "connector_request_rejected"
+        assert gateway.calls == 2
+        assert ledger.side_effect_count == 0
+        with pytest.raises(ExternalActionDispatchError) as replayed:
+            await dispatcher.dispatch_once(
+                failed.id,
+                lease_owner="worker.api-09.mixed.failed-replay",
+            )
+        assert replayed.value.code == "action_not_dispatchable"
+        assert gateway.calls == 2
+
+        async with dependencies.unit_of_work() as unit_of_work:
+            actions = await unit_of_work.external_actions.list_run_plan(
+                first.run_id,
+                first.envelope.plan_hash,
+            )
+            steps = await unit_of_work.run_steps.list_for_run(first.run_id)
+            run = await unit_of_work.runs.get(first.run_id)
+            timeline = await unit_of_work.audits.list_run(first.run_id)
+        action_by_id = {action.id: action for action in actions}
+        step_by_id = {step.id: step for step in steps}
+        assert action_by_id[first.id].state is ExternalActionState.DISPATCHING
+        assert action_by_id[first.id].call_started_at is not None
+        assert action_by_id[failed.id].state is ExternalActionState.FAILED
+        assert action_by_id[failed.id].terminal_reason_code == "connector_request_rejected"
+        assert action_by_id[queued.id].state is ExternalActionState.CANCELLED
+        assert action_by_id[queued.id].terminal_reason_code == "parent_run_failed"
+        assert step_by_id[first.step_id].state is StepState.EXECUTING
+        assert step_by_id[failed.step_id].state is StepState.FAILED
+        assert step_by_id[failed.step_id].terminal_reason_code == "connector_request_rejected"
+        assert step_by_id[queued.step_id].state is StepState.SKIPPED
+        assert step_by_id[queued.step_id].terminal_reason_code == "parent_run_failed"
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == "connector_request_rejected"
+        assert tuple(event.event_type for event in timeline[-5:]) == (
+            "action.failed",
+            "action.cancelled",
+            "step.transitioned",
+            "step.transitioned",
+            "run.transitioned",
+        )
+        assert timeline[-5].reason_code == "connector_request_rejected"
+        assert timeline[-4].reason_code == "parent_run_failed"
+
+        early = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.mixed.early",
+            limit=3,
+        )
+        assert early == ()
+        clock.current = permits[0].call_deadline_at
+        recovered = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.mixed.deadline",
+            limit=3,
+        )
+        assert len(recovered) == 1
+        assert recovered[0].disposition is DispatchDisposition.OUTCOME_UNKNOWN
+        assert recovered[0].action.id == first.id
+        assert recovered[0].action.terminal_reason_code == "parent_run_failed_after_call_start"
+        assert gateway.calls == 2
+        assert ledger.side_effect_count == 0
+    finally:
+        if first_dispatch is not None and not first_dispatch.done():
+            first_dispatch.cancel()
+        gateway.release_first.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_ordinary_read_exhaustion_reconciles_inflight_write_receipt(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-ordinary-read-exhaustion-receipt.db")
+    clock = MutableClock()
+    read_step_id, inflight, queued = await _released_mixed_read_write_plan(
+        runtime,
+        clock,
+        seed=190,
+    )
+    dependencies = _dependencies(runtime, clock, ids=IncrementingIds(50_000))
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = ReceiptThenBlockingGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                inflight.id,
+                lease_owner="worker.api-09.ordinary-read.receipt",
+            )
+        )
+        await asyncio.wait_for(gateway.receipt_committed.wait(), timeout=2)
+        assert gateway.calls == ledger.side_effect_count == 1
+        async with dependencies.unit_of_work() as unit_of_work:
+            started = await unit_of_work.external_actions.get(inflight.id)
+        assert started is not None and started.call_deadline_at is not None
+
+        read_result = await ControlledReadExecutor(
+            dependencies,
+            _TransientFailureReadAdapter(),
+        ).execute(
+            ControlledReadCommand(
+                read_step_id,
+                {"query": "release-write-dependency"},
+            ),
+            audit_context=_context("api-09.ordinary-read.exhausted"),
+        )
+        assert read_result.attempt.terminal_reason_code == "attempts_exhausted"
+        assert read_result.step.state is StepState.FAILED
+        async with dependencies.unit_of_work() as unit_of_work:
+            failed_run = await unit_of_work.runs.get(inflight.run_id)
+            queued_action = await unit_of_work.external_actions.get(queued.id)
+        assert failed_run is not None and failed_run.state is RunState.FAILED
+        assert failed_run.terminal_reason_code == "attempts_exhausted"
+        assert queued_action is not None and queued_action.state is ExternalActionState.CANCELLED
+        assert queued_action.terminal_reason_code == "parent_run_failed"
+        async with dependencies.unit_of_work() as unit_of_work:
+            failure_event = await unit_of_work.audits.get_mutation_event(
+                "run",
+                failed_run.id,
+                failed_run.version,
+            )
+        assert failure_event is not None
+        assert failure_event.safe_metadata.values["terminal_failure_origin"] == (
+            "ordinary_execution_failure"
+        )
+
+        clock.current = started.call_deadline_at
+        recovered = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.ordinary-read.recovery",
+            limit=2,
+        )
+        assert len(recovered) == 1
+        assert recovered[0].disposition is DispatchDisposition.SUCCEEDED
+        assert recovered[0].action.id == inflight.id
+        assert recovered[0].action.state is ExternalActionState.SUCCEEDED
+        assert gateway.calls == ledger.side_effect_count == 1
+        async with dependencies.unit_of_work() as unit_of_work:
+            final_run = await unit_of_work.runs.get(inflight.run_id)
+            final_step = await unit_of_work.run_steps.get(inflight.step_id)
+            timeline = await unit_of_work.audits.list_run(inflight.run_id)
+        assert final_run == failed_run
+        assert final_step is not None and final_step.state is StepState.SUCCEEDED
+        assert timeline[-2].event_type == "action.receipt_reconciled"
+        assert timeline[-2].action_id == inflight.id
+        assert timeline[-1].event_type == "step.transitioned"
+    finally:
+        gateway.release_response.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_pre_call_read_exhaustion_marks_runtime_control_write_recovery(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-pre-call-read-exhaustion.db")
+    clock = MutableClock()
+    read_step_id, inflight, _ = await _released_mixed_read_write_plan(
+        runtime,
+        clock,
+        seed=191,
+    )
+    dependencies = _dependencies(runtime, clock, ids=IncrementingIds(60_000))
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = BlockingFirstGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                inflight.id,
+                lease_owner="worker.api-09.pre-call-read.first",
+            )
+        )
+        await asyncio.wait_for(gateway.first_started.wait(), timeout=2)
+        async with dependencies.unit_of_work() as unit_of_work:
+            started = await unit_of_work.external_actions.get(inflight.id)
+        assert started is not None and started.call_deadline_at is not None
+        await _persist_exhausted_read_attempt_without_parent_cleanup(
+            dependencies,
+            clock,
+            step_id=read_step_id,
+        )
+
+        with pytest.raises(ControlledReadExecutorError) as denied:
+            await ControlledReadExecutor(
+                dependencies,
+                _SuccessfulReadAdapter(),
+            ).execute(
+                ControlledReadCommand(
+                    read_step_id,
+                    {"query": "release-write-dependency"},
+                ),
+                audit_context=_context("api-09.pre-call-read.exhausted"),
+            )
+        assert denied.value.code == "attempts_exhausted"
+        assert gateway.calls == 1
+        assert ledger.side_effect_count == 0
+        async with dependencies.unit_of_work() as unit_of_work:
+            failed_run = await unit_of_work.runs.get(inflight.run_id)
+            failure_event = None
+            if failed_run is not None:
+                failure_event = await unit_of_work.audits.get_mutation_event(
+                    "run",
+                    failed_run.id,
+                    failed_run.version,
+                )
+            timeline = await unit_of_work.audits.list_run(inflight.run_id)
+        assert failed_run is not None and failed_run.state is RunState.FAILED
+        assert failed_run.terminal_reason_code == "attempts_exhausted"
+        assert failure_event is not None
+        assert failure_event.safe_metadata.values["terminal_failure_origin"] == (
+            "runtime_control_denial"
+        )
+        assert any(
+            event.event_type == "runtime.control_denied"
+            and event.safe_metadata.values["denial_code"] == "attempts_exhausted"
+            for event in timeline
+        )
+
+        clock.current = started.call_deadline_at
+        recovered = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.pre-call-read.recovery",
+            limit=2,
+        )
+        assert len(recovered) == 1
+        assert recovered[0].disposition is DispatchDisposition.OUTCOME_UNKNOWN
+        assert recovered[0].action.id == inflight.id
+        assert recovered[0].action.terminal_reason_code == (
+            "runtime_control_denied_after_call_start"
+        )
+        assert gateway.calls == 1
+        assert ledger.side_effect_count == 0
+    finally:
+        gateway.release_first.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_legacy_failed_parent_reconciles_receipt_before_origin_lookup(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-legacy-failed-parent-receipt.db")
+    clock = MutableClock()
+    action = await _released_action(runtime, clock, seed=192)
+    dependencies = _dependencies(runtime, clock, ids=IncrementingIds(70_000))
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = ReceiptThenBlockingGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                action.id,
+                lease_owner="worker.api-09.legacy-receipt.first",
+            )
+        )
+        await asyncio.wait_for(gateway.receipt_committed.wait(), timeout=2)
+        async with dependencies.unit_of_work() as unit_of_work:
+            started = await unit_of_work.external_actions.get(action.id)
+            run = await unit_of_work.runs.get(action.run_id)
+            assert started is not None and started.call_deadline_at is not None
+            assert run is not None and run.state is RunState.EXECUTING
+            clock.tick(1)
+            legacy_failure = transition_run(
+                run,
+                RunLifecycleCommand.FAIL,
+                FailureContext(RunFailurePhase.EXECUTION, "attempts_exhausted"),
+                clock.now(),
+            )
+            assert await unit_of_work.runs.apply_transition(
+                expected_version=run.version,
+                expected_state=RunState.EXECUTING,
+                result=legacy_failure,
+            )
+            legacy_event = AuditEventFactory(
+                _context("api-09.legacy-receipt.failure")
+            ).run_transition(legacy_failure.run, legacy_failure.transition)
+            assert "terminal_failure_origin" not in legacy_event.safe_metadata.values
+            await unit_of_work.audits.append(legacy_event)
+            await unit_of_work.commit()
+
+        clock.current = started.call_deadline_at
+        recovered = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.legacy-receipt.recovery",
+            limit=1,
+        )
+        assert len(recovered) == 1
+        assert recovered[0].disposition is DispatchDisposition.SUCCEEDED
+        assert recovered[0].action.state is ExternalActionState.SUCCEEDED
+        assert gateway.calls == ledger.side_effect_count == 1
+        async with dependencies.unit_of_work() as unit_of_work:
+            final_run = await unit_of_work.runs.get(action.run_id)
+            final_step = await unit_of_work.run_steps.get(action.step_id)
+            timeline = await unit_of_work.audits.list_run(action.run_id)
+        assert final_run == legacy_failure.run
+        assert final_step is not None and final_step.state is StepState.SUCCEEDED
+        assert timeline[-2].event_type == "action.receipt_reconciled"
+    finally:
+        gateway.release_response.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_legacy_failed_parent_without_origin_uses_generic_no_receipt_reason(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-legacy-failed-parent-no-receipt.db")
+    clock = MutableClock()
+    action = await _released_action(runtime, clock, seed=193)
+    dependencies = _dependencies(runtime, clock, ids=IncrementingIds(80_000))
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = BlockingFirstGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                action.id,
+                lease_owner="worker.api-09.legacy-no-receipt.first",
+            )
+        )
+        await asyncio.wait_for(gateway.first_started.wait(), timeout=2)
+        async with dependencies.unit_of_work() as unit_of_work:
+            started = await unit_of_work.external_actions.get(action.id)
+            run = await unit_of_work.runs.get(action.run_id)
+            assert started is not None and started.call_deadline_at is not None
+            assert run is not None and run.state is RunState.EXECUTING
+            clock.tick(1)
+            legacy_failure = transition_run(
+                run,
+                RunLifecycleCommand.FAIL,
+                FailureContext(RunFailurePhase.EXECUTION, "attempts_exhausted"),
+                clock.now(),
+            )
+            assert await unit_of_work.runs.apply_transition(
+                expected_version=run.version,
+                expected_state=RunState.EXECUTING,
+                result=legacy_failure,
+            )
+            legacy_event = AuditEventFactory(
+                _context("api-09.legacy-no-receipt.failure")
+            ).run_transition(legacy_failure.run, legacy_failure.transition)
+            assert "terminal_failure_origin" not in legacy_event.safe_metadata.values
+            await unit_of_work.audits.append(legacy_event)
+            await unit_of_work.commit()
+
+        clock.current = started.call_deadline_at
+        recovered = await dispatcher.recover_stale(
+            lease_owner="worker.api-09.legacy-no-receipt.recovery",
+            limit=1,
+        )
+        assert len(recovered) == 1
+        assert recovered[0].disposition is DispatchDisposition.OUTCOME_UNKNOWN
+        assert recovered[0].action.terminal_reason_code == ("parent_run_failed_after_call_start")
+        assert gateway.calls == 1
+        assert ledger.side_effect_count == 0
+    finally:
+        gateway.release_first.set()
+        if first_dispatch is not None:
+            await asyncio.gather(first_dispatch, return_exceptions=True)
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_failed_parent_missing_exact_audit_fails_closed_without_replay(
+    tmp_path: Path,
+) -> None:
+    runtime = await _runtime(tmp_path / "api-09-failed-parent-missing-audit.db")
+    clock = MutableClock()
+    action = await _released_action(runtime, clock, seed=194)
+    dependencies = _dependencies(runtime, clock, ids=IncrementingIds(90_000))
+    delegate, ledger = _gateway(runtime, clock)
+    gateway = BlockingFirstGateway(delegate)
+    dispatcher = ExternalActionDispatcher(
+        dependencies,
+        gateway,
+        WriteAuthorizationGuard(),
+        lease_duration=timedelta(seconds=1),
+    )
+    first_dispatch: asyncio.Task[ExternalActionDispatchResult] | None = None
+    try:
+        first_dispatch = asyncio.create_task(
+            dispatcher.dispatch_once(
+                action.id,
+                lease_owner="worker.api-09.missing-audit.first",
+            )
+        )
+        await asyncio.wait_for(gateway.first_started.wait(), timeout=2)
+        async with dependencies.unit_of_work() as unit_of_work:
+            started = await unit_of_work.external_actions.get(action.id)
+            run = await unit_of_work.runs.get(action.run_id)
+        assert started is not None and started.call_deadline_at is not None
+        assert run is not None and run.state is RunState.EXECUTING
+        clock.tick(1)
+        async with runtime.session_factory() as session, session.begin():
+            record = await session.get(RunRecord, run.id)
+            assert record is not None
+            record.state = RunState.FAILED.value
+            record.terminal_reason_code = "attempts_exhausted"
+            record.updated_at = clock.now()
+            record.version += 1
+
+        clock.current = started.call_deadline_at
+        with pytest.raises(ExternalActionDispatchError) as rejected:
+            await dispatcher.recover_stale(
+                lease_owner="worker.api-09.missing-audit.recovery",
+                limit=1,
+            )
+        assert rejected.value.code == "terminal_parent_audit_invalid"
+        assert gateway.calls == 1
+        assert ledger.side_effect_count == 0
+        async with dependencies.unit_of_work() as unit_of_work:
+            unchanged = await unit_of_work.external_actions.get(action.id)
+        assert unchanged == started
     finally:
         gateway.release_first.set()
         if first_dispatch is not None:

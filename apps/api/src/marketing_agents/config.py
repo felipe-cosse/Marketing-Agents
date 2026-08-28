@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self, cast
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +17,59 @@ from marketing_agents.domain.validation import require_id
 from marketing_agents.infrastructure.db.url import parse_database_url, safe_database_url
 from marketing_agents.security.network_policy import AdapterNetworkPolicy, NetworkPolicyError
 from marketing_agents.security.secret_config import redact_config
+
+_DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _canonical_api_origin(origin: str) -> str:
+    if (
+        type(origin) is not str
+        or not origin
+        or len(origin) > 512
+        or any(ord(character) <= 0x20 or ord(character) == 0x7F for character in origin)
+    ):
+        raise ValueError("API trusted origins must be canonical HTTP origins")
+    try:
+        origin.encode("ascii", errors="strict")
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        raise ValueError("API trusted origins must be canonical HTTP origins") from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname is None
+    ):
+        raise ValueError("API trusted origins must be canonical HTTP origins")
+    if port is not None and not 1 <= port <= 65_535:
+        raise ValueError("API trusted origins must use a valid port")
+    try:
+        address = ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        hostname = parsed.hostname
+        if (
+            hostname != hostname.casefold()
+            or hostname.endswith(".")
+            or len(hostname) > 253
+            or any(not _DNS_LABEL_PATTERN.fullmatch(label) for label in hostname.split("."))
+        ):
+            raise ValueError("API trusted origins must be canonical HTTP origins") from None
+    else:
+        hostname = address.compressed.casefold()
+    if (parsed.scheme, port) in {("http", 80), ("https", 443)}:
+        port = None
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        authority = f"{authority}:{port}"
+    canonical = f"{parsed.scheme}://{authority}"
+    if origin != canonical:
+        raise ValueError("API trusted origins must not require normalization")
+    return canonical
 
 
 class Settings(BaseSettings):
@@ -54,6 +109,13 @@ class Settings(BaseSettings):
     real_connector_opt_in: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    api_request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=120.0)
+    api_trusted_origins: tuple[str, ...] = (
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://[::1]:8000",
+        "http://testserver",
+    )
     marketing_agents_digest_key_path: Path = Path("data/digest.key")
     real_llm_api_key: SecretStr | None = None
     webhook_hmac_secret: SecretStr | None = None
@@ -101,6 +163,19 @@ class Settings(BaseSettings):
             raise ValueError("API host must remain loopback-bound in the local identity mode")
         return value
 
+    @field_validator("api_trusted_origins")
+    @classmethod
+    def validate_api_trusted_origins(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if type(value) is not tuple or not value:
+            raise ValueError("API trusted origins must be a unique tuple")
+        canonical = tuple(_canonical_api_origin(origin) for origin in value)
+        if len(canonical) != len(set(canonical)):
+            raise ValueError("API trusted origins must be unique after canonicalization")
+        return canonical
+
     @model_validator(mode="after")
     def validate_security_modes(self) -> Self:
         if self.app_env == "production" and self.auth_mode == "local":
@@ -122,6 +197,10 @@ class Settings(BaseSettings):
     @property
     def trusted_hosts(self) -> tuple[str, ...]:
         return ("127.0.0.1", "localhost", "testserver", "[::1]")
+
+    @property
+    def trusted_origins(self) -> tuple[str, ...]:
+        return self.api_trusted_origins
 
     def safe_snapshot(self) -> dict[str, object]:
         values = self.model_dump(mode="json")

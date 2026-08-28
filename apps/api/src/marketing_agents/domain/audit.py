@@ -116,6 +116,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
 )
 _EVENT_AGGREGATES = {
     "ingress.manual_received": "manual_ingress",
+    "ingress.rate_limited": "webhook_ingress",
     "ingress.schema_rejected": "manual_ingress_rejection",
     "webhook.signature_validated": "webhook_ingress",
     "webhook.signature_rejected": "webhook_ingress",
@@ -168,6 +169,7 @@ _EVENT_OUTCOMES = {
     "run.transition_rejected": "rejected",
     "runtime.control_denied": "rejected",
     "work.idempotency_collision": "rejected",
+    "ingress.rate_limited": "rejected",
     "ingress.schema_rejected": "rejected",
     "webhook.signature_rejected": "rejected",
     "webhook.idempotency_collision": "rejected",
@@ -197,6 +199,9 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
             "trigger_id",
             "workflow_id",
         }
+    ),
+    "ingress.rate_limited": frozenset(
+        {"source", "trigger_id", "webhook_attempt_id", "retry_after_seconds"}
     ),
     "webhook.signature_validated": frozenset({"source", "trigger_id", "webhook_attempt_id"}),
     "webhook.signature_rejected": frozenset({"source", "trigger_id", "webhook_attempt_id"}),
@@ -495,6 +500,7 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
 }
 _EVENT_OPTIONAL_METADATA: Mapping[str, frozenset[str]] = {
     "attempt.completed": frozenset({"safe_error_code"}),
+    "run.transitioned": frozenset({"terminal_failure_origin"}),
     "runtime.control_denied": frozenset({"retry_after_seconds"}),
     "webhook.schema_rejected": frozenset({"configuration_revision", "instance_id", "workflow_id"}),
 }
@@ -526,6 +532,8 @@ _RUN_STATES = frozenset(
 )
 _SAFE_AUDIT_REASONS = frozenset(
     {
+        *RUNTIME_CONTROL_DENIAL_CODES,
+        "authorization_mismatch",
         "approval_barrier_incomplete",
         "approval_barrier_satisfied",
         "approval_barrier_released",
@@ -538,6 +546,8 @@ _SAFE_AUDIT_REASONS = frozenset(
         "approval_set_rejected",
         "approval_set_superseded",
         "approval_rejection_mismatch",
+        "binding_mismatch",
+        "capability_mismatch",
         "connector_delivery_uncertain",
         "connector_request_rejected",
         "connector_timeout",
@@ -546,12 +556,16 @@ _SAFE_AUDIT_REASONS = frozenset(
         "failure_phase_mismatch",
         "input_validated",
         "idempotency_conflict",
+        "invalid_request",
         "schema_rejected",
         "webhook_authentication_failed",
         "invalid_cancellation_effects",
         "invalid_transition",
         "non_monotonic_time",
         "operator_cancelled",
+        "operation_disabled",
+        "parent_run_failed",
+        "parent_run_failed_after_call_start",
         "plan_recorded",
         "plan_step_recorded",
         "pre_call_attempts_exhausted",
@@ -561,6 +575,8 @@ _SAFE_AUDIT_REASONS = frozenset(
         "run_cancelled_after_call_start",
         "runtime_control_denied",
         "runtime_control_denied_after_call_start",
+        "schema_invalid_response",
+        "schema_mismatch",
         "sibling_approval_rejected",
         "stale_delivery_outcome_unknown",
         "stale_run_version",
@@ -622,6 +638,7 @@ def _webhook_audit_aggregate_id(
     if event_type not in {
         "webhook.signature_validated",
         "webhook.signature_rejected",
+        "ingress.rate_limited",
         "webhook.received",
         "webhook.duplicate_suppressed",
         "webhook.idempotency_collision",
@@ -704,6 +721,13 @@ class AuditOutcome(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     OBSERVED = "observed"
+
+
+class RunTerminalFailureOrigin(StrEnum):
+    """Persisted provenance for an execution-phase terminal Run mutation."""
+
+    ORDINARY_EXECUTION = "ordinary_execution_failure"
+    RUNTIME_CONTROL = "runtime_control_denial"
 
 
 _AUTH_METHODS_BY_SOURCE: Mapping[AuditActorSource, frozenset[str]] = {
@@ -1275,6 +1299,7 @@ class AuditEventDraft:
             ):
                 raise ValueError("webhook audit has invalid subject links")
             expected_reason = {
+                "ingress.rate_limited": "rate_limit_exhausted",
                 "webhook.signature_rejected": "webhook_authentication_failed",
                 "webhook.idempotency_collision": "idempotency_conflict",
                 "webhook.schema_rejected": "schema_rejected",
@@ -1624,7 +1649,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     if draft.reason_code is not None and draft.reason_code not in _SAFE_AUDIT_REASONS:
         raise ValueError("audit reason code is not an allowlisted operational code")
     metadata = draft.safe_metadata.values
-    if draft.event_type.startswith("webhook."):
+    if draft.event_type.startswith("webhook.") or draft.event_type == "ingress.rate_limited":
         expected_actor_source = (
             AuditActorSource.SYSTEM
             if draft.event_type == "webhook.signature_rejected"
@@ -1643,6 +1668,11 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             event_type=draft.event_type,
         ):
             raise ValueError("webhook audit aggregate identity does not match")
+        if draft.event_type == "ingress.rate_limited" and not (
+            type(metadata["retry_after_seconds"]) is int
+            and 1 <= metadata["retry_after_seconds"] <= 3_600
+        ):
+            raise ValueError("webhook rate-limit retry delay is invalid")
         expected_disposition = {
             "webhook.received": "created",
             "webhook.duplicate_suppressed": "replayed",
@@ -1826,6 +1856,18 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
         }
         if (draft.previous_state, draft.new_state) not in allowed_edges[command]:
             raise ValueError("run transition audit command and states disagree")
+        terminal_failure_origin = metadata.get("terminal_failure_origin")
+        if terminal_failure_origin is not None and (
+            command != "fail"
+            or draft.previous_state != "executing"
+            or draft.new_state != "failed"
+            or terminal_failure_origin not in {origin.value for origin in RunTerminalFailureOrigin}
+            or (
+                terminal_failure_origin == RunTerminalFailureOrigin.RUNTIME_CONTROL.value
+                and draft.reason_code not in TERMINAL_RUNTIME_CONTROL_DENIAL_CODES
+            )
+        ):
+            raise ValueError("run terminal failure origin is invalid")
         fixed_run_reasons = {
             ("mark_validated", "validated"): "input_validated",
             ("activate_plan", "awaiting_approval"): "write_plan_requires_approval",
@@ -2141,6 +2183,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             "action.dispatch_reserved": {"approval_consumed"},
             "action.cancelled": {
                 "operator_cancelled",
+                "parent_run_failed",
                 "runtime_control_denied",
                 "sibling_approval_rejected",
             },
@@ -2200,7 +2243,12 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
                     approval_status == "released"
                     and (
                         draft.approval_decision_id is None
-                        or draft.reason_code not in {"operator_cancelled", "runtime_control_denied"}
+                        or draft.reason_code
+                        not in {
+                            "operator_cancelled",
+                            "parent_run_failed",
+                            "runtime_control_denied",
+                        }
                     )
                 )
                 or (

@@ -275,6 +275,22 @@ class RunSummaryView(RunApiModel):
     instance_url: str
 
 
+class RunTerminalErrorView(RunApiModel):
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,127}$")
+    cause_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
+    source: Literal["run", "step", "read_attempt", "external_action"]
+    step_id: str | None
+    action_id: str | None
+    outcome: str | None
+    final_attempt_number: int | None = Field(default=None, ge=1, le=10)
+    retryable: Literal[False]
+    call_deadline_at: datetime | None
+    run_deadline_at: datetime | None
+    occurred_at: datetime
+    step_url: str | None
+    action_url: str | None
+
+
 class RunResourceView(RunSummaryView):
     transitions: tuple[RunTransitionView, ...] = Field(min_length=1, max_length=64)
     plan: RunPlanView | None
@@ -283,6 +299,7 @@ class RunResourceView(RunSummaryView):
     artifact_summaries: tuple[ArtifactSummaryView, ...] = Field(max_length=10)
     artifacts_truncated: bool
     external_actions: tuple[ExternalActionView, ...] = Field(max_length=100)
+    terminal_error: RunTerminalErrorView | None = None
 
 
 class RunListResponse(RunApiModel):
@@ -370,5 +387,6 @@ __all__ = [
     "RunResourceView",
     "RunStepView",
     "RunSummaryView",
+    "RunTerminalErrorView",
     "RunTimelineResponse",
 ]

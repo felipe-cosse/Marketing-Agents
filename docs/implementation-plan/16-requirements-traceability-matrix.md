@@ -98,7 +98,7 @@ Allowed status values:
 | API-06 | Create/inspect/approve/reject immutable approval requests with auth. | 06, 09 | Approval routes/services | Approval API suite | verified |
 | API-07 | Inspect runs, artifacts, and audit. | 09 | Run/artifact/audit routes | API/timeline tests | verified |
 | API-08 | Validate every input and structured output. | 02, 05, 09, 10 | Schema validation boundaries | API-08 manifest + negative schema/runtime/adapter tests | verified |
-| API-09 | Bound retries/timeouts and expose terminal errors. | 05, 09 | Policies/problem responses | Failure tests | planned |
+| API-09 | Bound retries/timeouts and expose terminal errors. | 05, 09 | Policies/problem responses | Failure tests | verified |
 | WEB-01 | Interactive pan/zoom chart with all 5/12/43. | 12 | OrgChart canvas/layout | UI/browser exact-count tests | planned |
 | WEB-02 | Search/filter department/function/status/capability. | 12 | Toolbar/query state | Component/browser tests | planned |
 | WEB-03 | Agent details include all required metadata/recent runs. | 09, 12 | Detail API/panel | Completeness tests | planned |

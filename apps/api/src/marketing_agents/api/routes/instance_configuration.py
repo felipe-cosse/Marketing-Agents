@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import secrets
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from marketing_agents.api.correlation import request_correlation_id
 from marketing_agents.api.dependencies import (
     InstanceConfigurationExecutor,
     get_instance_configuration_executor,
@@ -577,7 +577,7 @@ async def update_instance_configuration(
             instance_id=instance_id,
             expected_revision=current.configuration_revision,
             patch=patch,
-            correlation_id=f"correlation.instance-configuration.{secrets.token_hex(16)}",
+            correlation_id=request_correlation_id(request),
         )
     except (TypeError, ValueError):
         return _problem_response(

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from marketing_agents import __version__
 from marketing_agents.api.catalog_queries import (
     CatalogQueryExecutor,
     LocalCatalogQueryService,
 )
+from marketing_agents.api.csrf import ProcessLocalCsrfToken
 from marketing_agents.api.dependencies import (
     ApprovalDecisionExecutor,
     ApprovalResourceExecutor,
@@ -21,7 +22,13 @@ from marketing_agents.api.dependencies import (
     RunResourceExecutor,
     WebhookAdmissionExecutor,
 )
-from marketing_agents.api.errors import safe_request_validation_error
+from marketing_agents.api.errors import (
+    safe_http_exception,
+    safe_request_validation_error,
+    safe_unhandled_exception,
+)
+from marketing_agents.api.middleware import Api09TransportSecurityMiddleware
+from marketing_agents.api.openapi import install_problem_openapi
 from marketing_agents.api.routes.approvals import (
     ApprovalPrivateResponseMiddleware,
 )
@@ -46,8 +53,10 @@ from marketing_agents.api.routes.runs import (
 )
 from marketing_agents.api.routes.runs import external_action_router as runtime_actions_router
 from marketing_agents.api.routes.runs import router as runs_router
+from marketing_agents.api.routes.session import router as session_router
 from marketing_agents.api.routes.webhooks import WebhookRequestBoundsMiddleware
 from marketing_agents.api.routes.webhooks import router as webhooks_router
+from marketing_agents.api.schemas.problems import ProblemDetails
 from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
@@ -75,8 +84,16 @@ def create_app(
         version=__version__,
         docs_url="/docs" if active_settings.app_env != "production" else None,
         redoc_url=None,
+        responses={
+            "default": {
+                "model": ProblemDetails,
+                "description": "A safe process-wide API problem occurrence.",
+            }
+        },
     )
     application.state.settings = active_settings
+    csrf_token = ProcessLocalCsrfToken()
+    application.state.csrf_token = csrf_token
     application.state.identity_provider = (
         identity_provider
         if identity_provider is not None
@@ -105,15 +122,20 @@ def create_app(
         RequestValidationError,
         safe_request_validation_error,
     )
+    application.add_exception_handler(StarletteHTTPException, safe_http_exception)
+    application.add_exception_handler(Exception, safe_unhandled_exception)
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
     application.add_middleware(InstanceConfigurationRequestBoundsMiddleware)
     application.add_middleware(WebhookRequestBoundsMiddleware)
-    application.add_middleware(
-        TrustedHostMiddleware, allowed_hosts=list(active_settings.trusted_hosts)
-    )
     application.add_middleware(ApprovalPrivateResponseMiddleware)
     application.add_middleware(Api07PrivateResponseMiddleware)
+    application.add_middleware(
+        Api09TransportSecurityMiddleware,
+        settings=active_settings,
+        csrf_token=csrf_token,
+    )
     application.include_router(health_router)
+    application.include_router(session_router)
     application.include_router(instance_configuration_router)
     application.include_router(manual_work_router)
     application.include_router(webhooks_router)
@@ -126,4 +148,5 @@ def create_app(
     application.include_router(runtime_actions_router)
     application.include_router(approvals_router)
     application.include_router(approval_actions_router)
+    install_problem_openapi(application)
     return application

@@ -26,6 +26,7 @@ from marketing_agents.domain.enums import RunState, WorkMode
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.security.redaction import SecretValue
 
+from tests.support.api import api_request, assert_problem, browser_request
 from tests.support.identity import (
     StaticIdentityProvider,
     human_principal,
@@ -164,16 +165,14 @@ async def _request(
     content: bytes | None = None,
     headers: Any = None,
 ) -> Response:
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        return await client.post(
-            PATH,
-            json=json,
-            content=content,
-            headers=headers,
-        )
+    return await api_request(
+        app,
+        "POST",
+        PATH,
+        json=json,
+        content=content,
+        headers=headers,
+    )
 
 
 def _mutate_and_return(
@@ -217,7 +216,7 @@ async def test_api_04_accepts_default_dry_run_and_retains_only_server_authority(
     assert command.idempotency_key.reveal() == raw_key
     assert command.campaign_brief_id is None
     assert command.demo_scenario_id is None
-    assert command.correlation_id.startswith("correlation.manual-api.")
+    assert command.correlation_id.startswith("correlation.api.")
     assert executor.principals == [_operator()]
     assert raw_key not in repr(command)
     assert raw_key not in response.text
@@ -281,8 +280,7 @@ async def test_api_04_body_is_alias_only_and_cannot_supply_authority(
     executor = FakeManualDryRunExecutor()
     response = await _request(_app(executor), json=body)
 
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "request_validation_failed"
+    assert_problem(response, status_code=422, code="request_validation_failed")
     assert CANARY not in response.text
     assert executor.commands == []
 
@@ -336,8 +334,7 @@ async def test_api_04_rejects_duplicate_or_malformed_retry_keys_without_reflecti
         headers=[("Content-Type", "application/json"), *headers],
     )
 
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Idempotency-Key must contain one valid opaque retry key"}
+    assert_problem(response, status_code=400, code="request_invalid")
     assert CANARY not in response.text
     assert executor.commands == []
 
@@ -361,7 +358,7 @@ async def test_api_04_requires_one_application_json_media_type(
         headers=headers,
     )
 
-    assert response.status_code == 415
+    assert_problem(response, status_code=403, code="browser_request_forbidden")
     assert executor.commands == []
 
     accepted = await _request(
@@ -405,11 +402,7 @@ async def test_api_08_api_04_rejects_non_strict_json_before_executor(body: bytes
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "code": "dry_run_input_invalid",
-        "message": "manual dry-run input is invalid",
-    }
+    assert_problem(response, status_code=422, code="dry_run_input_invalid")
     assert executor.commands == []
 
 
@@ -417,19 +410,22 @@ async def test_api_08_api_04_rejects_non_strict_json_before_executor(body: bytes
 async def test_api_08_api_04_mounted_route_keeps_strict_json_boundary() -> None:
     executor = FakeManualDryRunExecutor()
     parent = FastAPI()
-    parent.mount("/mounted", _app(executor))
+    child = _app(executor)
+    parent.mount("/mounted", child)
     async with AsyncClient(
         transport=ASGITransport(app=parent),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(
+        response = await browser_request(
+            client,
+            "POST",
             "/mounted" + PATH,
+            csrf_app=child,
             content=b'{"input":{"first":1},"input":{"second":2}}',
             headers={"Content-Type": "application/json"},
         )
 
-    assert response.status_code == 422
-    assert response.json()["code"] == "dry_run_input_invalid"
+    assert_problem(response, status_code=422, code="dry_run_input_invalid")
     assert executor.commands == []
 
 
@@ -452,10 +448,9 @@ async def test_api_08_api_04_rejects_encoded_or_ambiguous_json_transport(
         headers=headers,
     )
 
-    assert response.status_code == 415
-    assert response.json() == {"detail": "manual dry-run creation requires application/json"}
+    assert_problem(response, status_code=403, code="browser_request_forbidden")
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["vary"] == "Authorization"
+    assert response.headers["vary"] == "Authorization, Origin"
     assert executor.commands == []
 
 
@@ -469,12 +464,8 @@ async def test_api_04_rejects_deep_json_before_recursive_command_normalization()
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "code": "dry_run_input_invalid",
-        "message": "manual dry-run input is invalid",
-    }
-    assert len(response.content) < 256
+    assert_problem(response, status_code=422, code="dry_run_input_invalid")
+    assert len(response.content) < 512
     assert executor.commands == []
 
     boundary_body = b'{"input":' + (b'{"nested":' * 63) + b"{}" + (b"}" * 63) + b"}"
@@ -496,12 +487,8 @@ async def test_api_04_rejects_raw_body_over_common_limit_even_when_excess_is_whi
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "code": "dry_run_input_invalid",
-        "message": "manual dry-run input is invalid",
-    }
-    assert len(response.content) < 256
+    assert_problem(response, status_code=422, code="dry_run_input_invalid")
+    assert len(response.content) < 512
     assert CANARY not in response.text
     assert executor.commands == []
 
@@ -509,33 +496,39 @@ async def test_api_04_rejects_raw_body_over_common_limit_even_when_excess_is_whi
         yield b'{"input":{}}'
         yield b" " * 1_048_576
 
+    streamed_app = _app(executor)
     async with AsyncClient(
-        transport=ASGITransport(app=_app(executor)),
+        transport=ASGITransport(app=streamed_app),
         base_url="http://testserver",
     ) as client:
-        streamed = await client.post(
+        streamed = await browser_request(
+            client,
+            "POST",
             PATH,
+            csrf_app=streamed_app,
             content=streamed_oversized_body(),
             headers={"Content-Type": "application/json"},
         )
-    assert streamed.status_code == 422
-    assert streamed.json()["code"] == "dry_run_input_invalid"
-    assert len(streamed.content) < 256
+    assert_problem(streamed, status_code=422, code="dry_run_input_invalid")
+    assert len(streamed.content) < 512
     assert executor.commands == []
 
     invalid_long_instance_path = "/api/v1/agent-instances/" + ("x" * 513) + "/dry-runs"
+    invalid_app = _app(executor)
     async with AsyncClient(
-        transport=ASGITransport(app=_app(executor)),
+        transport=ASGITransport(app=invalid_app),
         base_url="http://testserver",
     ) as client:
-        invalid_path = await client.post(
+        invalid_path = await browser_request(
+            client,
+            "POST",
             invalid_long_instance_path,
+            csrf_app=invalid_app,
             content=oversized,
             headers={"Content-Type": "application/json"},
         )
-    assert invalid_path.status_code == 422
-    assert invalid_path.json()["code"] == "dry_run_input_invalid"
-    assert len(invalid_path.content) < 256
+    assert_problem(invalid_path, status_code=422, code="dry_run_input_invalid")
+    assert len(invalid_path.content) < 512
     assert CANARY not in invalid_path.text
     assert executor.commands == []
 
@@ -570,8 +563,7 @@ async def test_api_04_maps_service_failures_to_safe_stable_problems(
     executor.error = ManualDryRunServiceError(code, CANARY)
     response = await _request(_app(executor), json={"input": {}})
 
-    assert response.status_code == expected_status
-    assert response.json()["code"] == expected_code
+    assert_problem(response, status_code=expected_status, code=expected_code)
     assert CANARY not in response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["vary"] == "Authorization"
@@ -586,12 +578,14 @@ async def test_api_04_returns_only_service_sanitized_input_schema_pointers() -> 
         pointer="/input/topic",
     )
     response = await _request(_app(executor), json={"input": {}})
-    assert response.status_code == 422
-    assert response.json() == {
-        "code": "dry_run_input_invalid",
-        "message": "manual dry-run input is invalid",
-        "pointer": "/input/topic",
-    }
+    payload = assert_problem(response, status_code=422, code="dry_run_input_invalid")
+    assert payload["field_errors"] == [
+        {
+            "pointer": "/input/topic",
+            "code": "dry_run_input_invalid",
+            "message": "invalid request field",
+        }
+    ]
     assert CANARY not in response.text
 
     executor.error = ManualDryRunServiceError(
@@ -600,8 +594,12 @@ async def test_api_04_returns_only_service_sanitized_input_schema_pointers() -> 
         pointer=f"/input/{CANARY}/invalid~pointer",
     )
     rejected_pointer = await _request(_app(executor), json={"input": {}})
-    assert rejected_pointer.status_code == 422
-    assert "pointer" not in rejected_pointer.json()
+    rejected_payload = assert_problem(
+        rejected_pointer,
+        status_code=422,
+        code="dry_run_input_invalid",
+    )
+    assert "field_errors" not in rejected_payload
     assert CANARY not in rejected_pointer.text
 
 
@@ -632,8 +630,7 @@ async def test_api_04_missing_synchronous_failing_and_mismatched_executors_fail_
     mismatched = FakeManualDryRunExecutor()
     mismatched.result_mutator = wrong_path
     mismatch = await _request(_app(mismatched), json={"input": {}})
-    assert mismatch.status_code == 503
-    assert mismatch.json()["code"] == "manual_work_unavailable"
+    assert_problem(mismatch, status_code=503, code="manual_work_unavailable")
 
 
 @pytest.mark.asyncio
@@ -675,8 +672,7 @@ async def test_api_04_rejects_result_principal_mode_payload_and_resource_mismatc
         executor = FakeManualDryRunExecutor()
         executor.result_mutator = mutate
         response = await _request(_app(executor), json={"input": {"topic": "safe"}})
-        assert response.status_code == 503
-        assert response.json()["code"] == "manual_work_unavailable"
+        assert_problem(response, status_code=503, code="manual_work_unavailable")
 
 
 @pytest.mark.asyncio
@@ -691,8 +687,7 @@ async def test_api_04_rejects_python_equal_but_json_distinct_result_payload() ->
 
     response = await _request(_app(executor), json={"input": {"accepted": True}})
 
-    assert response.status_code == 503
-    assert response.json()["code"] == "manual_work_unavailable"
+    assert_problem(response, status_code=503, code="manual_work_unavailable")
 
 
 def test_api_04_openapi_is_exact_typed_and_never_accepts_authority_fields() -> None:
@@ -735,7 +730,15 @@ def test_api_04_openapi_is_exact_typed_and_never_accepts_authority_fields() -> N
         "415",
         "422",
         "503",
+        "default",
     }
+    for status_code, error_response in operation["responses"].items():
+        if status_code == "default" or int(status_code) >= 400:
+            assert error_response["content"] == {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ProblemDetails"},
+                }
+            }
     assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ManualDryRunResponse"
     }

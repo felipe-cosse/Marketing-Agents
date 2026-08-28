@@ -37,6 +37,7 @@ from marketing_agents.infrastructure.scheduling.cron_recurrence import (
     CroniterRecurrenceCalculator,
 )
 
+from tests.support.api import api_request, assert_problem, browser_request
 from tests.support.identity import (
     StaticIdentityProvider,
     human_principal,
@@ -271,11 +272,7 @@ async def _request(
     path: str,
     **kwargs: Any,
 ) -> Response:
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        return await client.request(method, path, **kwargs)
+    return await api_request(app, method, path, **kwargs)
 
 
 def _find_instance(body: Mapping[str, Any], instance_id: str) -> Mapping[str, Any]:
@@ -346,8 +343,7 @@ async def test_api_03_viewer_reads_deployment_only_configuration_schema(
             "GET",
             _schema_path(target.instance_id),
         )
-        assert denied_response.status_code == 403
-        assert denied_response.json() == {"detail": "catalog read is forbidden"}
+        assert_problem(denied_response, status_code=403, code="request_forbidden")
         assert denied_executor.schema_principals == []
 
 
@@ -371,8 +367,7 @@ async def test_api_03_mutation_requires_human_local_admin_before_service_lookup(
             headers={"If-Match": etag},
             json={"enabled": not target.enabled},
         )
-        assert response.status_code == 403
-        assert response.json() == {"detail": "instance configuration mutation is forbidden"}
+        assert_problem(response, status_code=403, code="request_forbidden")
         assert executor.read_principals == []
         assert executor.update_principals == []
 
@@ -428,8 +423,7 @@ async def test_api_03_patch_accepts_only_one_json_media_type(
             headers=headers,
             content=raw_body,
         )
-        assert response.status_code == 415
-        assert response.json() == {"detail": "instance configuration requires application/json"}
+        assert_problem(response, status_code=403, code="browser_request_forbidden")
     assert executor.read_principals == []
     assert executor.update_principals == []
 
@@ -490,12 +484,7 @@ async def test_api_08_api_03_patch_rejects_non_strict_json_before_service_lookup
         content=body,
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "code": "configuration_invalid",
-        "message": "instance configuration is invalid",
-        "currentRevision": None,
-    }
+    assert_problem(response, status_code=422, code="configuration_invalid")
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["vary"] == "Authorization"
     assert executor.read_principals == []
@@ -510,13 +499,17 @@ async def test_api_08_api_03_mounted_patch_keeps_strict_json_boundary(
 ) -> None:
     executor = _executor(defaults, compiled)
     parent = FastAPI()
-    parent.mount("/mounted", _app(executor))
+    child = _app(executor)
+    parent.mount("/mounted", child)
     async with AsyncClient(
         transport=ASGITransport(app=parent),
         base_url="http://testserver",
     ) as client:
-        response = await client.patch(
+        response = await browser_request(
+            client,
+            "PATCH",
             "/mounted" + _configuration_path(target.instance_id),
+            csrf_app=child,
             content=b'{"enabled":true,"enabled":false}',
             headers={
                 "Content-Type": "application/json",
@@ -524,8 +517,7 @@ async def test_api_08_api_03_mounted_patch_keeps_strict_json_boundary(
             },
         )
 
-    assert response.status_code == 422
-    assert response.json()["code"] == "configuration_invalid"
+    assert_problem(response, status_code=422, code="configuration_invalid")
     assert executor.read_principals == []
     assert executor.update_principals == []
 
@@ -557,10 +549,9 @@ async def test_api_08_api_03_rejects_encoded_or_ambiguous_json_transport(
         },
     )
 
-    assert response.status_code == 415
-    assert response.json() == {"detail": "instance configuration requires application/json"}
+    assert_problem(response, status_code=403, code="browser_request_forbidden")
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["vary"] == "Authorization"
+    assert response.headers["vary"] == "Authorization, Origin"
     assert executor.read_principals == []
     assert executor.update_principals == []
 
@@ -599,13 +590,8 @@ async def test_api_08_api_03_patch_bounds_depth_and_streamed_bytes_before_servic
     )
 
     for response in (deep, oversized):
-        assert response.status_code == 422
-        assert response.json() == {
-            "code": "configuration_invalid",
-            "message": "instance configuration is invalid",
-            "currentRevision": None,
-        }
-        assert len(response.content) < 256
+        assert_problem(response, status_code=422, code="configuration_invalid")
+        assert len(response.content) < 1_024
     assert executor.read_principals == []
     assert executor.update_principals == []
 
@@ -643,8 +629,11 @@ async def test_api_03_immutable_and_unknown_input_is_rejected_without_reflection
             headers={"If-Match": etag},
             json=payload,
         )
-        assert response.status_code == 422
-        assert response.json()["detail"]["code"] == "request_validation_failed"
+        problem = assert_problem(
+            response,
+            status_code=422,
+            code="request_validation_failed",
+        )
         assert IMMUTABLE_FIELD_CANARY not in response.text
         assert all(
             item
@@ -653,7 +642,7 @@ async def test_api_03_immutable_and_unknown_input_is_rejected_without_reflection
                 "code": "extra_forbidden",
                 "message": "invalid request field",
             }
-            for item in response.json()["detail"]["field_errors"]
+            for item in problem["field_errors"]
         )
     assert executor.read_principals == []
     assert executor.update_principals == []
@@ -685,8 +674,12 @@ async def test_api_03_patch_rejects_empty_null_required_and_coerced_values(
         headers={"If-Match": instance_configuration_etag(target.configuration_revision)},
         json=body,
     )
-    assert response.status_code == 422
-    field_errors = response.json()["detail"]["field_errors"]
+    problem = assert_problem(
+        response,
+        status_code=422,
+        code="request_validation_failed",
+    )
+    field_errors = problem["field_errors"]
     assert any(item["code"] == expected_code for item in field_errors)
     assert executor.read_principals == []
     assert executor.update_principals == []
@@ -848,12 +841,12 @@ async def test_api_03_stale_validator_returns_current_revision_without_mutation(
         headers={"If-Match": instance_configuration_etag(99)},
         json={"enabled": not target.enabled},
     )
-    assert response.status_code == 409
-    assert response.json() == {
-        "code": "configuration_revision_conflict",
-        "message": "instance configuration revision changed",
-        "currentRevision": target.configuration_revision,
-    }
+    problem = assert_problem(
+        response,
+        status_code=409,
+        code="configuration_revision_conflict",
+    )
+    assert problem["current_resource_version"] == target.configuration_revision
     assert response.headers["cache-control"] == "no-store"
     assert len(executor.read_principals) == 1
     assert executor.update_principals == []
@@ -871,8 +864,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         "GET",
         _schema_path(target.instance_id),
     )
-    assert missing.status_code == 503
-    assert missing.json() == {"detail": "instance configuration service unavailable"}
+    assert_problem(missing, status_code=503, code="service_unavailable")
 
     synchronous = SynchronousConfigurationExecutor()
     malformed = await _request(
@@ -880,7 +872,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         "GET",
         _schema_path(target.instance_id),
     )
-    assert malformed.status_code == 503
+    assert_problem(malformed, status_code=503, code="service_unavailable")
     assert synchronous.called is False
 
     throwing = _executor(defaults, compiled)
@@ -890,8 +882,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         "GET",
         _schema_path(target.instance_id),
     )
-    assert failed.status_code == 503
-    assert failed.json()["code"] == "configuration_unavailable"
+    assert_problem(failed, status_code=503, code="configuration_unavailable")
     assert "sensitive-schema-backend-canary" not in failed.text
 
     wrong_schema = _executor(defaults, compiled)
@@ -901,8 +892,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         "GET",
         _schema_path(target.instance_id),
     )
-    assert rejected_schema.status_code == 503
-    assert rejected_schema.json()["code"] == "configuration_unavailable"
+    assert_problem(rejected_schema, status_code=503, code="configuration_unavailable")
 
     wrong_update = _executor(defaults, compiled)
     wrong_update.update_result_override = object()
@@ -913,8 +903,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         headers={"If-Match": instance_configuration_etag(target.configuration_revision)},
         json={"enabled": not target.enabled},
     )
-    assert rejected_update.status_code == 503
-    assert rejected_update.json()["code"] == "configuration_unavailable"
+    assert_problem(rejected_update, status_code=503, code="configuration_unavailable")
 
     mismatched_update = _executor(defaults, compiled)
     mismatched_update.update_result_override = InstanceConfigurationUpdateResult(
@@ -928,8 +917,7 @@ async def test_api_03_missing_malformed_and_failing_executors_fail_closed(
         headers={"If-Match": instance_configuration_etag(target.configuration_revision)},
         json={"enabled": not target.enabled},
     )
-    assert rejected_mismatch.status_code == 503
-    assert rejected_mismatch.json()["code"] == "configuration_unavailable"
+    assert_problem(rejected_mismatch, status_code=503, code="configuration_unavailable")
 
 
 @pytest.mark.asyncio
@@ -961,8 +949,11 @@ async def test_api_03_effective_catalog_reads_and_etags_follow_persisted_configu
             instance_configuration_etag(target.configuration_revision)
         )
 
-        patched = await client.patch(
+        patched = await browser_request(
+            client,
+            "PATCH",
             _configuration_path(target.instance_id),
+            csrf_app=app,
             headers={"If-Match": before_detail["instance"]["configurationEtag"]},
             json={
                 "enabled": not target.enabled,
@@ -1045,8 +1036,7 @@ async def test_api_03_effective_catalog_rejects_template_mismatched_configuratio
     )
 
     response = await _request(_app(executor), "GET", "/api/v1/catalog")
-    assert response.status_code == 503
-    assert response.json()["code"] == "catalog_unavailable"
+    assert_problem(response, status_code=503, code="catalog_unavailable")
     assert "unsupported.source" not in response.text
 
     connector_target = next(
@@ -1083,8 +1073,7 @@ async def test_api_03_effective_catalog_rejects_template_mismatched_configuratio
         "GET",
         "/api/v1/catalog",
     )
-    assert connector_response.status_code == 503
-    assert connector_response.json()["code"] == "catalog_unavailable"
+    assert_problem(connector_response, status_code=503, code="catalog_unavailable")
     assert "mock.social.unregistered" not in connector_response.text
 
 
@@ -1110,20 +1099,15 @@ def test_api_03_openapi_exposes_only_typed_deployment_configuration_contracts(
         "404",
         "422",
         "503",
+        "default",
     }
-    assert schema_operation["responses"]["422"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/InstanceConfigurationRequestValidationError"
-    }
-    schema_forbidden_refs = {
-        item["$ref"]
-        for item in schema_operation["responses"]["403"]["content"]["application/json"]["schema"][
-            "anyOf"
-        ]
-    }
-    assert schema_forbidden_refs == {
-        "#/components/schemas/InstanceConfigurationHttpError",
-        "#/components/schemas/InstanceConfigurationProblem",
-    }
+    for response_status, documented in schema_operation["responses"].items():
+        if response_status != "200":
+            assert documented["content"] == {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ProblemDetails"}
+                }
+            }
 
     patch_operation = openapi["paths"]["/api/v1/agent-instances/{instance_id}/configuration"][
         "patch"
@@ -1164,6 +1148,7 @@ def test_api_03_openapi_exposes_only_typed_deployment_configuration_contracts(
         "422",
         "428",
         "503",
+        "default",
     }
     success_headers = patch_operation["responses"]["200"]["headers"]
     assert success_headers["ETag"]["schema"] == {
@@ -1171,21 +1156,16 @@ def test_api_03_openapi_exposes_only_typed_deployment_configuration_contracts(
         "pattern": '^"instance-configuration-v1-[1-9][0-9]*"$',
         "maxLength": 200,
     }
-    validation_refs = {
-        item["$ref"]
-        for item in patch_operation["responses"]["422"]["content"]["application/json"]["schema"][
-            "anyOf"
-        ]
-    }
-    assert validation_refs == {
-        "#/components/schemas/InstanceConfigurationProblem",
-        "#/components/schemas/InstanceConfigurationRequestValidationError",
-    }
-    validation_detail_schema = openapi["components"]["schemas"][
-        "InstanceConfigurationRequestValidationDetail"
-    ]
-    assert "field_errors" in validation_detail_schema["properties"]
-    assert "fieldErrors" not in validation_detail_schema["properties"]
+    for response_status, documented in patch_operation["responses"].items():
+        if response_status != "200":
+            assert documented["content"] == {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ProblemDetails"}
+                }
+            }
+    problem_schema = openapi["components"]["schemas"]["ProblemDetails"]
+    assert "field_errors" in problem_schema["properties"]
+    assert "fieldErrors" not in problem_schema["properties"]
     patch_schema = openapi["components"]["schemas"]["InstanceConfigurationPatchInput"]
     assert patch_schema["additionalProperties"] is False
     assert set(patch_schema["properties"]) == MUTABLE_FIELDS

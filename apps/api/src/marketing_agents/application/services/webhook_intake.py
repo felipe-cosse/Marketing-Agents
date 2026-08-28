@@ -39,6 +39,10 @@ from marketing_agents.application.services.incoming_work_validation import (
     IncomingWorkValidationError,
     ValidatedIncomingWork,
 )
+from marketing_agents.application.services.webhook_rate_limit import (
+    ProcessLocalWebhookAdmissionRateLimiter,
+    WebhookAdmissionRateLimiterUnavailable,
+)
 from marketing_agents.application.services.work_admission import WorkIdempotencyError
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
@@ -63,10 +67,18 @@ MAX_WEBHOOK_HEADER_BYTES = 65_536
 class WebhookAdmissionServiceError(RuntimeError):
     """Stable body-safe rejection at the webhook application boundary."""
 
-    def __init__(self, code: str, message: str, *, pointer: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        pointer: str | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.pointer = _safe_input_pointer(pointer)
+        self.retry_after_seconds = _safe_retry_after_seconds(retry_after_seconds)
 
 
 class WebhookAdmissionDisposition(StrEnum):
@@ -150,6 +162,12 @@ def _safe_input_pointer(value: object) -> str | None:
     return value
 
 
+def _safe_retry_after_seconds(value: object) -> int | None:
+    if type(value) is not int or not 1 <= value <= 3_600:
+        return None
+    return value
+
+
 def _service_error(code: str, message: str) -> WebhookAdmissionServiceError:
     return WebhookAdmissionServiceError(code, message)
 
@@ -165,6 +183,7 @@ class WebhookAdmissionService:
         resolver: WebhookAdmissionResolver,
         *,
         current_catalog_hash: str,
+        admission_rate_limiter: ProcessLocalWebhookAdmissionRateLimiter | None = None,
     ) -> None:
         if type(dependencies) is not OrchestrationDependencies:
             raise ValueError("webhook service requires exact orchestration dependencies")
@@ -178,6 +197,15 @@ class WebhookAdmissionService:
         self._digest_key = digest_key
         self._source_registry = source_registry
         self._resolver = resolver
+        if admission_rate_limiter is not None and type(admission_rate_limiter) is not (
+            ProcessLocalWebhookAdmissionRateLimiter
+        ):
+            raise ValueError("webhook service requires an exact admission rate limiter")
+        self._admission_rate_limiter = (
+            ProcessLocalWebhookAdmissionRateLimiter()
+            if admission_rate_limiter is None
+            else admission_rate_limiter
+        )
         self._receipt_service = IdempotentWorkRunReceiptService(
             dependencies,
             digest_key,
@@ -225,6 +253,43 @@ class WebhookAdmissionService:
             identity.principal.actor_id,
             correlation_id=command.correlation_id,
         )
+        try:
+            rate_decision = self._admission_rate_limiter.consume(
+                source=identity.source,
+                observed_at=now,
+                max_calls=definition.admission_rate_max_calls,
+                window_seconds=definition.admission_rate_window_seconds,
+            )
+        except (TypeError, ValueError, WebhookAdmissionRateLimiterUnavailable):
+            raise _service_error(
+                "webhook_service_unavailable",
+                "webhook admission is temporarily unavailable",
+            ) from None
+        if not rate_decision.allowed:
+            retry_after_seconds = rate_decision.retry_after_seconds
+            if retry_after_seconds is None:
+                raise _service_error(
+                    "webhook_service_unavailable",
+                    "webhook admission is temporarily unavailable",
+                )
+            try:
+                await self._audit_authenticated_rate_denial(
+                    command,
+                    audit_context=audit_context,
+                    attempt_id=attempt_id,
+                    retry_after_seconds=retry_after_seconds,
+                    now=now,
+                )
+            except Exception:
+                raise _service_error(
+                    "webhook_service_unavailable",
+                    "webhook admission is temporarily unavailable",
+                ) from None
+            raise WebhookAdmissionServiceError(
+                "webhook_rate_limited",
+                "webhook admission rate limit exceeded",
+                retry_after_seconds=retry_after_seconds,
+            )
         try:
             mapped = definition.mapper.parse(command.raw_body)
         except WebhookEnvelopeMappingError as error:
@@ -670,6 +735,38 @@ class WebhookAdmissionService:
                 occurred_at=now,
             )
             await unit_of_work.audits.append_global(event)
+            await unit_of_work.commit()
+
+    async def _audit_authenticated_rate_denial(
+        self,
+        command: WebhookAdmissionCommand,
+        *,
+        audit_context: AuditContext,
+        attempt_id: str,
+        retry_after_seconds: int,
+        now: datetime,
+    ) -> None:
+        """Persist authentication and bounded throttle evidence before returning 429."""
+
+        async with self._dependencies.unit_of_work() as unit_of_work:
+            factory = AuditEventFactory(audit_context)
+            await unit_of_work.audits.append_global_many(
+                (
+                    factory.webhook_signature_validated(
+                        source=command.source,
+                        trigger_id=command.trigger_id,
+                        webhook_attempt_id=attempt_id,
+                        occurred_at=now,
+                    ),
+                    factory.webhook_rate_limited(
+                        source=command.source,
+                        trigger_id=command.trigger_id,
+                        webhook_attempt_id=attempt_id,
+                        retry_after_seconds=retry_after_seconds,
+                        occurred_at=now,
+                    ),
+                )
+            )
             await unit_of_work.commit()
 
     async def _audit_schema_rejected(

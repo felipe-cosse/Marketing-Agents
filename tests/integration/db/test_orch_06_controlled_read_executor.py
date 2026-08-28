@@ -1243,6 +1243,110 @@ async def test_orch_06_permanent_and_adapter_cancellation_are_terminally_classif
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "classification", "outcome", "safe_error_code", "terminal_reason"),
+    (
+        (
+            ReadAdapterPermanentError("invalid_request", "safe permanent failure"),
+            ReadExecutionClassification.PERMANENT_FAILURE,
+            AttemptOutcome.PERMANENT_FAILURE,
+            "invalid_request",
+            "permanent_failure",
+        ),
+        (
+            ReadAdapterCancelledError("adapter_cancelled", "safe adapter cancellation"),
+            ReadExecutionClassification.CANCELLED,
+            AttemptOutcome.CANCELLED,
+            "adapter_cancelled",
+            "cancelled",
+        ),
+        (
+            ReadAdapterTransientError("upstream_unavailable", "safe transient failure"),
+            ReadExecutionClassification.TRANSIENT_FAILURE,
+            AttemptOutcome.TRANSIENT_FAILURE,
+            "upstream_unavailable",
+            "attempts_exhausted",
+        ),
+    ),
+)
+async def test_api_09_terminal_read_failure_fails_run_and_audits_safe_cause(
+    tmp_path: Path,
+    failure: BaseException,
+    classification: ReadExecutionClassification,
+    outcome: AttemptOutcome,
+    safe_error_code: str,
+    terminal_reason: str,
+) -> None:
+    prepared = await _prepare(tmp_path / f"api-09-read-{terminal_reason}.db")
+    try:
+        result = await ControlledReadExecutor(
+            prepared.dependencies,
+            SequenceAdapter([failure]),
+        ).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context(f"api-09-read-{terminal_reason}"),
+        )
+
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(prepared.run_id)
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        assert result.classification is classification
+        assert result.attempt.outcome is outcome
+        assert result.attempt.safe_error_code == safe_error_code
+        assert result.attempt.terminal_reason_code == terminal_reason
+        assert result.step.state is StepState.FAILED
+        assert result.step.terminal_reason_code == terminal_reason
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == terminal_reason
+        assert tuple(event.event_type for event in timeline[-3:]) == (
+            "attempt.completed",
+            "step.transitioned",
+            "run.transitioned",
+        )
+        assert timeline[-3].safe_metadata.values["safe_error_code"] == safe_error_code
+        assert timeline[-2].reason_code == timeline[-1].reason_code == terminal_reason
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_retry_deadline_exhaustion_fails_run_without_extra_attempt(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-09-retry-deadline.db", max_attempts=2)
+    adapter = SequenceAdapter(
+        [ReadAdapterTransientError("temporary_failure", "safe transient failure")]
+    )
+    try:
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            control = await unit_of_work.execution_control.get(prepared.run_id)
+        assert control is not None and control.deadline_at is not None
+        prepared.clock.current = control.deadline_at - timedelta(seconds=1)
+
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context("api-09-retry-deadline"),
+        )
+
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(prepared.run_id)
+            attempts = await unit_of_work.execution_control.list_attempts(
+                prepared.step_id,
+                prepared.operation_key,
+            )
+        assert result.classification is ReadExecutionClassification.TRANSIENT_FAILURE
+        assert result.retry_not_before is None
+        assert result.attempt.terminal_reason_code == "retry_deadline_exceeded"
+        assert result.attempt.safe_error_code == "temporary_failure"
+        assert result.step.state is StepState.FAILED
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == "retry_deadline_exceeded"
+        assert len(attempts) == len(adapter.calls) == 1
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
 async def test_orch_06_effective_attempt_timeout_cancels_adapter_and_fails_exhausted_step(
     tmp_path: Path,
 ) -> None:
@@ -1258,6 +1362,10 @@ async def test_orch_06_effective_attempt_timeout_cancels_adapter_and_fails_exhau
         assert result.attempt.outcome is AttemptOutcome.TRANSIENT_FAILURE
         assert result.attempt.terminal_reason_code == "attempts_exhausted"
         assert result.step.state is StepState.FAILED
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(prepared.run_id)
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == "attempts_exhausted"
     finally:
         await prepared.runtime.dispose()
 
@@ -1385,8 +1493,15 @@ async def test_orch_06_restart_expires_open_attempt_then_retries_or_fails_termin
                 prepared.operation_key,
             )
             final_control = await unit_of_work.execution_control.get(prepared.run_id)
+            final_run = await unit_of_work.runs.get(prepared.run_id)
         assert len(final_attempts) == max_attempts
         assert final_control is not None and final_control.model_calls == 1
+        assert final_run is not None
+        if max_attempts == 1:
+            assert final_run.state is RunState.FAILED
+            assert final_run.terminal_reason_code == "attempts_exhausted"
+        else:
+            assert final_run.state is RunState.EXECUTING
     finally:
         await prepared.runtime.dispose()
 

@@ -930,7 +930,11 @@ class SQLAlchemyExternalActionRepository:
         require_id(run_id, "runtime-cancel Run ID")
         require_digest(plan_hash, "runtime-cancel plan hash")
         require_id(reason_code, "runtime-cancel reason code")
-        if reason_code not in {"operator_cancelled", "runtime_control_denied"}:
+        if reason_code not in {
+            "operator_cancelled",
+            "parent_run_failed",
+            "runtime_control_denied",
+        }:
             raise ValueError("runtime-cancel reason code is not allowlisted")
         require_utc(occurred_at, "runtime-cancel time")
         if type(expected_version) is not int or expected_version < 1:

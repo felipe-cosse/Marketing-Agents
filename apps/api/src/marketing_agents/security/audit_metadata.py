@@ -36,7 +36,7 @@ MAX_AUDIT_METADATA_ARRAY = 256
 MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_BYTES = 65_536
 MAX_INSTANCE_CONFIGURATION_AUDIT_METADATA_KEYS = 512
 
-_RUN_FIELDS = frozenset({"command"})
+_RUN_FIELDS = frozenset({"command", "terminal_failure_origin"})
 _PLAN_FIELDS = frozenset(
     {
         "catalog_content_hash",
@@ -119,8 +119,12 @@ _WEBHOOK_SCHEMA_REJECTION_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | froze
         "workflow_id",
     }
 )
+_WEBHOOK_RATE_LIMIT_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | frozenset(
+    {"retry_after_seconds"}
+)
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
     "ingress.manual_received": _MANUAL_WORK_AUDIT_FIELDS,
+    "ingress.rate_limited": _WEBHOOK_RATE_LIMIT_AUDIT_FIELDS,
     "ingress.schema_rejected": _SCHEMA_REJECTION_AUDIT_FIELDS,
     "webhook.signature_validated": _WEBHOOK_SIGNATURE_AUDIT_FIELDS,
     "webhook.signature_rejected": _WEBHOOK_SIGNATURE_AUDIT_FIELDS,
@@ -318,7 +322,12 @@ _APPROVAL_ACTION_STATES = frozenset(
 )
 _APPROVAL_DECISIONS = frozenset({"approve", "reject"})
 _CLOSURE_REASONS = frozenset(
-    {"operator_cancelled", "runtime_control_denied", "sibling_approval_rejected"}
+    {
+        "operator_cancelled",
+        "parent_run_failed",
+        "runtime_control_denied",
+        "sibling_approval_rejected",
+    }
 )
 _SUPERSESSION_REASONS = frozenset(
     {"approval_set_rejected", "approval_set_superseded", "run_cancelled"}

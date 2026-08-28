@@ -69,7 +69,6 @@ from marketing_agents.domain.step_lifecycle import (
     NoStepTransitionContext,
     StepLifecycleCommand,
     StepTerminalContext,
-    StepTransitionContext,
     transition_step,
 )
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
@@ -548,36 +547,50 @@ class ControlledReadExecutor:
                         AuditEventFactory(audit_context).attempt_completed(completed.attempt)
                     ]
                     if completed.retry_not_before is None:
-                        transition = transition_step(
-                            step,
-                            StepLifecycleCommand.FAIL,
-                            StepTerminalContext(
-                                "run_cancelled"
-                                if cancellation_observed
-                                else completed.terminal_reason_code or "retry_deadline_exceeded"
-                            ),
-                            reserved_at,
+                        terminal_reason = (
+                            "run_cancelled"
+                            if cancellation_observed
+                            else completed.terminal_reason_code or "retry_deadline_exceeded"
                         )
-                        applied = await unit_of_work.run_steps.apply_transition(
-                            expected_run_version=run.version,
-                            expected_run_state=run.state,
-                            expected_version=step.version,
-                            expected_state=StepState.EXECUTING,
-                            result=transition,
-                        )
-                        if not applied:
-                            raise ControlledReadExecutorError(
-                                "stale_recovery_conflict",
-                                "expired READ attempt lost its step recovery fence",
-                                step_id=step.id,
+                        if run.state is RunState.EXECUTING and not cancellation_observed:
+                            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                                unit_of_work,
+                                run_id=run.id,
+                                failed_step_id=step.id,
+                                plan_hash=step.plan_hash,
+                                failure_code=terminal_reason,
+                                occurred_at=reserved_at,
+                                audit_context=audit_context,
                             )
-                        recovery_events.append(
-                            AuditEventFactory(audit_context).step_transition(
-                                transition.step,
-                                transition.transition,
+                            recovery_events.extend(cleanup.audit_events)
+                            recovered_step = cleanup.denied_step
+                        else:
+                            transition = transition_step(
+                                step,
+                                StepLifecycleCommand.FAIL,
+                                StepTerminalContext(terminal_reason),
+                                reserved_at,
                             )
-                        )
-                        recovered_step = transition.step
+                            applied = await unit_of_work.run_steps.apply_transition(
+                                expected_run_version=run.version,
+                                expected_run_state=run.state,
+                                expected_version=step.version,
+                                expected_state=StepState.EXECUTING,
+                                result=transition,
+                            )
+                            if not applied:
+                                raise ControlledReadExecutorError(
+                                    "stale_recovery_conflict",
+                                    "expired READ attempt lost its step recovery fence",
+                                    step_id=step.id,
+                                )
+                            recovery_events.append(
+                                AuditEventFactory(audit_context).step_transition(
+                                    transition.step,
+                                    transition.transition,
+                                )
+                            )
+                            recovered_step = transition.step
                     await unit_of_work.audits.append_many(tuple(recovery_events))
                     await unit_of_work.commit()
                     return _RecoveredRead(
@@ -986,17 +999,12 @@ class ControlledReadExecutor:
                         completion_events.extend((denial_event, *cleanup.audit_events))
                         updated_step = cleanup.denied_step
                     elif effective_classification is ReadExecutionClassification.SUCCEEDED:
-                        command = StepLifecycleCommand.SUCCEED
-                        context: StepTransitionContext = NoStepTransitionContext()
-                    else:
-                        command = StepLifecycleCommand.FAIL
-                        context = StepTerminalContext(
-                            "run_cancelled"
-                            if cancellation_observed
-                            else completed.terminal_reason_code or "unclassified_failure"
+                        transition = transition_step(
+                            step,
+                            StepLifecycleCommand.SUCCEED,
+                            NoStepTransitionContext(),
+                            completed_at,
                         )
-                    if effective_runtime_denial_code is None:
-                        transition = transition_step(step, command, context, completed_at)
                         applied = await unit_of_work.run_steps.apply_transition(
                             expected_run_version=run.version,
                             expected_run_state=run.state,
@@ -1010,6 +1018,47 @@ class ControlledReadExecutor:
                             audit_factory.step_transition(transition.step, transition.transition)
                         )
                         updated_step = transition.step
+                    else:
+                        terminal_reason = (
+                            "run_cancelled"
+                            if cancellation_observed
+                            else completed.terminal_reason_code or "unclassified_failure"
+                        )
+                        if run.state is RunState.EXECUTING and not cancellation_observed:
+                            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                                unit_of_work,
+                                run_id=run.id,
+                                failed_step_id=step.id,
+                                plan_hash=step.plan_hash,
+                                failure_code=terminal_reason,
+                                occurred_at=completed_at,
+                                audit_context=audit_context,
+                            )
+                            completion_events.extend(cleanup.audit_events)
+                            updated_step = cleanup.denied_step
+                        else:
+                            transition = transition_step(
+                                step,
+                                StepLifecycleCommand.FAIL,
+                                StepTerminalContext(terminal_reason),
+                                completed_at,
+                            )
+                            applied = await unit_of_work.run_steps.apply_transition(
+                                expected_run_version=run.version,
+                                expected_run_state=run.state,
+                                expected_version=step.version,
+                                expected_state=StepState.EXECUTING,
+                                result=transition,
+                            )
+                            if not applied:
+                                raise _CompletionConflict("parent Run or READ step changed")
+                            completion_events.append(
+                                audit_factory.step_transition(
+                                    transition.step,
+                                    transition.transition,
+                                )
+                            )
+                            updated_step = transition.step
                 await unit_of_work.audits.append_many(tuple(completion_events))
                 await unit_of_work.commit()
                 return ControlledReadResult(

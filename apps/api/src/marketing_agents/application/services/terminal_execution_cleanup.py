@@ -8,9 +8,11 @@ from datetime import datetime
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.approval import AuthorizationSetStatus
 from marketing_agents.domain.audit import (
-    RUNTIME_CONTROL_DENIAL_CODES,
+    TERMINAL_RUNTIME_CONTROL_DENIAL_CODES,
     AuditContext,
     AuditEventDraft,
+    RunTerminalFailureOrigin,
+    normalize_audit_reason_code,
 )
 from marketing_agents.domain.entities import ExternalAction, Run, RunStep
 from marketing_agents.domain.enums import Effect, ExternalActionState, RunState, StepState
@@ -21,6 +23,7 @@ from marketing_agents.domain.run_lifecycle import (
     RunTransitionResult,
     transition_run,
 )
+from marketing_agents.domain.runtime_policy import AttemptKind
 from marketing_agents.domain.step_lifecycle import (
     StepLifecycleCommand,
     StepTerminalContext,
@@ -30,6 +33,7 @@ from marketing_agents.domain.step_lifecycle import (
 from marketing_agents.domain.validation import require_digest, require_id, require_utc
 
 from .audit_events import AuditEventFactory
+from .run_cancellation import _executing_read_disposition
 
 
 class TerminalExecutionCleanupError(RuntimeError):
@@ -52,7 +56,7 @@ class TerminalExecutionCleanupResult:
 
 
 class TerminalExecutionCleanupService:
-    """Close all unstarted work and fail one runtime-denied executing plan atomically."""
+    """Close all unstarted work and fail one executing plan atomically."""
 
     async def fail_runtime_control_in_uow(
         self,
@@ -65,13 +69,51 @@ class TerminalExecutionCleanupService:
         occurred_at: datetime,
         audit_context: AuditContext,
     ) -> TerminalExecutionCleanupResult:
-        require_id(run_id, "terminal-cleanup Run ID")
-        require_id(denied_step_id, "terminal-cleanup denied step ID")
-        require_digest(plan_hash, "terminal-cleanup plan hash")
         require_id(denial_code, "terminal-cleanup denial code")
+        if denial_code not in TERMINAL_RUNTIME_CONTROL_DENIAL_CODES:
+            raise ValueError("terminal cleanup requires a terminal runtime-control denial code")
+        return await self.fail_execution_in_uow(
+            unit_of_work,
+            run_id=run_id,
+            failed_step_id=denied_step_id,
+            plan_hash=plan_hash,
+            failure_code=denial_code,
+            sibling_reason_code="runtime_control_denied",
+            _failure_origin=RunTerminalFailureOrigin.RUNTIME_CONTROL,
+            occurred_at=occurred_at,
+            audit_context=audit_context,
+        )
+
+    async def fail_execution_in_uow(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        run_id: str,
+        failed_step_id: str,
+        plan_hash: str,
+        failure_code: str,
+        occurred_at: datetime,
+        audit_context: AuditContext,
+        focal_action_id: str | None = None,
+        sibling_reason_code: str = "parent_run_failed",
+        _failure_origin: RunTerminalFailureOrigin = RunTerminalFailureOrigin.ORDINARY_EXECUTION,
+    ) -> TerminalExecutionCleanupResult:
+        """Fail one step/Run and close only siblings with no external call in flight."""
+
+        require_id(run_id, "terminal-cleanup Run ID")
+        require_id(failed_step_id, "terminal-cleanup failed step ID")
+        require_digest(plan_hash, "terminal-cleanup plan hash")
+        require_id(failure_code, "terminal-cleanup failure code")
+        require_id(sibling_reason_code, "terminal-cleanup sibling reason code")
         require_utc(occurred_at, "terminal-cleanup time")
-        if denial_code not in RUNTIME_CONTROL_DENIAL_CODES:
-            raise ValueError("terminal cleanup requires a runtime-control denial code")
+        if focal_action_id is not None:
+            require_id(focal_action_id, "terminal-cleanup focal action ID")
+        if type(_failure_origin) is not RunTerminalFailureOrigin:
+            raise TypeError("terminal cleanup requires an exact failure-origin witness")
+        if normalize_audit_reason_code(failure_code) != failure_code:
+            raise ValueError("terminal cleanup requires a safe terminal failure code")
+        if normalize_audit_reason_code(sibling_reason_code) != sibling_reason_code:
+            raise ValueError("terminal cleanup requires a safe sibling reason code")
         run = await unit_of_work.runs.get(run_id)
         if run is None or run.state is not RunState.EXECUTING:
             raise TerminalExecutionCleanupError(
@@ -85,17 +127,23 @@ class TerminalExecutionCleanupService:
                 "terminal_cleanup_plan_invalid",
                 "terminal runtime cleanup cannot validate the sealed plan",
             ) from exc
-        denied_step = next((step for step in steps if step.id == denied_step_id), None)
+        denied_step = next((step for step in steps if step.id == failed_step_id), None)
         if denied_step is None or denied_step.state not in {StepState.READY, StepState.EXECUTING}:
             raise TerminalExecutionCleanupError(
                 "terminal_cleanup_step_conflict",
                 "terminal runtime cleanup lost the denied step",
             )
+        control = await unit_of_work.execution_control.get(run_id)
+        if control is None or control.policy_hash != plan_hash:
+            raise TerminalExecutionCleanupError(
+                "terminal_cleanup_control_invalid",
+                "terminal runtime cleanup lacks the exact sealed execution control",
+            )
 
         write_steps = tuple(step for step in steps if step.effect is Effect.WRITE)
         actions: tuple[ExternalAction, ...] = ()
         if not write_steps:
-            if run.approval_required:
+            if run.approval_required or focal_action_id is not None:
                 raise TerminalExecutionCleanupError(
                     "terminal_cleanup_action_set_invalid",
                     "approval-required runtime cleanup has no sealed WRITE steps",
@@ -138,6 +186,14 @@ class TerminalExecutionCleanupService:
                     "terminal_cleanup_action_set_invalid",
                     "terminal runtime cleanup action rows do not cover the released WRITE set",
                 )
+            if focal_action_id is not None and (
+                (focal_action := action_by_id.get(focal_action_id)) is None
+                or focal_action.step_id != failed_step_id
+            ):
+                raise TerminalExecutionCleanupError(
+                    "terminal_cleanup_focal_action_invalid",
+                    "terminal runtime cleanup lost its exact focal WRITE action",
+                )
         else:
             raise TerminalExecutionCleanupError(
                 "terminal_cleanup_action_set_invalid",
@@ -147,7 +203,8 @@ class TerminalExecutionCleanupService:
         cancelled_pairs: list[tuple[ExternalAction, ExternalAction]] = []
         for action in actions:
             if (
-                action.state
+                action.id == focal_action_id
+                or action.state
                 not in {
                     ExternalActionState.DISPATCH_RESERVED,
                     ExternalActionState.DISPATCHING,
@@ -161,7 +218,7 @@ class TerminalExecutionCleanupService:
                 plan_hash=plan_hash,
                 expected_version=action.version,
                 occurred_at=occurred_at,
-                reason_code="runtime_control_denied",
+                reason_code=sibling_reason_code,
             )
             if cancelled is None:
                 raise TerminalExecutionCleanupError(
@@ -174,7 +231,7 @@ class TerminalExecutionCleanupService:
         denied_transition = transition_step(
             denied_step,
             StepLifecycleCommand.FAIL,
-            StepTerminalContext(denial_code),
+            StepTerminalContext(failure_code),
             occurred_at,
         )
         if not await unit_of_work.run_steps.apply_transition(
@@ -189,18 +246,39 @@ class TerminalExecutionCleanupService:
                 "denied step changed before terminal cleanup committed",
             )
 
-        failed_pre_call_transitions = tuple(
-            transition_step(
-                step,
-                StepLifecycleCommand.FAIL,
-                StepTerminalContext("runtime_control_denied"),
-                occurred_at,
-            )
-            for step in steps
-            if step.id != denied_step.id
-            and step.id in cancelled_step_ids
-            and step.state is StepState.EXECUTING
-        )
+        failed_pre_call_results: list[StepTransitionResult] = []
+        for step in steps:
+            if step.id == denied_step.id or step.state is not StepState.EXECUTING:
+                continue
+            close_without_external_call = step.id in cancelled_step_ids
+            if step.effect is Effect.READ:
+                if step.runtime_policy.attempt_kind is AttemptKind.NO_CALL:
+                    close_without_external_call = True
+                else:
+                    try:
+                        disposition = await _executing_read_disposition(
+                            unit_of_work,
+                            run_id=run_id,
+                            plan_hash=plan_hash,
+                            control_version=control.version,
+                            step=step,
+                        )
+                    except (RuntimeError, ValueError) as exc:
+                        raise TerminalExecutionCleanupError(
+                            "terminal_cleanup_attempt_lineage_invalid",
+                            "executing READ sibling lacks exact attempt lineage",
+                        ) from exc
+                    close_without_external_call = disposition == "retry_backoff"
+            if close_without_external_call:
+                failed_pre_call_results.append(
+                    transition_step(
+                        step,
+                        StepLifecycleCommand.FAIL,
+                        StepTerminalContext(sibling_reason_code),
+                        occurred_at,
+                    )
+                )
+        failed_pre_call_transitions = tuple(failed_pre_call_results)
         for transition in failed_pre_call_transitions:
             if not await unit_of_work.run_steps.apply_transition(
                 expected_run_version=run.version,
@@ -211,14 +289,14 @@ class TerminalExecutionCleanupService:
             ):
                 raise TerminalExecutionCleanupError(
                     "terminal_cleanup_step_conflict",
-                    "pre-call WRITE step changed before terminal cleanup committed",
+                    "non-call sibling step changed before terminal cleanup committed",
                 )
 
         skipped_transitions = tuple(
             transition_step(
                 step,
                 StepLifecycleCommand.SKIP,
-                StepTerminalContext("runtime_control_denied"),
+                StepTerminalContext(sibling_reason_code),
                 occurred_at,
             )
             for step in steps
@@ -244,7 +322,7 @@ class TerminalExecutionCleanupService:
         run_transition = transition_run(
             run,
             RunLifecycleCommand.FAIL,
-            FailureContext(RunFailurePhase.EXECUTION, denial_code),
+            FailureContext(RunFailurePhase.EXECUTION, failure_code),
             occurred_at,
         )
         if not await unit_of_work.runs.apply_transition(
@@ -275,7 +353,11 @@ class TerminalExecutionCleanupService:
                 factory.step_transition(transition.step, transition.transition)
                 for transition in skipped_transitions
             ),
-            factory.run_transition(run_transition.run, run_transition.transition),
+            factory.run_transition(
+                run_transition.run,
+                run_transition.transition,
+                terminal_failure_origin=_failure_origin,
+            ),
         )
         return TerminalExecutionCleanupResult(
             run=run_transition.run,

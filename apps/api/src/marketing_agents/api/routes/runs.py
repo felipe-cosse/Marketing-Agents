@@ -45,6 +45,7 @@ from marketing_agents.api.schemas.runs import (
     RunStepTransitionView,
     RunStepView,
     RunSummaryView,
+    RunTerminalErrorView,
     RunTimelineEventView,
     RunTimelineResponse,
     RunTransitionView,
@@ -71,6 +72,7 @@ from marketing_agents.application.services.run_resources import (
     RunRoutingAssignmentResource,
     RunStepResource,
     RunStepTransitionResource,
+    RunTerminalErrorResource,
     RunTimelineEvent,
     RunTimelinePage,
     RunTimelineQuery,
@@ -685,6 +687,53 @@ def _resource_view(item: RunResource) -> RunResourceView:
             ),
             artifacts_truncated=item.artifacts_truncated,
             external_actions=tuple(_action_view(value) for value in item.external_actions),
+            terminal_error=_terminal_error_view(item.run_id, item.terminal_error),
+        )
+    except (AttributeError, TypeError, ValueError):
+        _raise_unavailable()
+
+
+def _terminal_error_view(
+    run_id: str,
+    item: RunTerminalErrorResource | None,
+) -> RunTerminalErrorView | None:
+    if item is None:
+        return None
+    if type(item) is not RunTerminalErrorResource:
+        _raise_unavailable()
+    expected_step_url = (
+        None if item.step_id is None else f"/api/v1/runs/{run_id}/steps/{item.step_id}"
+    )
+    expected_action_url = (
+        None if item.action_id is None else f"/api/v1/external-actions/{item.action_id}"
+    )
+    if (
+        item.retryable is not False
+        or item.step_url != expected_step_url
+        or item.action_url != expected_action_url
+        or (item.source == "run" and (item.step_id is not None or item.action_id is not None))
+        or (
+            item.source in {"step", "read_attempt"}
+            and (item.step_id is None or item.action_id is not None)
+        )
+        or (item.source == "external_action" and (item.step_id is None or item.action_id is None))
+    ):
+        _raise_unavailable()
+    try:
+        return RunTerminalErrorView(
+            code=item.code,
+            cause_code=item.cause_code,
+            source=cast(Any, item.source),
+            step_id=item.step_id,
+            action_id=item.action_id,
+            outcome=item.outcome,
+            final_attempt_number=item.final_attempt_number,
+            retryable=False,
+            call_deadline_at=item.call_deadline_at,
+            run_deadline_at=item.run_deadline_at,
+            occurred_at=item.occurred_at,
+            step_url=item.step_url,
+            action_url=item.action_url,
         )
     except (AttributeError, TypeError, ValueError):
         _raise_unavailable()

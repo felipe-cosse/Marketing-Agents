@@ -39,6 +39,7 @@ from tests.integration.db.test_run_08_approval_persistence import (
     _runtime,
     _seed_run_and_plan,
 )
+from tests.support.api import assert_problem, browser_request
 from tests.support.identity import (
     FalseyStaticIdentityProvider,
     StaticIdentityProvider,
@@ -154,8 +155,11 @@ async def test_run_10_real_route_uses_local_actor_and_returns_only_resource_stat
             transport=ASGITransport(app=application),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(
+            response = await browser_request(
+                client,
+                "POST",
                 _route(request.id, decision_path),
+                csrf_app=application,
                 json={
                     **_body(request.action_hash),
                     "reason": reason_canary,
@@ -196,7 +200,7 @@ async def test_run_10_real_route_uses_local_actor_and_returns_only_resource_stat
         assert decision.decision == decision_kind.value
         assert decision.actor_id == "local-operator"
         assert decision.authentication_method == "local_fixed"
-        assert decision.correlation_id.startswith("correlation.approval-api.")
+        assert decision.correlation_id.startswith("correlation.api.")
         assert (attempts, receipts) == (0, 0)
     finally:
         await runtime.dispose()
@@ -244,9 +248,14 @@ async def test_run_10_route_role_matrix_denies_before_executor(
         transport=ASGITransport(app=application),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(_route(decision=decision_path), json=_body())
-    assert response.status_code == 403
-    assert response.json() == {"detail": "approval decision is forbidden"}
+        response = await browser_request(
+            client,
+            "POST",
+            _route(decision=decision_path),
+            csrf_app=application,
+            json=_body(),
+        )
+    assert_problem(response, status_code=403, code="request_forbidden")
     assert executor.calls == []
 
 
@@ -265,9 +274,14 @@ async def test_run_10_route_missing_identity_is_unauthorized_before_executor(
         transport=ASGITransport(app=application),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(_route(decision=decision_path), json=_body())
-    assert response.status_code == 401
-    assert response.json() == {"detail": "authentication required"}
+        response = await browser_request(
+            client,
+            "POST",
+            _route(decision=decision_path),
+            csrf_app=application,
+            json=_body(),
+        )
+    assert_problem(response, status_code=401, code="authentication_required")
     assert executor.calls == []
 
 
@@ -306,7 +320,13 @@ async def test_run_10_forged_body_authority_and_decision_never_reach_executor(
         transport=ASGITransport(app=application),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(_route(), json=forged)
+        response = await browser_request(
+            client,
+            "POST",
+            _route(),
+            csrf_app=application,
+            json=forged,
+        )
     assert response.status_code == 422
     assert "forged-value" not in response.text
     assert executor.calls == []
@@ -331,33 +351,50 @@ async def test_run_10_spoofed_header_and_oversized_reason_fail_without_secret_ec
         transport=ASGITransport(app=application),
         base_url="http://testserver",
     ) as client:
-        spoofed = await client.post(
+        spoofed = await browser_request(
+            client,
+            "POST",
             _route(),
+            csrf_app=application,
             json=_body(),
             headers={"X-Actor-ID": "principal.forged"},
         )
-        invalid_reason = await client.post(
+        invalid_reason = await browser_request(
+            client,
+            "POST",
             _route(),
+            csrf_app=application,
             json={**_body(), "reason": reason_canary},
         )
         field_name_canary = "secret-field-name-canary"
-        many_extras = await client.post(
+        many_extras = await browser_request(
+            client,
+            "POST",
             _route(),
+            csrf_app=application,
             json={
                 **_body(),
                 field_name_canary: "secret-field-value-canary",
                 **{f"untrusted-extra-{index}": index for index in range(100)},
             },
         )
-    assert spoofed.status_code == 400
-    assert invalid_reason.status_code == 422
+    assert_problem(spoofed, status_code=400, code="request_invalid")
+    assert_problem(
+        invalid_reason,
+        status_code=422,
+        code="request_validation_failed",
+    )
     assert reason_canary not in invalid_reason.text
     assert '"input"' not in invalid_reason.text
     assert '"ctx"' not in invalid_reason.text
-    assert many_extras.status_code == 422
+    extras_payload = assert_problem(
+        many_extras,
+        status_code=422,
+        code="request_validation_failed",
+    )
     assert field_name_canary not in many_extras.text
     assert "secret-field-value-canary" not in many_extras.text
-    field_errors = many_extras.json()["detail"]["field_errors"]
+    field_errors = extras_payload["field_errors"]
     assert len(field_errors) == 32
     assert {item["pointer"] for item in field_errors} == {"/body"}
     assert executor.calls == []
@@ -394,13 +431,18 @@ async def test_run_10_route_maps_service_errors_without_sensitive_detail(
         transport=ASGITransport(app=application),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(_route(), json=_body())
-    assert response.status_code == expected_status
-    assert response.json()["detail"]["code"] == safe_code
+        response = await browser_request(
+            client,
+            "POST",
+            _route(),
+            csrf_app=application,
+            json=_body(),
+        )
+    assert_problem(response, status_code=expected_status, code=safe_code)
     assert "sensitive-service-error-canary" not in response.text
     assert len(executor.calls) == 1
     assert executor.calls[0][0].decision is ApprovalDecisionKind.APPROVE
-    assert executor.calls[0][0].correlation_id.startswith("correlation.approval-api.")
+    assert executor.calls[0][0].correlation_id.startswith("correlation.api.")
 
 
 @pytest.mark.asyncio
@@ -431,12 +473,14 @@ async def test_run_10_real_service_rechecks_stored_policy_after_route_guard(
             transport=ASGITransport(app=application),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(
+            response = await browser_request(
+                client,
+                "POST",
                 _route(request.id),
+                csrf_app=application,
                 json=_body(request.action_hash),
             )
-        assert response.status_code == 403
-        assert response.json()["detail"]["code"] == "approval_scope_missing"
+        assert_problem(response, status_code=403, code="approval_scope_missing")
         async with runtime.session_factory() as session:
             decisions = int(
                 (await session.execute(select(func.count(ApprovalDecisionRecord.id)))).scalar_one()
@@ -486,17 +530,14 @@ async def test_run_10_route_rejects_executor_result_that_disagrees_with_fixed_pa
             transport=ASGITransport(app=application),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(
+            response = await browser_request(
+                client,
+                "POST",
                 _route(request.id, "reject"),
+                csrf_app=application,
                 json=_body(request.action_hash),
             )
-        assert response.status_code == 409
-        assert response.json() == {
-            "detail": {
-                "code": "approval_conflict",
-                "message": "approval request could not be decided",
-            }
-        }
+        assert_problem(response, status_code=409, code="approval_conflict")
         assert len(executor.calls) == 1
         assert executor.calls[0].decision is ApprovalDecisionKind.REJECT
     finally:

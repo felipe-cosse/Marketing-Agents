@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import secrets
 from dataclasses import replace
 from typing import Annotated
 
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from marketing_agents.api.correlation import request_correlation_id
 from marketing_agents.api.dependencies import (
     ManualDryRunExecutor,
     get_manual_dry_run_executor,
@@ -445,7 +445,7 @@ async def create_agent_instance_dry_run(
             idempotency_key=idempotency_key,
             campaign_brief_id=body.campaign_brief_id,
             demo_scenario_id=body.demo_scenario_id,
-            correlation_id=f"correlation.manual-api.{secrets.token_hex(16)}",
+            correlation_id=request_correlation_id(request),
         )
     except (TypeError, ValueError):
         return _problem_response(

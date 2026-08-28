@@ -29,11 +29,25 @@ from marketing_agents.application.services.artifact_resources import (
 from marketing_agents.application.services.connector_output_projection import (
     bounded_connector_output_projection,
 )
-from marketing_agents.domain.audit import AuditEvent
+from marketing_agents.domain.audit import (
+    AuditEvent,
+    normalize_audit_reason_code,
+)
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import ConnectorActionReceipt, ExternalAction, RunStep
-from marketing_agents.domain.enums import ApprovalStatus, Effect, RunState
-from marketing_agents.domain.execution_control import RunExecutionControl
+from marketing_agents.domain.enums import (
+    ApprovalStatus,
+    Effect,
+    ExternalActionState,
+    RunState,
+    StepState,
+)
+from marketing_agents.domain.execution_control import (
+    SAFE_ATTEMPT_ERROR_CODES,
+    AttemptOutcome,
+    ExecutionAttempt,
+    RunExecutionControl,
+)
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand
 from marketing_agents.domain.runtime_policy import (
@@ -55,6 +69,22 @@ _RUN_CURSOR_PREFIX = "run-page-v1."
 _TIMELINE_CURSOR_PREFIX = "run-timeline-v1."
 _RUN_FILTER_DOMAIN = b"marketing-agents:run-page-filter:v1\x00"
 _STATUS_ETAG_DOMAIN = b"marketing-agents:instance-runtime-status:v1\x00"
+_POST_CALL_READ_RUNTIME_DENIAL_CODES = frozenset(
+    {
+        "model_output_tokens_exceeded",
+        "model_output_tokens_invalid",
+        "output_payload_too_large",
+        "output_schema_invalid",
+    }
+)
+_READ_TERMINAL_CODES_REQUIRING_ATTEMPT = _POST_CALL_READ_RUNTIME_DENIAL_CODES | frozenset(
+    {
+        "attempts_exhausted",
+        "cancelled",
+        "permanent_failure",
+        "retry_deadline_exceeded",
+    }
+)
 
 
 class RunResourceServiceError(ValueError):
@@ -265,6 +295,25 @@ class ExternalActionResource:
 
 
 @dataclass(frozen=True, slots=True)
+class RunTerminalErrorResource:
+    """One safe operator-facing explanation for a failed Run."""
+
+    code: str
+    cause_code: str | None
+    source: str
+    step_id: str | None
+    action_id: str | None
+    outcome: str | None
+    final_attempt_number: int | None
+    retryable: bool
+    call_deadline_at: datetime | None
+    run_deadline_at: datetime | None
+    occurred_at: datetime
+    step_url: str | None
+    action_url: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class RunResource:
     run_id: str
     work_item_id: str
@@ -292,6 +341,7 @@ class RunResource:
     timeline_url: str
     artifacts_url: str
     instance_url: str
+    terminal_error: RunTerminalErrorResource | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,6 +877,153 @@ def _project_action(action: ExternalAction) -> ExternalActionResource:
     )
 
 
+def _validated_terminal_attempt(
+    step: RunStep,
+    attempts: tuple[ExecutionAttempt, ...],
+    control: RunExecutionControl,
+) -> ExecutionAttempt | None:
+    if type(attempts) is not tuple or any(
+        type(value) is not ExecutionAttempt
+        or value.run_id != step.run_id
+        or value.step_id != step.id
+        or value.operation_key != step.runtime_policy.operation_key
+        or value.policy_hash != control.policy_hash
+        for value in attempts
+    ):
+        raise ValueError("terminal attempt history no longer binds its failed step")
+    if (
+        tuple(value.attempt_number for value in attempts) != tuple(range(1, len(attempts) + 1))
+        or len(attempts) > step.runtime_policy.retry.max_attempts
+    ):
+        raise ValueError("terminal attempt history violates its bounded retry policy")
+    if not attempts:
+        if step.terminal_reason_code in _READ_TERMINAL_CODES_REQUIRING_ATTEMPT:
+            raise ValueError("failed READ step is missing its terminal attempt")
+        return None
+    terminal = attempts[-1]
+    terminal_reason_matches = terminal.terminal_reason_code == step.terminal_reason_code
+    post_call_runtime_denial_matches = (
+        step.terminal_reason_code in _POST_CALL_READ_RUNTIME_DENIAL_CODES
+        and terminal.outcome is AttemptOutcome.PERMANENT_FAILURE
+        and terminal.terminal_reason_code == "permanent_failure"
+        and terminal.safe_error_code == step.terminal_reason_code
+    )
+    if (
+        terminal.outcome is None
+        or (
+            terminal.safe_error_code is not None
+            and terminal.safe_error_code not in SAFE_ATTEMPT_ERROR_CODES
+        )
+        or terminal.retry_not_before is not None
+        or not (terminal_reason_matches or post_call_runtime_denial_matches)
+        or terminal.completed_at != step.updated_at
+    ):
+        raise ValueError("final READ attempt does not explain its terminal step")
+    return terminal
+
+
+def _project_terminal_error(
+    item: InspectableRun,
+    *,
+    plan: InspectableRunPlan | None,
+    control: RunExecutionControl | None,
+    attempts_by_step: Mapping[str, tuple[ExecutionAttempt, ...]],
+    actions: tuple[ExternalAction, ...],
+) -> RunTerminalErrorResource | None:
+    run = item.run
+    if run.state is not RunState.FAILED:
+        if attempts_by_step:
+            raise ValueError("non-failed Run cannot retain terminal attempt projection state")
+        return None
+    if run.terminal_reason_code is None:
+        raise ValueError("failed Run lacks its safe terminal code")
+    if normalize_audit_reason_code(run.terminal_reason_code) != run.terminal_reason_code:
+        raise ValueError("failed Run terminal code is not safe to project")
+    run_deadline = None if control is None else control.deadline_at
+    base: dict[str, Any] = {
+        "code": run.terminal_reason_code,
+        "cause_code": None,
+        "source": "run",
+        "step_id": None,
+        "action_id": None,
+        "outcome": None,
+        "final_attempt_number": None,
+        "retryable": False,
+        "call_deadline_at": None,
+        "run_deadline_at": run_deadline,
+        "occurred_at": run.updated_at,
+        "step_url": None,
+        "action_url": None,
+    }
+    if plan is None:
+        if attempts_by_step or actions:
+            raise ValueError("unplanned failed Run cannot retain execution children")
+        return RunTerminalErrorResource(**base)
+
+    matching_steps = tuple(
+        step
+        for step in plan.steps
+        if step.state is StepState.FAILED and step.terminal_reason_code == run.terminal_reason_code
+    )
+    if len(matching_steps) != 1:
+        # A pre-execution or ambiguous concurrent Run failure remains safely
+        # explainable by its Run code without guessing which child caused it.
+        return RunTerminalErrorResource(**base)
+    step = matching_steps[0]
+    base.update(
+        {
+            "source": "step",
+            "step_id": step.id,
+            "step_url": f"/api/v1/runs/{run.id}/steps/{step.id}",
+        }
+    )
+    if step.effect is Effect.READ:
+        if control is None:
+            raise ValueError("failed READ step lacks execution control")
+        attempt = _validated_terminal_attempt(
+            step,
+            attempts_by_step.get(step.id, ()),
+            control,
+        )
+        if attempt is not None:
+            assert attempt.outcome is not None
+            base.update(
+                {
+                    "cause_code": attempt.safe_error_code,
+                    "source": "read_attempt",
+                    "outcome": attempt.outcome.value,
+                    "final_attempt_number": attempt.attempt_number,
+                    "call_deadline_at": attempt.call_deadline_at,
+                }
+            )
+        return RunTerminalErrorResource(**base)
+
+    matching_actions = tuple(
+        action
+        for action in actions
+        if action.step_id == step.id
+        and action.state in {ExternalActionState.FAILED, ExternalActionState.OUTCOME_UNKNOWN}
+        and action.terminal_reason_code == step.terminal_reason_code
+    )
+    if not matching_actions:
+        return RunTerminalErrorResource(**base)
+    action = max(
+        matching_actions,
+        key=lambda value: (value.envelope.proposal_revision, value.id),
+    )
+    base.update(
+        {
+            "cause_code": action.terminal_reason_code,
+            "source": "external_action",
+            "action_id": action.id,
+            "outcome": action.state.value,
+            "final_attempt_number": action.delivery_attempt_count,
+            "action_url": f"/api/v1/external-actions/{action.id}",
+        }
+    )
+    return RunTerminalErrorResource(**base)
+
+
 def _project_run(
     item: InspectableRun,
     *,
@@ -836,6 +1033,7 @@ def _project_run(
     artifact_summaries: tuple[ArtifactSummary, ...] = (),
     artifacts_truncated: bool = False,
     actions: tuple[ExternalActionResource, ...] = (),
+    terminal_error: RunTerminalErrorResource | None = None,
 ) -> RunResource:
     _validate_inspectable_run(item)
     run = item.run
@@ -867,6 +1065,7 @@ def _project_run(
         timeline_url=f"/api/v1/runs/{run.id}/timeline",
         artifacts_url=f"/api/v1/runs/{run.id}/artifacts",
         instance_url=f"/api/v1/agent-instances/{work.instance_id}",
+        terminal_error=terminal_error,
     )
 
 
@@ -1068,10 +1267,20 @@ class RunResourceService:
                 pending_approvals: tuple[Any, ...] = ()
                 artifact_items: tuple[Any, ...] = ()
                 actions: tuple[ExternalAction, ...] = ()
+                attempts_by_step: dict[str, tuple[ExecutionAttempt, ...]] = {}
                 action_receipts: dict[str, ConnectorActionReceipt | None] = {}
                 if stored is not None:
                     plan_item = await unit_of_work.run_steps.get_inspectable_plan(run_id)
                     control = await unit_of_work.execution_control.get(run_id)
+                    if stored.run.state is RunState.FAILED and plan_item is not None:
+                        for step in plan_item.steps:
+                            if step.effect is Effect.READ and step.state is StepState.FAILED:
+                                attempts_by_step[
+                                    step.id
+                                ] = await unit_of_work.execution_control.list_attempts(
+                                    step.id,
+                                    step.runtime_policy.operation_key,
+                                )
                     pending_approvals = await unit_of_work.approvals.list_requests(
                         status=ApprovalStatus.PENDING,
                         run_id=run_id,
@@ -1169,6 +1378,13 @@ class RunResourceService:
                     step,
                 )
             projected_actions = tuple(_project_action(value) for value in actions)
+            terminal_error = _project_terminal_error(
+                stored,
+                plan=plan_item,
+                control=control,
+                attempts_by_step=attempts_by_step,
+                actions=actions,
+            )
             return _project_run(
                 stored,
                 plan=plan,
@@ -1177,6 +1393,7 @@ class RunResourceService:
                 artifact_summaries=projected_artifacts,
                 artifacts_truncated=len(artifact_items) > 10,
                 actions=projected_actions,
+                terminal_error=terminal_error,
             )
         except (TypeError, ValueError):
             raise self._corrupt() from None
@@ -1551,6 +1768,7 @@ __all__ = [
     "RunResourceServiceError",
     "RunRoutingAssignmentResource",
     "RunStepResource",
+    "RunTerminalErrorResource",
     "RunTimelineEvent",
     "RunTimelinePage",
     "RunTimelineQuery",

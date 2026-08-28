@@ -61,6 +61,7 @@ from marketing_agents.security.digest_key import DigestKey
 from marketing_agents.security.redaction import SecretValue
 from sqlalchemy import func, select
 
+from tests.support.api import browser_request
 from tests.support.identity import StaticIdentityProvider, human_principal
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -549,6 +550,8 @@ async def test_api_04_concurrent_same_key_serializes_replay_and_changed_conflict
 async def test_api_04_http_route_composes_real_service_resolver_and_durable_uow(
     tmp_path: Path,
 ) -> None:
+    """API-09 keeps the durable API-04 route behind the browser mutation contract."""
+
     catalog = _catalog()
     database_path = tmp_path / "manual-http-composition.db"
     database_url = f"sqlite+aiosqlite:///{database_path}"
@@ -570,8 +573,11 @@ async def test_api_04_http_route_composes_real_service_resolver_and_durable_uow(
             transport=ASGITransport(app=application),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(
+            response = await browser_request(
+                client,
+                "POST",
                 f"/api/v1/agent-instances/{TARGET_INSTANCE_ID}/dry-runs",
+                csrf_app=application,
                 headers={
                     "Authorization": "Bearer local-api-04-operator-token",
                     "Content-Type": "application/json",

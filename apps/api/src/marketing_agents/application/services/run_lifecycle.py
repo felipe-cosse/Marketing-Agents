@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -24,6 +25,8 @@ from marketing_agents.domain.run_lifecycle import (
 )
 
 from .audit_events import AuditEventFactory
+
+_REJECTION_RETRY_DELAYS_SECONDS = (0.01, 0.02)
 
 
 class RunLifecycleServiceError(RuntimeError):
@@ -411,7 +414,7 @@ class RunLifecycleService:
         reason_code: str,
         audit_context: AuditContext,
     ) -> None:
-        for retry_index in range(3):
+        for retry_index in range(len(_REJECTION_RETRY_DELAYS_SECONDS) + 1):
             try:
                 async with self._dependencies.unit_of_work() as unit_of_work:
                     current = await unit_of_work.runs.get(run_id)
@@ -422,26 +425,27 @@ class RunLifecycleService:
                         expected_version=current.version,
                         expected_state=current.state,
                     )
-                    if not fenced:
-                        continue
-                    await self._append_rejection_in_uow(
-                        unit_of_work,
-                        current=current,
-                        expected_version=expected_version,
-                        command=command,
-                        reason_code=reason_code,
-                        occurred_at=self._dependencies.utc_now(),
-                        audit_context=audit_context,
-                    )
-                    await unit_of_work.commit()
-                    return
+                    if fenced:
+                        await self._append_rejection_in_uow(
+                            unit_of_work,
+                            current=current,
+                            expected_version=expected_version,
+                            command=command,
+                            reason_code=reason_code,
+                            occurred_at=self._dependencies.utc_now(),
+                            audit_context=audit_context,
+                        )
+                        await unit_of_work.commit()
+                        return
             except RuntimeError as exc:
-                if (
-                    getattr(exc, "code", None)
-                    not in {"audit_sequence_busy", "audit_append_conflict"}
-                    or retry_index == 2
-                ):
+                if getattr(exc, "code", None) not in {
+                    "audit_sequence_busy",
+                    "audit_append_conflict",
+                } or retry_index == len(_REJECTION_RETRY_DELAYS_SECONDS):
                     raise
+            if retry_index < len(_REJECTION_RETRY_DELAYS_SECONDS):
+                # Let the winning transaction commit after this UoW has released its snapshot.
+                await asyncio.sleep(_REJECTION_RETRY_DELAYS_SECONDS[retry_index])
         raise RunLifecycleServiceError(
             "audit_rejection_race",
             "rejected Run attempt could not acquire a stable observation fence",

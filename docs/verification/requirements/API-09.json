@@ -1,0 +1,262 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-09",
+  "matrix_statement_sha256": "2400e5ed272af483d32368fe57b282c879f926c40850e12f492f36d7970c1b6b",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/correlation.py",
+      "apps/api/src/marketing_agents/api/csrf.py",
+      "apps/api/src/marketing_agents/api/errors.py",
+      "apps/api/src/marketing_agents/api/middleware/__init__.py",
+      "apps/api/src/marketing_agents/api/middleware/transport_security.py",
+      "apps/api/src/marketing_agents/api/openapi.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/api/routes/manual_work.py",
+      "apps/api/src/marketing_agents/api/routes/runs.py",
+      "apps/api/src/marketing_agents/api/routes/session.py",
+      "apps/api/src/marketing_agents/api/routes/webhooks.py",
+      "apps/api/src/marketing_agents/api/schemas/problems.py",
+      "apps/api/src/marketing_agents/api/schemas/runs.py",
+      "apps/api/src/marketing_agents/api/schemas/session.py",
+      "apps/api/src/marketing_agents/application/ports/webhook_sources.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_resources.py",
+      "apps/api/src/marketing_agents/application/services/terminal_execution_cleanup.py",
+      "apps/api/src/marketing_agents/application/services/webhook_intake.py",
+      "apps/api/src/marketing_agents/application/services/webhook_rate_limit.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-09.json",
+      "docs/verification/requirements/API-09.md",
+      "tests/integration/api/test_api_02_catalog_hierarchy.py",
+      "tests/integration/api/test_api_03_instance_configuration.py",
+      "tests/integration/api/test_api_04_manual_dry_runs.py",
+      "tests/integration/api/test_api_05_webhooks.py",
+      "tests/integration/api/test_api_06_approvals.py",
+      "tests/integration/api/test_api_07_runtime_contracts.py",
+      "tests/integration/api/test_api_09_transport_security.py",
+      "tests/integration/api/test_run_10_approval_routes.py",
+      "tests/integration/api/test_run_10_identity_dependency.py",
+      "tests/integration/db/test_api_04_manual_work_persistence.py",
+      "tests/integration/db/test_api_05_webhook_intake.py",
+      "tests/integration/db/test_orch_06_controlled_read_executor.py",
+      "tests/integration/db/test_run_01_lifecycle_persistence.py",
+      "tests/integration/db/test_run_03_write_completion.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/support/api.py",
+      "tests/unit/application/test_api_07_run_resources.py",
+      "tests/unit/application/test_api_09_terminal_error_projection.py",
+      "tests/unit/application/test_api_09_webhook_rate_limit.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/middleware/transport_security.py",
+          "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+          "apps/api/src/marketing_agents/application/services/webhook_rate_limit.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_api_09_transport_security.py",
+          "tests/integration/db/test_orch_06_controlled_read_executor.py",
+          "tests/integration/db/test_run_05_external_action_idempotency.py",
+          "tests/unit/application/test_api_09_terminal_error_projection.py",
+          "tests/unit/application/test_api_09_webhook_rate_limit.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-api-and-runtime-deadlines",
+      "type": "negative_control",
+      "statement": "The ASGI boundary gives each request one lifetime, cancels one timeout, never retries a route, returns a safe 503 before response start, and never double-starts a stream. Durable READ and WRITE attempts retain retry, call, and Run-deadline bounds; exhaustion adds no attempt. A lost Run compare-and-swap persists its rejection in at most three attempts separated by two bounded waits outside transactions, preserving stale_run_version after the winner commits.",
+      "test_refs": [
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_timeout_cancels_once_without_retry",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_timeout_after_response_start_never_double_starts",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_09_retry_deadline_exhaustion_fails_run_without_extra_attempt",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py::test_run_01_two_sessions_allow_exactly_one_expected_version_transition",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_write_timeout_is_minimum_of_all_durable_bounds",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_call_start_commit_latency_cannot_extend_absolute_deadline"
+      ]
+    },
+    {
+      "id": "atomic-terminal-run-failures",
+      "type": "contract",
+      "statement": "An ordinary terminal READ or WRITE fails the focal step and Run atomically, closes queued or provably pre-call siblings, and records terminal_failure_origin as ordinary execution or runtime-control denial. Started writes reconcile an exact durable receipt first; without one, recovery maps the origin, uses a safe generic fallback for legacy originless audits, and refuses replay when the exact failed-Run mutation witness is missing.",
+      "test_refs": [
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_09_terminal_read_failure_fails_run_and_audits_safe_cause",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_09_retry_deadline_exhaustion_fails_run_without_extra_attempt",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_terminal_cleanup_rejects_nonterminal_runtime_control_code",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_terminal_write_failure_closes_only_pre_call_siblings",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_ordinary_read_exhaustion_reconciles_inflight_write_receipt",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_pre_call_read_exhaustion_marks_runtime_control_write_recovery",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_legacy_failed_parent_reconciles_receipt_before_origin_lookup",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_legacy_failed_parent_without_origin_uses_generic_no_receipt_reason",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_09_failed_parent_missing_exact_audit_fails_closed_without_replay"
+      ]
+    },
+    {
+      "id": "safe-terminal-resource-projection",
+      "type": "contract",
+      "statement": "Failed Run detail exposes one bounded terminal_error from coherent Run, step, control, and attempt facts. Exact final READ causes are shown; recognized no-attempt pre-call failures use source=step; post-call denials require final-attempt mapping. Unsafe terminal IDs, missing or drifting lineage, and impossible post-call facts fail closed, while provider text, payloads, headers, and secrets are never projected.",
+      "test_refs": [
+        "tests/unit/application/test_api_09_terminal_error_projection.py::test_api_09_run_detail_exposes_terminal_retry_and_safe_adapter_cause",
+        "tests/unit/application/test_api_09_terminal_error_projection.py::test_api_09_read_failure_without_attempt_projects_step_error",
+        "tests/unit/application/test_api_09_terminal_error_projection.py::test_api_09_pre_call_write_failure_without_action_projects_step_error",
+        "tests/unit/application/test_api_09_terminal_error_projection.py::test_api_09_unknown_terminal_identifier_fails_closed",
+        "tests/unit/application/test_api_09_terminal_error_projection.py::test_api_09_post_call_denial_without_attempt_fails_closed"
+      ]
+    },
+    {
+      "id": "unified-problems-and-server-correlation",
+      "type": "contract",
+      "statement": "The installed API boundary gives application failures one strict application/problem+json occurrence shape with no-store and security headers, bounded optional fields, non-reflective framework validation, safe header preservation, and one unpredictable server-owned correlation ID shared by the response and admitted command. Caller correlation and arbitrary exception headers are discarded.",
+      "test_refs": [
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_framework_and_route_errors_share_strict_problem_details",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_duplicate_host_and_caller_correlation_are_not_trusted",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_real_route_command_reuses_response_correlation"
+      ]
+    },
+    {
+      "id": "same-origin-direct-transport-boundary",
+      "type": "negative_control",
+      "statement": "The local browser control plane issues a private process token and admits unsafe API mutations only with exact JSON transport, one canonical trusted Origin, same-origin Fetch Metadata, and the current CSRF token. Strict Host parsing and direct-mode rejection of Forwarded and X-Forwarded-* precede handlers. The exact signature-first webhook route remains CSRF-exempt without altering receive bytes.",
+      "test_refs": [
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_session_is_private_bounded_and_per_process",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_settings_reject_noncanonical_trusted_origins",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_host_and_direct_proxy_rejections_precede_handlers",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_browser_mutation_rejections_are_generic_and_pre_handler",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_browser_mutation_accepts_only_current_same_origin_token",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_duplicate_browser_security_headers_fail_closed",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_browser_policy_is_root_path_safe_when_mounted",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_webhook_exemption_preserves_exact_receive_bytes",
+        "tests/integration/api/test_run_10_identity_dependency.py::test_api_09_direct_mode_proxy_headers_fail_before_provider",
+        "tests/integration/db/test_api_04_manual_work_persistence.py::test_api_04_http_route_composes_real_service_resolver_and_durable_uow"
+      ]
+    },
+    {
+      "id": "bounded-authenticated-webhook-admission",
+      "type": "negative_control",
+      "statement": "Webhook admission verifies the exact signed request before consuming a fixed-window slot keyed by the authenticated source. Denial precedes envelope parsing, workflow resolution, Work, Run, and receipt persistence, and provider work; only redacted webhook.signature_validated and ingress.rate_limited audits persist. Windows roll over exactly, resist clock rollback, bound cardinality, fail closed, and return bounded Retry-After.",
+      "test_refs": [
+        "tests/unit/application/test_api_09_webhook_rate_limit.py::test_api_09_rate_limiter_uses_exact_windows_and_resists_clock_rollback",
+        "tests/unit/application/test_api_09_webhook_rate_limit.py::test_api_09_rate_limiter_bounds_trusted_source_cardinality_and_prunes",
+        "tests/unit/application/test_api_09_webhook_rate_limit.py::test_api_09_only_authenticated_sources_consume_and_denial_precedes_mapping",
+        "tests/unit/application/test_api_09_webhook_rate_limit.py::test_api_09_rate_limit_audit_is_verified_redacted_and_bounded",
+        "tests/integration/db/test_api_05_webhook_intake.py::test_api_09_authenticated_rate_denial_is_audited_before_429_and_fails_closed",
+        "tests/integration/api/test_api_05_webhooks.py::test_api_09_rate_limit_problem_preserves_retry_contract"
+      ]
+    },
+    {
+      "id": "live-openapi-problem-contract",
+      "type": "contract",
+      "statement": "The live FastAPI OpenAPI document contains the strict ProblemDetails schema and rewrites documented application error responses to only application/problem+json, including the session and mutation surfaces, while runtime 404, 405, route, validation, and unhandled failures conform to that same bounded occurrence model.",
+      "test_refs": [
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_openapi_uses_one_problem_details_media_type",
+        "tests/integration/api/test_api_09_transport_security.py::test_api_09_framework_and_route_errors_share_strict_problem_details"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-09-failure-boundaries",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_09_transport_security.py",
+        "tests/unit/application/test_api_09_terminal_error_projection.py",
+        "tests/unit/application/test_api_09_webhook_rate_limit.py",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py",
+        "tests/integration/api/test_api_03_instance_configuration.py",
+        "tests/integration/api/test_api_04_manual_dry_runs.py",
+        "tests/integration/api/test_api_05_webhooks.py",
+        "tests/integration/api/test_api_06_approvals.py",
+        "tests/integration/api/test_api_07_runtime_contracts.py",
+        "tests/integration/api/test_run_10_approval_routes.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/integration/db/test_api_04_manual_work_persistence.py",
+        "tests/integration/db/test_api_05_webhook_intake.py",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py",
+        "tests/integration/db/test_run_03_write_completion.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/unit/application/test_api_07_run_resources.py",
+        "tests/network/test_safe_11_network_isolation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200,
+      "network_requirement": "deny",
+      "covers": [
+        "bounded-api-and-runtime-deadlines",
+        "atomic-terminal-run-failures",
+        "safe-terminal-resource-projection",
+        "unified-problems-and-server-correlation",
+        "same-origin-direct-transport-boundary",
+        "bounded-authenticated-webhook-admission",
+        "live-openapi-problem-contract"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/correlation.py",
+      "apps/api/src/marketing_agents/api/csrf.py",
+      "apps/api/src/marketing_agents/api/errors.py",
+      "apps/api/src/marketing_agents/api/middleware/**",
+      "apps/api/src/marketing_agents/api/openapi.py",
+      "apps/api/src/marketing_agents/api/routes/runs.py",
+      "apps/api/src/marketing_agents/api/routes/session.py",
+      "apps/api/src/marketing_agents/api/routes/webhooks.py",
+      "apps/api/src/marketing_agents/api/schemas/problems.py",
+      "apps/api/src/marketing_agents/api/schemas/runs.py",
+      "apps/api/src/marketing_agents/api/schemas/session.py",
+      "apps/api/src/marketing_agents/application/ports/webhook_sources.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/application/services/run_lifecycle.py",
+      "apps/api/src/marketing_agents/application/services/run_resources.py",
+      "apps/api/src/marketing_agents/application/services/terminal_execution_cleanup.py",
+      "apps/api/src/marketing_agents/application/services/webhook_intake.py",
+      "apps/api/src/marketing_agents/application/services/webhook_rate_limit.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "tests/integration/db/test_api_05_webhook_intake.py"
+    ],
+    "gate_id": "api-09-failure-boundaries"
+  },
+  "limitations": [
+    "The CSRF token and webhook admission windows are intentionally process-local for the single-process v1 API. They reset on process restart and do not provide a cross-process or distributed quota; a multi-process deployment must replace them with shared state and an appropriate session design.",
+    "The API runs in direct mode and therefore rejects every Forwarded and X-Forwarded-* field. DEL-05 still owns the default runnable composition, listener and worker topology, and any future explicitly trusted reverse-proxy boundary; API-09 does not parse or trust proxy assertions.",
+    "DEL-07 still owns the committed OpenAPI snapshot, generated TypeScript client, and drift gate. API-09 verifies and normalizes only the live FastAPI OpenAPI document and runtime response contract.",
+    "The readiness probe's diagnostic 503 retains its established readiness payload rather than being rewritten as an application problem. Other installed API and framework failures pass through the shared application/problem+json occurrence boundary.",
+    "The HTTP request timeout cancels downstream ASGI work and performs no automatic retry. If a downstream response has already started, the boundary propagates the timeout instead of attempting a second response; transport-level disconnect handling remains the server's responsibility.",
+    "Runtime retry evidence applies only to persisted orchestrator-controlled READ and WRITE attempts. API-09 does not add route retries, provider SDK retries, background worker composition, or an implicit retry around non-idempotent effects.",
+    "The webhook quota is keyed by authenticated source, and the v1 static registry enforces exactly one configured trigger per source. Invalid signatures consume no quota; rate denial occurs after authentication but before parsing or resolution and before any Work, Run, or receipt persistence or downstream work.",
+    "DEL-04 owns migration and upgrade DDL for the new ingress.rate_limited audit-event database constraint. API-09 proves the constraint and repository behavior only against a fresh metadata-created SQLite schema; it does not claim an upgrade path for an existing database.",
+    "Tests use local ASGI transports, SQLite-backed integration stores, deterministic adapters, and the repository network-denial fixture. No reverse proxy, multi-process server, PostgreSQL race, live provider, external webhook sender, or network fallback is exercised or claimed."
+  ]
+}
