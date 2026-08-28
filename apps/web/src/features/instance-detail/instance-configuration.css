@@ -1,0 +1,226 @@
+.instance-configuration {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.instance-configuration__heading {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.instance-configuration__heading h4 {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.3;
+  color: #344054;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.instance-configuration__heading p,
+.instance-configuration__hint,
+.instance-configuration__readonly,
+.instance-configuration__success,
+.instance-configuration__error p {
+  margin: 3px 0 0;
+  font-size: 9px;
+  line-height: 1.45;
+  color: var(--color-muted);
+}
+
+.instance-configuration__readonly,
+.instance-configuration__success,
+.instance-configuration__error,
+.instance-configuration__validation {
+  padding: 9px 10px;
+  border: 1px solid #dce4ed;
+  border-radius: 8px;
+}
+
+.instance-configuration__readonly {
+  margin: 0;
+  color: #52657a;
+  background: #f8fafc;
+}
+
+.instance-configuration__success {
+  margin: 0;
+  color: #0a693a;
+  background: var(--color-safe-soft);
+  border-color: #cde9d8;
+}
+
+.instance-configuration__form {
+  display: grid;
+  gap: 10px;
+}
+
+.instance-configuration__group {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  margin: 0;
+  background: #f8fafc;
+  border: 1px solid #dce4ed;
+  border-radius: 8px;
+}
+
+.instance-configuration__group legend {
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #344054;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.instance-configuration__binding {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 9px;
+  border-top: 1px solid #e3e9f0;
+}
+
+.instance-configuration__binding:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.instance-configuration__binding strong,
+.instance-configuration__error strong,
+.instance-configuration__validation strong {
+  overflow-wrap: anywhere;
+  font-size: 9px;
+  line-height: 1.35;
+  color: #344054;
+}
+
+.instance-configuration__check {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  font-size: 9px;
+  line-height: 1.35;
+  color: #344054;
+}
+
+.instance-configuration__check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.instance-configuration__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.instance-configuration__field > span {
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #52657a;
+}
+
+.instance-configuration__field input,
+.instance-configuration__field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.3;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 7px;
+}
+
+.instance-configuration__field input:disabled,
+.instance-configuration__field select:disabled,
+.instance-configuration__check input:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.instance-configuration__field input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.instance-configuration__field input:focus-visible,
+.instance-configuration__field select:focus-visible,
+.instance-configuration__check input:focus-visible,
+.instance-configuration__button:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.instance-configuration__validation,
+.instance-configuration__error {
+  display: grid;
+  gap: 6px;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: #f2c9c5;
+}
+
+.instance-configuration__validation ul,
+.instance-configuration__error ul {
+  display: grid;
+  gap: 3px;
+  padding-left: 17px;
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.instance-configuration__error p {
+  margin: 0;
+  color: #7a271a;
+}
+
+.instance-configuration__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+}
+
+.instance-configuration__button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.instance-configuration__button.is-primary {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.instance-configuration__button.is-secondary {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border-color: #cbd8f5;
+}
+
+.instance-configuration__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

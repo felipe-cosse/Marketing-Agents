@@ -30,6 +30,8 @@ export function AgentCard({
       type="button"
       className="agent-card"
       aria-label={accessibleName}
+      aria-controls={selected ? "agent-inspector" : undefined}
+      aria-expanded={selected}
       aria-pressed={selected}
       data-instance-id={instance.id}
       data-node-id={instance.id}

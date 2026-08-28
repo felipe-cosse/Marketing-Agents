@@ -1,15 +1,113 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  AGENT_DETAIL_ETAG,
+  makeAgentDetailPayload,
+  makeViewerSessionPayload,
+} from "../../test/agentDetailFixture";
+import {
+  fetchInstanceConfigurationSchema,
+  fetchLocalSession,
+  type InstanceConfigurationSchema,
+  type LocalSession,
+} from "../../api/instanceConfiguration";
+import type * as InstanceConfigurationApi from "../../api/instanceConfiguration";
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import { OrgChartPage } from "./OrgChartPage";
 
+vi.mock("../../api/instanceConfiguration", async () => {
+  const actual = await vi.importActual<typeof InstanceConfigurationApi>(
+    "../../api/instanceConfiguration",
+  );
+  return {
+    ...actual,
+    fetchLocalSession: vi.fn(),
+    fetchInstanceConfigurationSchema: vi.fn(),
+  };
+});
+
+const VIEWER_SESSION: LocalSession = {
+  actorId: "principal.local.viewer",
+  roles: ["viewer"],
+  scopes: [],
+  authMode: "local",
+  environment: "local",
+  modelMode: "mock",
+  connectorMode: "mock",
+  networkPermission: false,
+  warning: "Local identity — not production authentication",
+};
+
+const ADMIN_SESSION: LocalSession = {
+  ...VIEWER_SESSION,
+  actorId: "principal.local.admin",
+  roles: ["local_admin", "viewer"],
+};
+
+const fetchSessionMock = vi.mocked(fetchLocalSession);
+const fetchSchemaMock = vi.mocked(fetchInstanceConfigurationSchema);
+
+function configurationSchema(
+  instanceId: string,
+  templateId: string,
+): InstanceConfigurationSchema {
+  return {
+    projectionVersion: "instance-configuration-schema-v1",
+    instanceId,
+    templateId,
+    supportedTriggerTypes: ["manual"],
+    connectorFamilies: [
+      { connectorFamily: "local", bindingIds: ["local-catalog"] },
+    ],
+    scheduleSupported: false,
+    variantLabelMaxLength: 100,
+    maxTriggerBindings: 16,
+    maxConnectorBindings: 16,
+  };
+}
+
+function resetConfigurationMocks(): void {
+  fetchSessionMock.mockReset();
+  fetchSchemaMock.mockReset();
+  fetchSessionMock.mockResolvedValue(VIEWER_SESSION);
+  fetchSchemaMock.mockImplementation(({ instanceId, templateId }) =>
+    Promise.resolve(configurationSchema(instanceId, templateId)),
+  );
+}
+
+function enableConfigurationEditing(): void {
+  fetchSessionMock.mockResolvedValue(ADMIN_SESSION);
+}
+
 interface FixtureInstance {
   readonly id: string;
+  readonly templateId: string;
+  readonly displayName: string;
+  readonly purpose: string;
+  readonly sourceOrdinal: number;
+}
+
+interface FixtureFunction {
+  readonly id: string;
+  readonly displayName: string;
+  readonly instances: readonly FixtureInstance[];
+}
+
+interface FixtureDepartment {
+  readonly id: string;
+  readonly displayName: string;
+  readonly functions: readonly FixtureFunction[];
 }
 
 function fixtureInstanceIds(): string[] {
@@ -83,8 +181,44 @@ function renderPage(initialEntry = "/"): ReturnType<typeof render> {
   );
 }
 
+function fixtureDetail(instanceId: string): Record<string, unknown> {
+  const payload = makeHierarchyPayload();
+  const departments = payload.departments as FixtureDepartment[];
+  for (const department of departments) {
+    for (const agentFunction of department.functions) {
+      const instance = agentFunction.instances.find(
+        (candidate) => candidate.id === instanceId,
+      );
+      if (instance === undefined) continue;
+      const sharedTemplateDeploymentCount = departments
+        .flatMap(({ functions }) => functions)
+        .flatMap(({ instances }) => instances)
+        .filter(({ templateId }) => templateId === instance.templateId).length;
+      return makeAgentDetailPayload({
+        instanceId,
+        templateId: instance.templateId,
+        departmentId: department.id,
+        functionId: agentFunction.id,
+        sourceOrdinal: instance.sourceOrdinal,
+        sharedTemplateDeploymentCount,
+        displayName: instance.displayName,
+        purpose: instance.purpose,
+        runtime: instanceId.endsWith(".02") ? "static" : "completed",
+      });
+    }
+  }
+  throw new Error(`Unknown fixture instance: ${instanceId}`);
+}
+
+function requestHeader(
+  init: RequestInit | undefined,
+  name: string,
+): string | null {
+  return new Headers(init?.headers).get(name);
+}
+
 function installFetch(completedId?: string): ReturnType<typeof vi.fn> {
-  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string"
         ? input
@@ -100,6 +234,29 @@ function installFetch(completedId?: string): ReturnType<typeof vi.fn> {
           headers: {
             ETag: `"instance-status-sha256-v1:${"b".repeat(64)}"`,
           },
+        }),
+      );
+    }
+    if (url === "/api/v1/session") {
+      return Promise.resolve(Response.json(makeViewerSessionPayload()));
+    }
+    const detailMatch = /^\/api\/v1\/agent-instances\/([^/]+)$/u.exec(url);
+    if (detailMatch !== null) {
+      if (requestHeader(init, "If-None-Match") === AGENT_DETAIL_ETAG) {
+        return Promise.resolve(
+          new Response(null, {
+            status: 304,
+            headers: { ETag: AGENT_DETAIL_ETAG },
+          }),
+        );
+      }
+      const encodedInstanceId = detailMatch[1];
+      if (encodedInstanceId === undefined) {
+        return Promise.reject(new Error("Detail route did not capture an ID"));
+      }
+      return Promise.resolve(
+        Response.json(fixtureDetail(decodeURIComponent(encodedInstanceId)), {
+          headers: { ETag: AGENT_DETAIL_ETAG },
         }),
       );
     }
@@ -120,8 +277,48 @@ async function openFilters(
   await screen.findByRole("dialog", { name: "Catalog filters" });
 }
 
+const FIRST_DETAIL_ID = "inst.social-media.new-content.agent-1.01";
+const SECOND_DETAIL_ID = "inst.social-media.new-content.agent-2.01";
+
+function cardById(instanceId: string): HTMLButtonElement {
+  const card = document.querySelector<HTMLButtonElement>(
+    `[data-instance-id="${instanceId}"]`,
+  );
+  if (card === null) throw new Error(`Expected card ${instanceId}`);
+  return card;
+}
+
+async function makeConfigurationDirty(
+  user: ReturnType<typeof userEvent.setup>,
+  value = "Unsaved local override",
+): Promise<{
+  readonly inspector: HTMLElement;
+  readonly form: HTMLElement;
+  readonly variant: HTMLInputElement;
+}> {
+  const inspector = await screen.findByRole("complementary", {
+    name: "Agent 1",
+  });
+  await user.click(within(inspector).getByRole("button", { name: "Edit" }));
+  const form = await within(inspector).findByRole("form", {
+    name: "Deployment configuration editor",
+  });
+  const variant =
+    within(form).getByLabelText<HTMLInputElement>("Variant label");
+  await user.type(variant, value);
+  await waitFor(() =>
+    expect(
+      within(form).getByRole("button", { name: "Save configuration" }),
+    ).toBeEnabled(),
+  );
+  return { inspector, form, variant };
+}
+
 describe("WEB-02 OrgChartPage integration", () => {
-  beforeEach(() => vi.useRealTimers());
+  beforeEach(() => {
+    vi.useRealTimers();
+    resetConfigurationMocks();
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("canonicalizes invalid and repeated URL state and fetches each resource once", async () => {
@@ -130,8 +327,10 @@ describe("WEB-02 OrgChartPage integration", () => {
       "/?q=one&q=two&department=dept.email&function=func.community.events&unknown=x",
     );
     await loaded();
-    expect(screen.getByLabelText("Current search")).toHaveTextContent(
-      "?department=dept.email",
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current search")).toHaveTextContent(
+        "?department=dept.email",
+      ),
     );
     expect(document.querySelectorAll(".department-group")).toHaveLength(1);
     expect(document.querySelectorAll(".function-group")).toHaveLength(2);
@@ -296,5 +495,216 @@ describe("WEB-02 OrgChartPage integration", () => {
     await waitFor(() =>
       expect(document.querySelectorAll(".agent-card")).toHaveLength(5),
     );
+  });
+});
+
+describe("WEB-03 OrgChartPage detail integration", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    resetConfigurationMocks();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("closes immediately on Escape from the selected card and restores its focus", async () => {
+    const user = userEvent.setup();
+    installFetch();
+    renderPage();
+    await loaded();
+    const card = cardById(FIRST_DETAIL_ID);
+
+    await user.click(card);
+    await screen.findByRole("complementary", { name: "Agent 1" });
+    expect(card).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Agent 1" }),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(card).toHaveFocus());
+  });
+
+  it("closes only the topmost filter dialog on Escape", async () => {
+    const user = userEvent.setup();
+    installFetch();
+    renderPage();
+    await loaded();
+    const card = cardById(FIRST_DETAIL_ID);
+
+    await user.click(card);
+    const inspector = await screen.findByRole("complementary", {
+      name: "Agent 1",
+    });
+    await openFilters(user);
+    const dialog = screen.getByRole("dialog", { name: "Catalog filters" });
+    within(dialog).getByRole("combobox", { name: "Department" }).focus();
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(inspector).toBeVisible();
+    expect(card).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps a dirty selection in place or discards it before focusing the destination card", async () => {
+    const user = userEvent.setup();
+    enableConfigurationEditing();
+    installFetch();
+    renderPage();
+    await loaded();
+    const first = cardById(FIRST_DETAIL_ID);
+    const second = cardById(SECOND_DETAIL_ID);
+
+    await user.click(first);
+    const { inspector, form, variant } = await makeConfigurationDirty(user);
+    await user.click(second);
+
+    let dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    expect(first).toHaveAttribute("aria-pressed", "true");
+    expect(second).toHaveAttribute("aria-pressed", "false");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    );
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(inspector).toBeVisible();
+    expect(variant).toHaveValue("Unsaved local override");
+    await waitFor(() =>
+      expect(
+        within(form).getByRole("checkbox", { name: "Deployment enabled" }),
+      ).toHaveFocus(),
+    );
+
+    await user.click(second);
+    dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard changes" }),
+    );
+
+    await screen.findByRole("complementary", { name: "Agent 2" });
+    await waitFor(() => expect(second).toHaveFocus());
+    expect(first).toHaveAttribute("aria-pressed", "false");
+    expect(second).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps a filtered-out dirty editor usable and can discard on the next filter transition", async () => {
+    const user = userEvent.setup();
+    enableConfigurationEditing();
+    installFetch();
+    renderPage();
+    await loaded();
+    await user.click(cardById(FIRST_DETAIL_ID));
+    const { inspector, form, variant } = await makeConfigurationDirty(user);
+    const search = screen.getByRole("searchbox", { name: "Search agents" });
+
+    fireEvent.change(search, { target: { value: SECOND_DETAIL_ID } });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    );
+
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(search).toHaveValue(SECOND_DETAIL_ID);
+    expect(
+      document.querySelector(`[data-instance-id="${FIRST_DETAIL_ID}"]`),
+    ).toBeNull();
+    expect(inspector).toBeVisible();
+    expect(variant).toHaveValue("Unsaved local override");
+    await waitFor(() =>
+      expect(
+        within(form).getByRole("checkbox", { name: "Deployment enabled" }),
+      ).toHaveFocus(),
+    );
+
+    fireEvent.change(search, { target: { value: "no matching agent" } });
+    const discardDialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    await user.click(
+      within(discardDialog).getByRole("button", { name: "Discard changes" }),
+    );
+
+    await waitFor(() => expect(inspector).not.toBeInTheDocument());
+    expect(search).toHaveValue("no matching agent");
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(document.querySelector('[aria-pressed="true"]')).toBeNull();
+  });
+
+  it("loads one complete selected detail, restores focus on close, and conditionally reuses it", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch();
+    renderPage();
+    await loaded();
+    const card = document.querySelector<HTMLButtonElement>(
+      '[data-instance-id="inst.social-media.new-content.agent-1.01"]',
+    );
+    if (card === null) throw new Error("expected detail fixture card");
+
+    await user.click(card);
+    const inspector = await screen.findByRole("complementary", {
+      name: "Agent 1",
+    });
+    expect(card).toHaveAttribute("aria-expanded", "true");
+    expect(within(inspector).getByText("Overview")).toBeVisible();
+    expect(
+      within(inspector).getByText("Deployment & configuration"),
+    ).toBeVisible();
+    expect(
+      within(inspector).getByText("Capabilities & policies"),
+    ).toBeVisible();
+    expect(within(inspector).getByText("Recent runs")).toBeVisible();
+    expect(within(inspector).getAllByText(/run\.web-03\.latest/u)).toHaveLength(
+      2,
+    );
+
+    await user.click(
+      within(inspector).getByRole("button", {
+        name: "Close details for Agent 1",
+      }),
+    );
+    expect(screen.queryByRole("complementary", { name: "Agent 1" })).toBeNull();
+    await waitFor(() => expect(card).toHaveFocus());
+
+    await user.click(card);
+    await screen.findByRole("complementary", { name: "Agent 1" });
+    const detailCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes(
+        "/api/v1/agent-instances/inst.social-media.new-content.agent-1.01",
+      ),
+    );
+    expect(detailCalls).toHaveLength(2);
+    expect(requestHeader(detailCalls[1]?.[1], "If-None-Match")).toBe(
+      AGENT_DETAIL_ETAG,
+    );
+  });
+
+  it("identifies the second shared-template deployment and never fabricates a run state", async () => {
+    const user = userEvent.setup();
+    installFetch();
+    renderPage();
+    await loaded();
+    const card = document.querySelector<HTMLButtonElement>(
+      '[data-instance-id="inst.community.events.agent-1.02"]',
+    );
+    if (card === null) throw new Error("expected duplicate fixture card");
+
+    await user.click(card);
+    const inspector = await screen.findByRole("complementary", {
+      name: "Agent 1 · Instance 2 of 2",
+    });
+    expect(
+      within(inspector).getAllByText("inst.community.events.agent-1.02"),
+    ).toHaveLength(2);
+    expect(
+      within(inspector).getByText(
+        "Recent run data is unavailable for this local runtime.",
+      ),
+    ).toBeVisible();
+    expect(within(inspector).queryByText("Never run")).toBeNull();
   });
 });

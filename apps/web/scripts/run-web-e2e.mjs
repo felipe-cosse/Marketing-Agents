@@ -6,7 +6,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptsRoot = dirname(fileURLToPath(import.meta.url));
-for (const script of ["run-web-01-e2e.mjs", "run-web-02-e2e.mjs"]) {
+for (const script of [
+  "run-web-01-e2e.mjs",
+  "run-web-02-e2e.mjs",
+  "run-web-03-e2e.mjs",
+]) {
   const result = spawnSync(process.execPath, [resolve(scriptsRoot, script)], {
     stdio: "inherit",
     env: process.env,
