@@ -1,0 +1,20 @@
+{
+  "name": "marketing-agents-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.15.0 <25",
+    "pnpm": "11.24.0"
+  },
+  "scripts": {
+    "web:build": "pnpm --dir apps/web build",
+    "web:format": "pnpm --dir apps/web format",
+    "web:format:check": "pnpm --dir apps/web format:check",
+    "web:lint": "pnpm --dir apps/web lint",
+    "web:test": "pnpm --dir apps/web test",
+    "web:test:coverage": "pnpm --dir apps/web test:coverage",
+    "web:test:e2e": "pnpm --dir apps/web test:e2e",
+    "web:typecheck": "pnpm --dir apps/web typecheck"
+  }
+}
