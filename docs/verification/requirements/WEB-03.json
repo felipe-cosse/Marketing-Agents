@@ -1,0 +1,139 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-03",
+  "matrix_statement_sha256": "792dac8b65bb4ac90d81ef65000b724168c148de8242d6a2b1144ba89c18d5c4",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-03.json",
+      "docs/verification/requirements/WEB-03.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/agentInstanceDetail.ts",
+          "apps/web/src/api/instanceConfiguration.ts",
+          "apps/web/src/features/instance-detail/AgentInspector.tsx",
+          "apps/web/src/features/instance-detail/InstanceConfigurationEditor.tsx",
+          "apps/web/src/features/instance-detail/AgentDetailPane.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/e2e/web-03-agent-details.spec.ts",
+          "apps/web/src/api/agentInstanceDetail.test.ts",
+          "apps/web/src/api/instanceConfiguration.test.ts",
+          "apps/web/src/features/instance-detail/AgentInspector.test.tsx",
+          "apps/web/src/features/instance-detail/InstanceConfigurationEditor.test.tsx"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-detail-runtime-contract",
+      "type": "contract",
+      "statement": "The selected instance detail is strictly cross-bound to the hierarchy and presents complete instance, template, capability, policy, schema, evidence, and bounded recent-run metadata. Static runtime absence remains unavailable rather than fabricated as never-run.",
+      "test_refs": [
+        "apps/web/src/api/agentInstanceDetail.test.ts::WEB-03 agent instance detail normalization > accepts, cross-binds, camel-cases, and freezes the exact static detail",
+        "apps/web/src/api/agentInstanceDetail.test.ts::WEB-03 agent instance detail normalization > accepts a coherent bounded runtime overlay and distinguishes never-run",
+        "apps/web/src/features/instance-detail/AgentInspector.test.tsx::WEB-03 AgentInspector > renders every read-only metadata section and the owned configuration slot",
+        "apps/web/src/features/instance-detail/AgentInspector.test.tsx::WEB-03 AgentInspector > distinguishes unavailable runtime data from a confirmed never-run state",
+        "apps/web/e2e/web-03-agent-details.spec.ts::WEB-03 selection shows complete dynamic and duplicate static detail with conditional reuse",
+        "apps/web/scripts/run-web-03-witness.mjs::WEB-03 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "revision-safe-deployment-configuration",
+      "type": "negative_control",
+      "statement": "Only local-admin sessions can edit the five deployment-owned fields. Schema options fail closed, PATCH uses the configuration ETag and memory-only CSRF token, schedule representations remain identical, and 409 or 422 responses preserve drafts without automatic merge or resubmission.",
+      "test_refs": [
+        "apps/web/src/api/instanceConfiguration.test.ts::WEB-03 configuration PATCH transport > uses the exact configuration ETag and private CSRF header",
+        "apps/web/src/api/instanceConfiguration.test.ts::WEB-03 configuration PATCH transport > refreshes the session and retries exactly once for csrf_token_invalid",
+        "apps/web/src/api/instanceConfiguration.test.ts::WEB-03 configuration PATCH transport > exposes only safe 409 and field-validation metadata",
+        "apps/web/src/api/agentInstanceDetail.test.ts::WEB-03 agent instance detail normalization > round-trips a disabled schedule update into a reusable agent detail",
+        "apps/web/src/features/instance-detail/InstanceConfigurationEditor.test.tsx::WEB-03 InstanceConfigurationEditor > sends only changed top-level fields with the configuration ETag and announces success",
+        "apps/web/src/features/instance-detail/InstanceConfigurationEditor.test.tsx::WEB-03 InstanceConfigurationEditor > preserves a draft on conflict and reloads explicitly without resubmitting",
+        "apps/web/e2e/web-03-agent-details.spec.ts::WEB-03 configuration edit uses revision safety, dirty warnings, and explicit conflict reload",
+        "apps/web/scripts/run-web-03-witness.mjs::WEB-03 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "selection-layout-and-revalidation",
+      "type": "positive",
+      "statement": "One selected card owns one conditionally revalidated detail query, exposes duplicate deployment ordinals, restores card focus on close, warns before dirty navigation, docks at 1536 pixels, and overlays at 1280 pixels without compressing the graph or creating horizontal overflow.",
+      "test_refs": [
+        "apps/web/src/api/agentInstanceDetail.test.ts::WEB-03 conditional agent instance detail transport > sends If-None-Match and returns prior object identity on a matching 304",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > closes immediately on Escape from the selected card and restores its focus",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > closes only the topmost filter dialog on Escape",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > keeps a dirty selection in place or discards it before focusing the destination card",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > keeps a filtered-out dirty editor usable and can discard on the next filter transition",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > loads one complete selected detail, restores focus on close, and conditionally reuses it",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-03 OrgChartPage detail integration > identifies the second shared-template deployment and never fabricates a run state",
+        "apps/web/e2e/web-03-agent-details.spec.ts::WEB-03 inspector docks at 1536 and overlays without overflow at 1280",
+        "apps/web/e2e/web-03-agent-details.spec.ts::WEB-03 configuration edit uses revision safety, dirty warnings, and explicit conflict reload"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-03-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-03-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-detail-runtime-contract",
+        "revision-safe-deployment-configuration",
+        "selection-layout-and-revalidation"
+      ]
+    },
+    {
+      "id": "web-03-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-03-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-detail-runtime-contract",
+        "revision-safe-deployment-configuration",
+        "selection-layout-and-revalidation"
+      ]
+    },
+    {
+      "id": "web-03-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-03-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-detail-runtime-contract",
+        "revision-safe-deployment-configuration",
+        "selection-layout-and-revalidation"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/agentInstanceDetail.ts",
+      "apps/web/src/api/instanceConfiguration.ts"
+    ],
+    "gate_id": "web-03-dependency-free-witness"
+  },
+  "limitations": [
+    "WEB-03 owns selected-agent metadata, bounded recent runs, and deployment-only configuration. Dry runs remain WEB-04, approvals WEB-05, full run timelines and artifacts WEB-06, narrow/mobile tree behavior WEB-07, and exhaustive accessibility acceptance WEB-08.",
+    "A static detail response explicitly reports recent-run data as unavailable. The interface never converts runtime absence into a confirmed never_run state and never invents history.",
+    "The browser gate uses the real production Vite build and real hierarchy, detail, and session APIs. It overlays deterministic same-origin runtime, configuration-schema, success, conflict, and 304 boundaries because a fresh local runtime store is intentionally optional.",
+    "The accepted concept contains illustrative vendor branding, approval counts, historical dates, View all, and Run with mocks controls. WEB-03 uses source-authoritative vendor-neutral data and omits future-scope or inert actions.",
+    "DEL-07 still owns a generated TypeScript API client and drift gate. WEB-03 validates unknown responses through endpoint-specific strict normalizers without claiming generated-client parity."
+  ]
+}

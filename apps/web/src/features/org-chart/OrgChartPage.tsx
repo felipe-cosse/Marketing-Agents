@@ -1,5 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 
 import {
   CATALOG_HIERARCHY_QUERY_KEY,
@@ -9,6 +15,9 @@ import {
   fetchInstanceStatusSummary,
   type InstanceStatusSummary,
 } from "../../api/instanceStatusSummary";
+import { AgentDetailPane } from "../instance-detail/AgentDetailPane";
+import { UnsavedConfigurationDialog } from "../instance-detail/UnsavedConfigurationDialog";
+import { findSelectedAgent } from "../instance-detail/selectedAgent";
 import { CatalogToolbar, type CatalogFilterOptions } from "./CatalogToolbar";
 import {
   RUN_STATES,
@@ -88,6 +97,19 @@ interface LoadedOrgChartProps {
   readonly hierarchy: NormalizedHierarchy;
 }
 
+interface PendingSelection {
+  readonly instanceId: string | null;
+  readonly restoreFocusId: string | null;
+}
+
+function focusInstanceCard(instanceId: string): boolean {
+  const card = [
+    ...document.querySelectorAll<HTMLButtonElement>("[data-instance-id]"),
+  ].find((candidate) => candidate.dataset.instanceId === instanceId);
+  card?.focus();
+  return card !== undefined;
+}
+
 function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const expectedInstanceIds = useMemo(
     () => instanceIds(hierarchy),
@@ -117,15 +139,27 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(
     null,
   );
+  const [configurationDirty, setConfigurationDirty] = useState(false);
+  const [pendingSelection, setPendingSelection] =
+    useState<PendingSelection | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const options = useMemo(() => catalogFilterOptions(hierarchy), [hierarchy]);
+  const runtimeStatusByInstanceId = useMemo(
+    () =>
+      new Map(
+        statusQuery.data?.items.map((item) => [item.instanceId, item]) ?? [],
+      ),
+    [statusQuery.data],
+  );
   const statusByInstanceId = useMemo(
     () =>
       new Map(
-        statusQuery.data?.items.map((item) => [item.instanceId, item.status]) ??
-          [],
+        [...runtimeStatusByInstanceId].map(([instanceId, item]) => [
+          instanceId,
+          item.status,
+        ]),
       ),
-    [statusQuery.data],
+    [runtimeStatusByInstanceId],
   );
   const projectionStatuses =
     filterState.filters.runState === null
@@ -135,9 +169,20 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     () => projectHierarchy(hierarchy, filterState.filters, projectionStatuses),
     [filterState.filters, hierarchy, projectionStatuses],
   );
-  const handleSelectionChange = useCallback((instanceId: string | null) => {
-    setSelectedInstanceId(instanceId);
-  }, []);
+  const handleSelectionChange = useCallback(
+    (instanceId: string | null) => {
+      if (instanceId === selectedInstanceId) return;
+      if (configurationDirty) {
+        setPendingSelection({
+          instanceId,
+          restoreFocusId: instanceId === null ? selectedInstanceId : null,
+        });
+        return;
+      }
+      setSelectedInstanceId(instanceId);
+    },
+    [configurationDirty, selectedInstanceId],
+  );
   useFilteredFocus({
     sourceHierarchy: hierarchy,
     projection,
@@ -219,42 +264,128 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     filterState.clearAll();
     requestAnimationFrame(() => searchRef.current?.focus());
   }, [filterState]);
+  const selectedAgent = useMemo(
+    () => findSelectedAgent(hierarchy, selectedInstanceId),
+    [hierarchy, selectedInstanceId],
+  );
+  const closeInspector = useCallback(() => {
+    if (selectedInstanceId === null) return;
+    if (configurationDirty) {
+      setPendingSelection({
+        instanceId: null,
+        restoreFocusId: selectedInstanceId,
+      });
+      return;
+    }
+    const restoreFocusId = selectedInstanceId;
+    setSelectedInstanceId(null);
+    requestAnimationFrame(() => {
+      if (!focusInstanceCard(restoreFocusId)) searchRef.current?.focus();
+    });
+  }, [configurationDirty, selectedInstanceId]);
+  const keepEditing = useCallback(() => {
+    setPendingSelection(null);
+    requestAnimationFrame(() => {
+      const inspector = document.querySelector("#agent-inspector");
+      const editorTarget = inspector?.querySelector<HTMLElement>(
+        "form input:not(:disabled), form select:not(:disabled), form button:not(:disabled)",
+      );
+      const fallback = inspector?.querySelector<HTMLElement>(
+        "button:not(:disabled)",
+      );
+      (editorTarget ?? fallback)?.focus();
+    });
+  }, []);
+  const discardAndContinue = useCallback(() => {
+    if (pendingSelection === null) return;
+    const { instanceId, restoreFocusId } = pendingSelection;
+    setPendingSelection(null);
+    setConfigurationDirty(false);
+    setSelectedInstanceId(instanceId);
+    requestAnimationFrame(() => {
+      const focusId = instanceId ?? restoreFocusId;
+      if (focusId !== null && focusInstanceCard(focusId)) return;
+      searchRef.current?.focus();
+    });
+  }, [pendingSelection]);
+  const handleWorkspaceKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    const eventTarget = event.target instanceof Element ? event.target : null;
+    if (
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      selectedInstanceId === null ||
+      pendingSelection !== null ||
+      eventTarget?.closest('[role="dialog"], [role="alertdialog"]') !== null
+    ) {
+      return;
+    }
+    event.preventDefault();
+    closeInspector();
+  };
 
   return (
-    <OrgChartCanvas
-      hierarchy={projection.hierarchy}
-      selectedInstanceId={selectedInstanceId}
-      onSelectionChange={handleSelectionChange}
-      emptyTitle={emptyTitle}
-      emptyMessage={emptyMessage}
-      onClearFilters={clearAndFocusSearch}
-      toolbar={
-        <CatalogToolbar
+    <div
+      className={`chart-workspace ${selectedAgent === null ? "" : "chart-workspace--with-inspector"}`}
+      onKeyDown={handleWorkspaceKeyDown}
+    >
+      <OrgChartCanvas
+        hierarchy={projection.hierarchy}
+        selectedInstanceId={selectedInstanceId}
+        onSelectionChange={handleSelectionChange}
+        emptyTitle={emptyTitle}
+        emptyMessage={emptyMessage}
+        onClearFilters={clearAndFocusSearch}
+        toolbar={
+          <CatalogToolbar
+            hierarchy={hierarchy}
+            options={options}
+            filters={{
+              q: filterState.filters.q,
+              departmentId: filterState.filters.departmentId ?? "",
+              functionId: filterState.filters.functionId ?? "",
+              deploymentState: filterState.filters.deployment ?? "",
+              recentRunState: filterState.filters.runState ?? "",
+              capabilityId: filterState.filters.capabilityId ?? "",
+            }}
+            resultCount={projection.matchedInstanceCount}
+            resultAnnouncement={runStatusUnavailable ? emptyTitle : undefined}
+            statusAvailable={statusQuery.data !== undefined}
+            statusStale={statusQuery.isRefetchError}
+            searchRef={searchRef}
+            onQueryChange={filterState.setQuery}
+            onDepartmentChange={onDepartmentChange}
+            onFunctionChange={onFunctionChange}
+            onDeploymentStateChange={onDeploymentChange}
+            onRecentRunStateChange={onRunStateChange}
+            onCapabilityChange={onCapabilityChange}
+            onClear={filterState.clearAll}
+          />
+        }
+      />
+      {selectedAgent === null ? null : (
+        <AgentDetailPane
           hierarchy={hierarchy}
-          options={options}
-          filters={{
-            q: filterState.filters.q,
-            departmentId: filterState.filters.departmentId ?? "",
-            functionId: filterState.filters.functionId ?? "",
-            deploymentState: filterState.filters.deployment ?? "",
-            recentRunState: filterState.filters.runState ?? "",
-            capabilityId: filterState.filters.capabilityId ?? "",
-          }}
-          resultCount={projection.matchedInstanceCount}
-          resultAnnouncement={runStatusUnavailable ? emptyTitle : undefined}
-          statusAvailable={statusQuery.data !== undefined}
-          statusStale={statusQuery.isRefetchError}
-          searchRef={searchRef}
-          onQueryChange={filterState.setQuery}
-          onDepartmentChange={onDepartmentChange}
-          onFunctionChange={onFunctionChange}
-          onDeploymentStateChange={onDeploymentChange}
-          onRecentRunStateChange={onRunStateChange}
-          onCapabilityChange={onCapabilityChange}
-          onClear={filterState.clearAll}
+          selected={selectedAgent}
+          runtimeStatus={runtimeStatusByInstanceId.get(
+            selectedAgent.instance.id,
+          )}
+          onClose={closeInspector}
+          onConfigurationDirtyChange={setConfigurationDirty}
         />
-      }
-    />
+      )}
+      <UnsavedConfigurationDialog
+        open={pendingSelection !== null}
+        destinationLabel={
+          pendingSelection?.instanceId === null
+            ? "close this inspector"
+            : "open another agent"
+        }
+        onDiscard={discardAndContinue}
+        onKeepEditing={keepEditing}
+      />
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@ export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
+.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -97,6 +97,12 @@ web-test-web-02-unit:
 web-test-web-02-witness:
 	node apps/web/scripts/run-web-02-witness.mjs
 
+web-test-web-03-unit:
+	node apps/web/scripts/run-web-03-unit.mjs
+
+web-test-web-03-witness:
+	node apps/web/scripts/run-web-03-witness.mjs
+
 test: test-source test-tooling test-network
 
 verify-source:
@@ -112,4 +118,4 @@ verify-governance: format-check verify-source test-source test-tooling verify-hi
 
 verify-backend: format-check lint typecheck test-backend
 
-verify-web: web-format-check web-lint web-typecheck web-test web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-build
+verify-web: web-format-check web-lint web-typecheck web-test web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-build
