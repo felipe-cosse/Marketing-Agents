@@ -143,6 +143,7 @@ Allowed status values:
 | DEL-06 | README, architecture, assumptions, security docs. | 15 | Required docs | Documentation checklist | planned |
 | DEL-07 | Required unit/catalog/API/state/idempotency/approval/adapter/frontend tests. | 14 | Full test tree | `make verify` | planned |
 | DEL-08 | Format/lint/type/test task runner commands. | 01, 14, 15 | Makefile/configs | Static gates | implemented |
+| DEL-09 | History verification accepts only explicitly pinned legacy merge-subject exceptions. | 14, 15 | Evidence verifier/policy | Pinned exception tooling tests | verified |
 
 ## Acceptance criteria matrix
 
