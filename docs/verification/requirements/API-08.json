@@ -1,0 +1,221 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "API-08",
+  "matrix_statement_sha256": "b632a4eeb7182d6dc4122b5c5250b97aa0a9a3344fa10ef5009f1178f5d76644",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/api/routes/manual_work.py",
+      "apps/api/src/marketing_agents/api/strict_json.py",
+      "apps/api/src/marketing_agents/application/policies/json_schema.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+      "apps/api/src/marketing_agents/application/ports/connectors.py",
+      "apps/api/src/marketing_agents/application/ports/llm.py",
+      "apps/api/src/marketing_agents/application/ports/read_adapter.py",
+      "apps/api/src/marketing_agents/application/ports/runtime_inputs.py",
+      "apps/api/src/marketing_agents/application/ports/runtime_outputs.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/deterministic.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/factory.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/validation.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/API-08.json",
+      "docs/verification/requirements/API-08.md",
+      "tests/contract/test_arch_06_llm_provider.py",
+      "tests/integration/api/test_api_03_instance_configuration.py",
+      "tests/integration/api/test_api_04_manual_dry_runs.py",
+      "tests/integration/api/test_api_06_approvals.py",
+      "tests/integration/db/test_orch_06_controlled_read_executor.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/security/test_safe_02_external_write_authorization.py",
+      "tests/support/read_adapter.py",
+      "tests/unit/application/ports/test_safe_05_llm_contract.py",
+      "tests/unit/application/test_api_08_json_schema_policy.py",
+      "tests/unit/application/test_run_02_effect_aware_planning.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/policies/json_schema.py",
+          "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/llm/validation.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/application/test_api_08_json_schema_policy.py",
+          "tests/contract/test_arch_06_llm_provider.py",
+          "tests/integration/db/test_orch_06_controlled_read_executor.py",
+          "tests/integration/db/test_run_05_external_action_idempotency.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "canonical-offline-schema-policy",
+      "type": "contract",
+      "statement": "One fail-closed policy canonicalizes and freezes object-shaped Draft 2020-12 schemas, enforces that dialect in actual nested subschemas, binds optional IDs, supports only resolvable local $ref and $dynamicRef pointers or anchors, rejects duplicate anchors and legacy recursive keywords, preserves reference-shaped annotation/default data, and emits deterministic non-reflective pointers without retaining rejected values.",
+      "test_refs": [
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_compilation_canonicalizes_and_freezes_an_independent_snapshot",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_optional_embedded_id_may_be_absent_but_must_match_when_present",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_nonlocal_schema_references_are_rejected",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_unresolved_local_references_fail_during_compilation",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_local_references_and_format_checks_are_enforced",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_local_anchors_and_nested_resources_resolve_at_compile_time",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_duplicate_anchors_in_one_resource_are_rejected",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_reference_shaped_example_data_is_not_treated_as_a_schema_reference",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_invalid_dialect_and_schema_definition_fail_during_compilation",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_nested_schema_cannot_switch_to_an_unsupported_dialect",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_legacy_recursive_keywords_are_rejected_in_actual_subschemas",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_error_selection_and_pointers_are_deterministic_and_non_reflective",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_depth_limit_is_inclusive_and_rejects_limit_plus_one",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_policy_failures_do_not_retain_hostile_exception_context",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_hostile_mapping_methods_fail_closed_without_retaining_canaries"
+      ]
+    },
+    {
+      "id": "strict-existing-input-boundaries",
+      "type": "negative_control",
+      "statement": "Configuration PATCH, manual dry-run, and approval mutations match the ASGI path independently of root_path, require one unencoded application/json media type with at most one UTF-8 charset, and bound bytes, depth, and ambiguous JSON before executor lookup. Strict DTOs reject coercion and authority fields; admitted manual/webhook payloads and READ requests are schema-validated before external execution with safe non-reflective failures.",
+      "test_refs": [
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_runtime_guard_maps_schema_policy_failures_to_safe_codes",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_schema_invalid_read_input_precedes_attempt_and_adapter_call",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_08_api_03_patch_rejects_non_strict_json_before_service_lookup",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_08_api_03_mounted_patch_keeps_strict_json_boundary",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_08_api_03_rejects_encoded_or_ambiguous_json_transport",
+        "tests/integration/api/test_api_03_instance_configuration.py::test_api_08_api_03_patch_bounds_depth_and_streamed_bytes_before_service_lookup",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_08_api_04_rejects_non_strict_json_before_executor",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_08_api_04_mounted_route_keeps_strict_json_boundary",
+        "tests/integration/api/test_api_04_manual_dry_runs.py::test_api_08_api_04_rejects_encoded_or_ambiguous_json_transport",
+        "tests/integration/api/test_api_06_approvals.py::test_api_08_api_06_rejects_non_strict_json_before_executor",
+        "tests/integration/api/test_api_06_approvals.py::test_api_08_api_06_mounted_route_keeps_strict_json_boundary",
+        "tests/integration/api/test_api_06_approvals.py::test_api_08_api_06_rejects_encoded_or_ambiguous_json_transport"
+      ]
+    },
+    {
+      "id": "sealed-read-output-before-artifact",
+      "type": "negative_control",
+      "statement": "Controlled READ snapshots the exact caller command before its first await, detaches the operation, recompiles contracts, validates input before reservation, and passes adapter.execute a disposable request. Exact-matched results face private canonical byte/token/depth/schema checks before detached reconstruction for artifacts. Caller, adapter, or late mutation and hostile/invalid output cannot alter authority, persistence, or completion-denial audit identity.",
+      "test_refs": [
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_schema_invalid_read_input_precedes_attempt_and_adapter_call",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_read_command_is_detached_before_the_first_await",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_invalid_command_snapshot_failure_is_context_free",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_completion_denial_uses_private_command_step_id",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_hostile_read_result_is_schema_invalid_and_never_persisted",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_adapter_cannot_mutate_sealed_policy_or_output_contract_across_call",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_successful_read_result_is_detached_from_late_adapter_mutation",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_api_08_structured_output_depth_is_bounded_before_artifact_persistence",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py::test_run_06_schema_invalid_output_is_safe_and_has_no_artifact",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_runtime_output_contract_rejects_invalid_or_mismatched_schemas",
+        "tests/unit/application/test_api_08_json_schema_policy.py::test_api_08_runtime_output_contract_accepts_matching_or_absent_embedded_id"
+      ]
+    },
+    {
+      "id": "independently-validated-llm-boundary",
+      "type": "contract",
+      "statement": "Deterministic and explicitly selected real LLM adapters accept only exact canonical typed requests, bind the declared output schema ID and hash before provider access, retain an immutable preflight snapshot, and reconstruct exact complete responses before checking schema, byte/token bounds, and provider identity. Renderer or delegate mutation cannot weaken trusted bounds, and renderer failures are context-free and non-reflective.",
+      "test_refs": [
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_same_id_changed_schema_is_rejected_before_renderer_call",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_remote_or_malformed_schema_never_reaches_renderer_or_provider",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_non_request_objects_and_constructed_corruption_never_reach_provider",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_deterministic_renderer_failures_are_context_free_and_non_reflective",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_real_response_requires_exact_canonical_llm_response",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_non_complete_response_fails_before_payload_schema_validation",
+        "tests/contract/test_arch_06_llm_provider.py::test_api_08_response_is_canonical_detached_data_and_schema_snapshot_cannot_drift"
+      ]
+    },
+    {
+      "id": "validated-write-response-with-ambiguous-effect",
+      "type": "negative_control",
+      "statement": "The registered WRITE gateway reconstructs the exact authorized request DTO before calling a connector and reconstructs and schema-validates an exact canonical ConnectorWriteResult afterward. A malformed result or ordinary post-call response-normalization exception is classified schema_invalid_response with request_may_have_left_process true, so the dispatcher cannot record false success or corrupt the action result and recovery uses the authoritative receipt.",
+      "test_refs": [
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_api_08_registry_gateway_rejects_malformed_write_result_after_one_effect"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "api-08-schema-boundaries",
+      "runner": "argv",
+      "argv": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "tests/unit/application/test_api_08_json_schema_policy.py",
+        "tests/contract/test_arch_06_llm_provider.py",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/api/test_api_03_instance_configuration.py",
+        "tests/integration/api/test_api_04_manual_dry_runs.py",
+        "tests/integration/api/test_api_06_approvals.py",
+        "tests/security/test_safe_02_external_write_authorization.py",
+        "tests/unit/application/ports/test_safe_05_llm_contract.py",
+        "tests/unit/application/test_api_04_manual_work_intake.py",
+        "tests/integration/db/test_api_04_manual_work_persistence.py",
+        "tests/integration/api/test_api_05_webhooks.py",
+        "tests/integration/db/test_api_05_webhook_intake.py",
+        "tests/unit/application/test_orch_05_typed_artifact_bindings.py",
+        "tests/security/test_safe_06_runtime_policy.py",
+        "tests/catalog/test_dom_03_template_io_schemas.py",
+        "tests/unit/application/test_run_02_effect_aware_planning.py",
+        "tests/network/test_safe_11_network_isolation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "canonical-offline-schema-policy",
+        "strict-existing-input-boundaries",
+        "sealed-read-output-before-artifact",
+        "independently-validated-llm-boundary",
+        "validated-write-response-with-ambiguous-effect"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/routes/approvals.py",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/api/routes/manual_work.py",
+      "apps/api/src/marketing_agents/api/strict_json.py",
+      "apps/api/src/marketing_agents/application/policies/json_schema.py",
+      "apps/api/src/marketing_agents/application/policies/runtime_guard.py",
+      "apps/api/src/marketing_agents/application/ports/connectors.py",
+      "apps/api/src/marketing_agents/application/ports/llm.py",
+      "apps/api/src/marketing_agents/application/ports/read_adapter.py",
+      "apps/api/src/marketing_agents/application/ports/runtime_inputs.py",
+      "apps/api/src/marketing_agents/application/ports/runtime_outputs.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/deterministic.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/factory.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/llm/validation.py"
+    ],
+    "gate_id": "api-08-schema-boundaries"
+  },
+  "limitations": [
+    "API-09 owns the process-wide application/problem+json vocabulary, correlation middleware, and global status and terminal-error normalization. API-08 adds strict validation seams and fixed non-reflective route-local failures, but does not claim that global response contract.",
+    "DEL-05 owns default runnable API, worker, repository, deterministic LLM, and connector composition. API-08 proves the schema boundaries through installed routes and injected real services, adapters, and repositories; it does not claim the default process wires every runtime dependency.",
+    "DEL-07 owns the committed OpenAPI snapshot, generated TypeScript client, and drift gate. API-08 preserves typed FastAPI/Pydantic contracts and runs existing live-schema regressions but does not claim generated client artifacts.",
+    "RuntimeInputContract computes a canonical request-schema hash, but the persisted controlled-READ operation currently seals only the request schema ID, not that hash. The executor validates against the adapter-declared schema before reservation, yet cannot independently detect a same-ID changed request schema without a later persisted request-schema hash.",
+    "The controlled executor validates output against the hash-bound schema before artifact construction and records output schema identity, version, and hash in provenance. The artifact repository does not receive a schema resolver and therefore cannot independently revalidate an artifact body against that schema during add or hydration.",
+    "Webhook authentication intentionally remains signature-first over exact raw bytes. Its bounded transport, strict source mapper, resolved input-schema validation, and safe pointer behavior are the separately proven API-05 seam included in this regression gate; API-08 does not insert the shared JSON parser ahead of signature verification.",
+    "The central runtime policy supports local-only $ref and $dynamicRef inside one schema document and rejects remote references. Draft 2020-12 does not implement the legacy $recursiveRef/$recursiveAnchor vocabulary, so actual subschemas containing those keywords fail closed; annotation/default data remains inert. Catalog multi-file resolution is a separate boundary.",
+    "The real-provider tests use injected delegates and no network, and connector tests use deterministic local gateways. No live model provider, external connector, remote schema, or network fallback is exercised or claimed."
+  ]
+}

@@ -25,6 +25,7 @@ from marketing_agents.application.ports.read_adapter import (
 from marketing_agents.application.ports.repositories import (
     ExecutionControlRepositoryConflict,
 )
+from marketing_agents.application.ports.runtime_inputs import RuntimeInputContract
 from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.application.ports.unit_of_work import UnitOfWorkFactory
 from marketing_agents.application.services import (
@@ -32,6 +33,7 @@ from marketing_agents.application.services import (
     ControlledReadCommand,
     ControlledReadExecutor,
     ControlledReadExecutorError,
+    ControlledReadResult,
     ExecutionActivationService,
     IdempotentWorkRunReceiptService,
     ReadExecutionClassification,
@@ -415,6 +417,135 @@ class StrictResultSchemaAdapter(SequenceAdapter):
         )
 
 
+class MutatingContractAdapter(StrictResultSchemaAdapter):
+    def __init__(self, attack: str) -> None:
+        super().__init__([])
+        self.attack = attack
+        self.retained_operation: OperationExecutionPolicy | None = None
+        self.retained_contract: RuntimeOutputContract | None = None
+
+    def output_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeOutputContract:
+        contract = super().output_contract_for(operation)
+        self.retained_operation = operation
+        self.retained_contract = contract
+        return contract
+
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        self.calls.append(request)
+        assert self.retained_operation is not None
+        assert self.retained_contract is not None
+        object.__setattr__(self.retained_operation, "max_output_bytes", 4_194_304)
+        object.__setattr__(self.retained_operation, "max_model_output_tokens", 32_768)
+        object.__setattr__(self.retained_contract, "schema", {})
+        object.__setattr__(self.retained_contract, "provider_name", "forged-provider")
+        if self.attack == "late_result":
+            result = observation_for(
+                request,
+                {"accepted": True},
+                model_output_tokens=1,
+            )
+
+            def mutate_after_return() -> None:
+                object.__setattr__(
+                    result.contract,
+                    "data_classification",
+                    DataClassification.PUBLIC,
+                )
+                object.__setattr__(result, "classification", DataClassification.PUBLIC)
+                object.__setattr__(result, "run_id", "run.forged")
+
+            asyncio.get_running_loop().call_soon(mutate_after_return)
+            return result
+        if self.attack == "request":
+            object.__setattr__(
+                request.contract,
+                "data_classification",
+                DataClassification.PUBLIC,
+            )
+            object.__setattr__(request, "run_id", "run.forged")
+            payload = {"accepted": True}
+            output_tokens = 1
+        elif self.attack == "schema":
+            payload: Mapping[str, object] = {"wrong": True}
+            output_tokens = 1
+        elif self.attack == "bytes":
+            payload = {"accepted": True, "padding": "x" * 100_000}
+            output_tokens = 1
+        else:
+            payload = {"accepted": True}
+            output_tokens = 32_768
+        return observation_for(
+            request,
+            payload,
+            model_output_tokens=output_tokens,
+        )
+
+
+class HostileResultAdapter(ExactReadContractAdapter):
+    def __init__(self) -> None:
+        self.calls: list[ReadAdapterRequest] = []
+
+    async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
+        self.calls.append(request)
+        result = observation_for(request, {"accepted": True})
+
+        class HostileMapping(Mapping[str, object]):
+            def __getitem__(self, _key: str) -> object:
+                raise RuntimeError("api-08-provider-secret-canary")
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                raise RuntimeError("api-08-provider-secret-canary")
+
+            def __len__(self) -> int:
+                raise RuntimeError("api-08-provider-secret-canary")
+
+        object.__setattr__(result, "output_payload", HostileMapping())
+        return result
+
+
+class ForcedCompletionDenialExecutor(ControlledReadExecutor):
+    async def _complete(
+        self,
+        reserved: object,
+        classification: ReadExecutionClassification,
+        output: ReadAdapterResult | None,
+        *,
+        runtime_denial_code: str | None,
+        safe_error_code: str | None,
+        audit_context: AuditContext,
+    ) -> ControlledReadResult:
+        del classification, output, runtime_denial_code, safe_error_code, audit_context
+        request = cast(ReadAdapterRequest, reserved.request)  # type: ignore[attr-defined]
+        raise ControlledReadExecutorError(
+            "attempt_completion_conflict",
+            "injected safe completion conflict",
+            step_id=request.step_id,
+        )
+
+
+class StrictInputSchemaAdapter(SequenceAdapter):
+    def input_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeInputContract:
+        if operation.request_schema_id is None:
+            raise ValueError("strict test operation requires a request schema")
+        return RuntimeInputContract(
+            schema_id=operation.request_schema_id,
+            schema_version="v1",
+            schema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["query"],
+                "properties": {"query": {"type": "string", "minLength": 1}},
+            },
+            classification=operation.data_classification,
+        )
+
+
 class BudgetResultAdapter(ExactReadContractAdapter):
     def __init__(
         self,
@@ -610,6 +741,162 @@ async def test_run_06_same_schema_id_changed_body_precedes_attempt_and_budget_mu
 
 
 @pytest.mark.asyncio
+async def test_api_08_schema_invalid_read_input_precedes_attempt_and_adapter_call(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-08-input-schema-invalid.db")
+    adapter = StrictInputSchemaAdapter([{"must": "not-call"}])
+    try:
+        with pytest.raises(ControlledReadExecutorError) as captured:
+            await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+                ControlledReadCommand(
+                    prepared.step_id,
+                    {"query": 7, "undeclared": "provider-secret-canary"},
+                ),
+                audit_context=_audit_context("api-08-input-schema-invalid"),
+            )
+        assert captured.value.code == "input_schema_invalid"
+        assert adapter.calls == []
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(prepared.run_id)
+            step = await unit_of_work.run_steps.get(prepared.step_id)
+            attempts = await unit_of_work.execution_control.list_attempts(
+                prepared.step_id,
+                prepared.operation_key,
+            )
+            control = await unit_of_work.execution_control.get(prepared.run_id)
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        assert run is not None and run.state is RunState.FAILED
+        assert run.terminal_reason_code == "input_schema_invalid"
+        assert step is not None and step.state is StepState.FAILED
+        assert step.terminal_reason_code == "input_schema_invalid"
+        assert attempts == ()
+        assert control is not None and control.model_calls == 0
+        assert "provider-secret-canary" not in repr(
+            [event.safe_metadata.values for event in timeline]
+        )
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_08_read_command_is_detached_before_the_first_await(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-08-command-snapshot.db")
+    adapter = DurableObservationAdapter(prepared)
+    command = ControlledReadCommand(prepared.step_id, {"query": "safe"})
+    forged_step_id = "step.api-08-command-mutation-canary"
+    payload_canary = "api-08-command-payload-mutation-canary"
+
+    def mutate_caller_owned_command() -> None:
+        object.__setattr__(command, "step_id", forged_step_id)
+        object.__setattr__(command, "input_payload", {"query": payload_canary})
+
+    asyncio.get_running_loop().call_soon(mutate_caller_owned_command)
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            command,
+            audit_context=_audit_context("api-08-command-snapshot"),
+        )
+
+        assert command.step_id == forged_step_id
+        assert command.input_payload == {"query": payload_canary}
+        assert result.classification is ReadExecutionClassification.SUCCEEDED
+        assert len(adapter.calls) == 1
+        assert adapter.calls[0].step_id == prepared.step_id
+        assert adapter.calls[0].input_payload == {"query": "safe"}
+        assert result.attempt.step_id == prepared.step_id
+        assert result.attempt.redacted_input == {"query": "safe"}
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        retained = repr((result, adapter.calls, timeline))
+        assert forged_step_id not in retained
+        assert payload_canary not in retained
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_08_invalid_command_snapshot_failure_is_context_free(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-08-command-snapshot-invalid.db")
+    adapter = DurableObservationAdapter(prepared)
+    command = ControlledReadCommand(prepared.step_id, {"query": "safe"})
+    canary = "api-08-hostile-command-snapshot-canary"
+
+    class HostileMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise RuntimeError(canary)
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            raise RuntimeError(canary)
+
+        def __len__(self) -> int:
+            raise RuntimeError(canary)
+
+    object.__setattr__(command, "input_payload", HostileMapping())
+    try:
+        with pytest.raises(
+            TypeError,
+            match="controlled READ execution requires a valid exact command",
+        ) as captured:
+            await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+                command,
+                audit_context=_audit_context("api-08-command-snapshot-invalid"),
+            )
+
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
+        assert canary not in repr(captured.value)
+        assert adapter.calls == []
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_08_completion_denial_uses_private_command_step_id(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-08-command-completion-denial.db")
+    adapter = SequenceAdapter([{"value": "safe"}])
+    command = ControlledReadCommand(prepared.step_id, {"query": "safe"})
+    forged_step_id = "step.api-08-completion-denial-canary"
+    payload_canary = "api-08-completion-denial-payload-canary"
+
+    def mutate_caller_owned_command() -> None:
+        object.__setattr__(command, "step_id", forged_step_id)
+        object.__setattr__(command, "input_payload", {"query": payload_canary})
+
+    asyncio.get_running_loop().call_soon(mutate_caller_owned_command)
+    try:
+        with pytest.raises(ControlledReadExecutorError) as captured:
+            await ForcedCompletionDenialExecutor(prepared.dependencies, adapter).execute(
+                command,
+                audit_context=_audit_context("api-08-command-completion-denial"),
+            )
+
+        assert captured.value.code == "attempt_completion_conflict"
+        assert command.step_id == forged_step_id
+        assert command.input_payload == {"query": payload_canary}
+        assert len(adapter.calls) == 1
+        assert adapter.calls[0].step_id == prepared.step_id
+        assert adapter.calls[0].input_payload == {"query": "safe"}
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        denials = tuple(event for event in timeline if event.event_type == "runtime.control_denied")
+        assert len(denials) == 1
+        assert denials[0].step_id == prepared.step_id
+        assert denials[0].safe_metadata.values["denial_code"] == "attempt_completion_conflict"
+        retained = repr((captured.value, adapter.calls, timeline))
+        assert forged_step_id not in retained
+        assert payload_canary not in retained
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
 async def test_orch_06_first_start_commits_before_adapter_and_success_completes_later(
     tmp_path: Path,
 ) -> None:
@@ -738,6 +1025,137 @@ async def test_run_06_schema_invalid_output_is_safe_and_has_no_artifact(
             and event.safe_metadata.values["denial_code"] == "output_schema_invalid"
             for event in timeline
         )
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_08_hostile_read_result_is_schema_invalid_and_never_persisted(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(tmp_path / "api-08-hostile-read-result.db")
+    adapter = HostileResultAdapter()
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context("api-08-hostile-read-result"),
+        )
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            artifacts = await unit_of_work.artifacts.list_for_run(prepared.run_id)
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        assert len(adapter.calls) == 1
+        assert result.classification is ReadExecutionClassification.PERMANENT_FAILURE
+        assert result.attempt.safe_error_code == "output_schema_invalid"
+        assert result.output is None and result.artifact is None
+        assert artifacts == ()
+        assert "provider-secret-canary" not in repr(
+            [event.safe_metadata.values for event in timeline]
+        )
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("attack", "expected_code"),
+    (
+        ("schema", "output_schema_invalid"),
+        ("bytes", "output_payload_too_large"),
+        ("tokens", "model_output_tokens_exceeded"),
+        ("request", "adapter_response_mismatch"),
+    ),
+)
+async def test_api_08_adapter_cannot_mutate_sealed_policy_or_output_contract_across_call(
+    tmp_path: Path,
+    attack: str,
+    expected_code: str,
+) -> None:
+    prepared = await _prepare(
+        tmp_path / f"api-08-contract-mutation-{attack}.db",
+        output_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["accepted"],
+            "properties": {"accepted": {"type": "boolean"}},
+        },
+        max_output_bytes=1_024,
+    )
+    adapter = MutatingContractAdapter(attack)
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context(f"api-08-contract-mutation-{attack}"),
+        )
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            artifacts = await unit_of_work.artifacts.list_for_run(prepared.run_id)
+        assert len(adapter.calls) == 1
+        assert result.classification is ReadExecutionClassification.PERMANENT_FAILURE
+        assert result.attempt.safe_error_code == expected_code
+        assert result.output is None and result.artifact is None
+        assert artifacts == ()
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_08_successful_read_result_is_detached_from_late_adapter_mutation(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepare(
+        tmp_path / "api-08-late-result-mutation.db",
+        output_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["accepted"],
+            "properties": {"accepted": {"type": "boolean"}},
+        },
+    )
+    adapter = MutatingContractAdapter("late_result")
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context("api-08-late-result-mutation"),
+        )
+        assert result.classification is ReadExecutionClassification.SUCCEEDED
+        assert result.output is not None
+        assert result.output.run_id == prepared.run_id
+        assert result.output.classification is DataClassification.INTERNAL
+        assert result.output.contract.data_classification is DataClassification.INTERNAL
+        assert result.artifact is not None
+        assert result.artifact.provenance.classification is DataClassification.INTERNAL
+        assert result.artifact.provenance.sources[0].classification is DataClassification.INTERNAL
+    finally:
+        await prepared.runtime.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mapping_depth", (63, 64))
+async def test_api_08_structured_output_depth_is_bounded_before_artifact_persistence(
+    tmp_path: Path,
+    mapping_depth: int,
+) -> None:
+    prepared = await _prepare(tmp_path / f"api-08-output-depth-{mapping_depth}.db")
+    nested: object = "depth-canary"
+    for _ in range(mapping_depth):
+        nested = {"nested": nested}
+    adapter = SequenceAdapter([nested])
+    try:
+        result = await ControlledReadExecutor(prepared.dependencies, adapter).execute(
+            ControlledReadCommand(prepared.step_id, {"query": "safe"}),
+            audit_context=_audit_context(f"api-08-output-depth-{mapping_depth}"),
+        )
+        async with prepared.dependencies.unit_of_work() as unit_of_work:
+            artifacts = await unit_of_work.artifacts.list_for_run(prepared.run_id)
+            timeline = await unit_of_work.audits.list_run(prepared.run_id)
+        if mapping_depth == 63:
+            assert result.classification is ReadExecutionClassification.SUCCEEDED
+            assert len(artifacts) == 1
+        else:
+            assert result.classification is ReadExecutionClassification.PERMANENT_FAILURE
+            assert result.attempt.safe_error_code == "output_schema_invalid"
+            assert result.output is None and result.artifact is None
+            assert artifacts == ()
+            assert "depth-canary" not in repr([event.safe_metadata.values for event in timeline])
     finally:
         await prepared.runtime.dispose()
 

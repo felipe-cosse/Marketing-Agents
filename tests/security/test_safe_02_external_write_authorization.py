@@ -99,7 +99,11 @@ def test_safe_02_mutation_families_have_zero_calls_without_exact_proof(
             if not isinstance(write, AuthorizedExternalWrite):
                 raise TypeError("sealed authorization required")
             calls.append(write)
-            return ConnectorWriteResult("receipt:1", "succeeded", {})
+            return ConnectorWriteResult(
+                receipt_id="receipt:1",
+                status="succeeded",
+                safe_metadata={},
+            )
 
     action = _action(action_type)
     bad_reservation = _reservation(action).model_copy(update={"action_hash": "0" * 64})
@@ -117,7 +121,11 @@ def test_safe_02_exact_reserved_action_produces_one_connector_call() -> None:
     class RecordingConnector:
         async def execute(self, write: AuthorizedExternalWrite) -> ConnectorWriteResult:
             calls.append(write)
-            return ConnectorWriteResult("receipt:1", "succeeded", {"mock": True})
+            return ConnectorWriteResult(
+                receipt_id="receipt:1",
+                status="succeeded",
+                safe_metadata={"mock": True},
+            )
 
     action = _action()
     write = WriteAuthorizationGuard().authorize(action, _reservation(action), IDEMPOTENCY_KEY)

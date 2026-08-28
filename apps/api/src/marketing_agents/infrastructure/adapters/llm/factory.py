@@ -110,11 +110,11 @@ class ValidatingRealLLMProvider:
         self._expected_provider = expected_provider
 
     async def generate_structured(self, request: LLMRequest) -> LLMResponse:
-        validate_llm_request(self._guard, request)
-        response = await self._delegate.generate_structured(request)
+        preflight = validate_llm_request(self._guard, request)
+        response = await self._delegate.generate_structured(preflight.request)
         return validate_llm_response(
             self._guard,
-            request,
+            preflight,
             response,
             expected_provider=self._expected_provider,
         )

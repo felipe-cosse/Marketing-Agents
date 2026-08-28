@@ -34,6 +34,12 @@ from marketing_agents.api.schemas.approvals import (
     ApprovalResourceView,
     ApprovalSummaryView,
 )
+from marketing_agents.api.strict_json import (
+    StrictJsonTransportError,
+    strict_json_route_path,
+    strict_json_transport_headers_are_valid,
+    validate_strict_json_body,
+)
 from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionCommand,
     ApprovalDecisionServiceError,
@@ -141,7 +147,7 @@ class ApprovalPrivateResponseMiddleware:
         self._app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        path = str(scope.get("path", ""))
+        path = strict_json_route_path(scope)
         if scope["type"] != "http" or not (
             path == "/api/v1/approvals"
             or path.startswith("/api/v1/approvals/")
@@ -163,6 +169,16 @@ class ApprovalPrivateResponseMiddleware:
 
         try:
             if scope.get("method") == "POST":
+                if not strict_json_transport_headers_are_valid(scope):
+                    await self._reject(
+                        scope,
+                        receive,
+                        private_send,
+                        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                        code="approval_json_required",
+                        message="approval mutations require application/json",
+                    )
+                    return
                 declared = self._declared_length(scope)
                 if declared == "invalid":
                     await self._reject(
@@ -200,7 +216,12 @@ class ApprovalPrivateResponseMiddleware:
                     buffered.extend(chunk)
                     if not message.get("more_body", False):
                         break
-                if self._json_depth_exceeds(bytes(buffered)):
+                try:
+                    validate_strict_json_body(
+                        bytes(buffered),
+                        max_depth=_MAX_APPROVAL_JSON_DEPTH,
+                    )
+                except StrictJsonTransportError:
                     await self._reject(
                         scope,
                         receive,
@@ -264,30 +285,6 @@ class ApprovalPrivateResponseMiddleware:
         return "too_large" if parsed > _MAX_APPROVAL_REQUEST_BYTES else None
 
     @staticmethod
-    def _json_depth_exceeds(body: bytes) -> bool:
-        depth = 0
-        in_string = False
-        escaped = False
-        for byte in body:
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif byte == 0x5C:
-                    escaped = True
-                elif byte == 0x22:
-                    in_string = False
-                continue
-            if byte == 0x22:
-                in_string = True
-            elif byte in {0x5B, 0x7B}:
-                depth += 1
-                if depth > _MAX_APPROVAL_JSON_DEPTH:
-                    return True
-            elif byte in {0x5D, 0x7D}:
-                depth = max(0, depth - 1)
-        return False
-
-    @staticmethod
     async def _reject_too_large(scope: Scope, receive: Receive, send: Send) -> None:
         await ApprovalPrivateResponseMiddleware._reject(
             scope,
@@ -323,13 +320,7 @@ def _private_response(response: Response) -> None:
 
 
 def _require_json_transport(request: Request) -> None:
-    values = request.headers.getlist("content-type")
-    encodings = request.headers.getlist("content-encoding")
-    if (
-        len(values) != 1
-        or encodings
-        or values[0].split(";", 1)[0].strip().casefold() != "application/json"
-    ):
+    if not strict_json_transport_headers_are_valid(request.scope):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={

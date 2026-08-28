@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
+from marketing_agents.application.policies.json_schema import (
+    DRAFT_2020_12_DIALECT,
+    JsonSchemaPolicyError,
+)
 from marketing_agents.application.policies.runtime_guard import (
     CapabilityPolicy,
     RuntimePolicyGuard,
@@ -23,6 +29,7 @@ from marketing_agents.application.ports.llm import (
     TrustedSystemInstructions,
 )
 from marketing_agents.config import Settings
+from marketing_agents.domain.schema_hash import canonical_schema_hash
 from marketing_agents.infrastructure.adapters.llm import deterministic, factory
 from marketing_agents.infrastructure.adapters.llm.deterministic import (
     DeterministicLLMProvider,
@@ -40,13 +47,18 @@ from marketing_agents.infrastructure.adapters.llm.factory import (
     ValidatingRealLLMProvider,
     build_llm_provider,
 )
-from marketing_agents.infrastructure.adapters.llm.validation import LLMResponsePolicyError
+from marketing_agents.infrastructure.adapters.llm.validation import (
+    LLMRequestPolicyError,
+    LLMResponsePolicyError,
+)
 from marketing_agents.security.content_trust import ExternalContentKind, UntrustedContentPart
 from pydantic import JsonValue, ValidationError
 
 TEMPLATE_ID = "tpl.social-media.new-content.linkedin-post-drafter"
 SCHEMA_ID = "schema:linkedin-draft:v1"
 OUTPUT_SCHEMA: dict[str, JsonValue] = {
+    "$schema": DRAFT_2020_12_DIALECT,
+    "$id": SCHEMA_ID,
     "type": "object",
     "additionalProperties": False,
     "required": ["draft", "fixture"],
@@ -88,8 +100,12 @@ def _request(
     content: str = "Write about deterministic orchestration.",
     output_schema_id: str = SCHEMA_ID,
     output_schema: dict[str, JsonValue] | None = None,
+    output_schema_hash: str | None = None,
     max_output_tokens: int = 128,
 ) -> LLMRequest:
+    selected_schema = dict(OUTPUT_SCHEMA) if output_schema is None else output_schema
+    if output_schema is None and output_schema_id != SCHEMA_ID:
+        selected_schema["$id"] = output_schema_id
     return LLMRequest(
         system_instructions=TrustedSystemInstructions(
             template_id=TEMPLATE_ID,
@@ -105,7 +121,12 @@ def _request(
             ),
         ),
         output_schema_id=output_schema_id,
-        output_schema=output_schema or OUTPUT_SCHEMA,
+        output_schema_hash=(
+            canonical_schema_hash(selected_schema)
+            if output_schema_hash is None
+            else output_schema_hash
+        ),
+        output_schema=selected_schema,
         context=LLMInvocationContext(
             run_id=run_id,
             step_id="step:draft",
@@ -132,10 +153,22 @@ def _renderer_registry() -> DeterministicRendererRegistry:
             RendererRegistration(
                 key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
                 version="fixture-v1",
+                output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
                 renderer=_render_draft,
             ),
         )
     )
+
+
+def _changed_output_schema() -> dict[str, JsonValue]:
+    return {
+        "$schema": DRAFT_2020_12_DIALECT,
+        "$id": SCHEMA_ID,
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["replacement"],
+        "properties": {"replacement": {"type": "boolean"}},
+    }
 
 
 def test_arch_06_default_factory_is_offline_deterministic_and_exact_keyed() -> None:
@@ -172,10 +205,18 @@ def test_arch_06_duplicate_renderers_and_network_capable_imports_are_rejected() 
     registration = RendererRegistration(
         key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
         version="fixture-v1",
+        output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
         renderer=_render_draft,
     )
     with pytest.raises(DeterministicRendererError, match="duplicate deterministic renderer"):
         DeterministicRendererRegistry((registration, registration))
+    with pytest.raises(DeterministicRendererError, match="schema hash must be canonical"):
+        RendererRegistration(
+            key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
+            version="fixture-v1",
+            output_schema_hash="not-a-schema-hash",
+            renderer=_render_draft,
+        )
 
     forbidden_roots = {"aiohttp", "boto3", "httpx", "openai", "requests", "urllib3"}
     for module in (deterministic, factory):
@@ -192,6 +233,203 @@ def test_arch_06_duplicate_renderers_and_network_capable_imports_are_rejected() 
             if isinstance(node, ast.ImportFrom)
         }
         assert imported_roots.isdisjoint(forbidden_roots)
+
+
+def test_api_08_same_id_changed_schema_is_rejected_before_renderer_call() -> None:
+    renderer_calls = 0
+
+    def counting_renderer(
+        request: LLMRequest,
+        context: DeterministicRenderContext,
+    ) -> dict[str, JsonValue]:
+        nonlocal renderer_calls
+        renderer_calls += 1
+        return _render_draft(request, context)
+
+    registry = DeterministicRendererRegistry(
+        (
+            RendererRegistration(
+                key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
+                version="fixture-v1",
+                output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
+                renderer=counting_renderer,
+            ),
+        )
+    )
+    provider = DeterministicLLMProvider(registry, _guard())
+
+    with pytest.raises(LLMRequestPolicyError) as changed_schema:
+        asyncio.run(provider.generate_structured(_request(output_schema=_changed_output_schema())))
+    assert changed_schema.value.code == "renderer_schema_hash_mismatch"
+    assert renderer_calls == 0
+
+    with pytest.raises(LLMRequestPolicyError) as false_hash:
+        asyncio.run(
+            provider.generate_structured(
+                _request(
+                    output_schema=_changed_output_schema(),
+                    output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
+                )
+            )
+        )
+    assert false_hash.value.code == "schema_hash_mismatch"
+    assert renderer_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("schema", "code"),
+    [
+        (
+            {
+                "$schema": DRAFT_2020_12_DIALECT,
+                "$id": SCHEMA_ID,
+                "$ref": "https://schemas.example.test/remote.json",
+            },
+            "schema_reference_nonlocal",
+        ),
+        (
+            {
+                "$schema": DRAFT_2020_12_DIALECT,
+                "$id": SCHEMA_ID,
+                "type": 7,
+            },
+            "schema_invalid",
+        ),
+        (
+            {
+                "$schema": DRAFT_2020_12_DIALECT,
+                "$id": SCHEMA_ID,
+                "$ref": "#/$defs/missing",
+            },
+            "schema_invalid",
+        ),
+        (
+            {
+                "$schema": DRAFT_2020_12_DIALECT,
+                "$id": "schema:different-output:v1",
+                "type": "object",
+            },
+            "schema_identity_mismatch",
+        ),
+    ],
+)
+def test_api_08_remote_or_malformed_schema_never_reaches_renderer_or_provider(
+    schema: dict[str, JsonValue],
+    code: str,
+) -> None:
+    renderer_calls = 0
+
+    def counting_renderer(
+        request: LLMRequest,
+        context: DeterministicRenderContext,
+    ) -> dict[str, JsonValue]:
+        nonlocal renderer_calls
+        renderer_calls += 1
+        return _render_draft(request, context)
+
+    deterministic_provider = DeterministicLLMProvider(
+        DeterministicRendererRegistry(
+            (
+                RendererRegistration(
+                    key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
+                    version="fixture-v1",
+                    output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
+                    renderer=counting_renderer,
+                ),
+            )
+        ),
+        _guard(),
+    )
+    with pytest.raises(JsonSchemaPolicyError) as renderer_error:
+        asyncio.run(deterministic_provider.generate_structured(_request(output_schema=schema)))
+    assert renderer_error.value.code == code
+    assert renderer_calls == 0
+
+    class NeverCalledProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_structured(self, request: LLMRequest) -> LLMResponse:
+            self.calls += 1
+            raise AssertionError("invalid schema reached real provider")
+
+    delegate = NeverCalledProvider()
+    real_provider = ValidatingRealLLMProvider(delegate, _guard(), expected_provider="openai")
+    with pytest.raises(JsonSchemaPolicyError) as provider_error:
+        asyncio.run(real_provider.generate_structured(_request(output_schema=schema)))
+    assert provider_error.value.code == code
+    assert delegate.calls == 0
+
+
+def test_api_08_non_request_objects_and_constructed_corruption_never_reach_provider() -> None:
+    class NeverCalledProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_structured(self, request: LLMRequest) -> LLMResponse:
+            self.calls += 1
+            raise AssertionError("invalid request reached provider")
+
+    delegate = NeverCalledProvider()
+    provider = ValidatingRealLLMProvider(delegate, _guard(), expected_provider="openai")
+    invalid_requests = (
+        cast(LLMRequest, {"not": "an LLMRequest"}),
+        LLMRequest.model_construct(),
+    )
+    for invalid_request in invalid_requests:
+        with pytest.raises(LLMRequestPolicyError) as captured:
+            asyncio.run(provider.generate_structured(invalid_request))
+        assert captured.value.code == "request_invalid"
+    assert delegate.calls == 0
+
+
+def test_api_08_deterministic_renderer_failures_are_context_free_and_non_reflective() -> None:
+    canary = "api-08-provider-secret-canary"
+
+    class HostileDict(dict[str, JsonValue]):
+        def items(self):  # type: ignore[no-untyped-def]
+            raise RuntimeError(canary)
+
+    class HostileMapping(Mapping[str, object]):
+        def __getitem__(self, _key: str) -> object:
+            raise RuntimeError(canary)
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            raise RuntimeError(canary)
+
+        def __len__(self) -> int:
+            raise RuntimeError(canary)
+
+    def raise_directly(_request, _context):  # type: ignore[no-untyped-def]
+        raise RuntimeError(canary)
+
+    renderers = (
+        raise_directly,
+        lambda _request, _context: HostileDict(),
+        lambda _request, _context: {
+            "draft": HostileMapping(),
+            "fixture": "a" * 12,
+        },
+    )
+    for renderer in renderers:
+        registry = DeterministicRendererRegistry(
+            (
+                RendererRegistration(
+                    key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
+                    version="fixture-v1",
+                    output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
+                    renderer=renderer,  # type: ignore[arg-type]
+                ),
+            )
+        )
+        provider = DeterministicLLMProvider(registry, _guard())
+        with pytest.raises(LLMResponsePolicyError) as captured:
+            asyncio.run(provider.generate_structured(_request()))
+        assert captured.value.code == "provider_response_invalid"
+        assert canary not in str(captured.value)
+        assert canary not in repr(captured.value)
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
 
 
 @pytest.mark.parametrize(
@@ -232,6 +470,7 @@ def test_arch_06_mock_output_is_independently_schema_and_bounds_validated(
             RendererRegistration(
                 key=RendererKey(TEMPLATE_ID, SCHEMA_ID),
                 version="fixture-v1",
+                output_schema_hash=canonical_schema_hash(OUTPUT_SCHEMA),
                 renderer=renderer,  # type: ignore[arg-type]
             ),
         )
@@ -260,6 +499,139 @@ class _FakeRealProvider:
             finish_reason="complete",
             usage=LLMUsage(input_tokens=10, output_tokens=10),
         )
+
+
+class _StaticRealProvider:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls = 0
+
+    async def generate_structured(self, request: LLMRequest) -> LLMResponse:
+        self.calls += 1
+        return cast(LLMResponse, self.response)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"not": "an LLMResponse"},
+        LLMResponse.model_construct(
+            structured_payload={"draft": "x", "fixture": "b" * 12},
+            provider="openai",
+            model=17,
+            version="test-v1",
+            finish_reason="complete",
+            usage=LLMUsage(input_tokens=1, output_tokens=1),
+        ),
+        LLMResponse.model_construct(
+            structured_payload={"draft": float("nan"), "fixture": "b" * 12},
+            provider="openai",
+            model="fake-structured-model",
+            version="test-v1",
+            finish_reason="complete",
+            usage=LLMUsage(input_tokens=1, output_tokens=1),
+        ),
+    ],
+)
+def test_api_08_real_response_requires_exact_canonical_llm_response(response: object) -> None:
+    delegate = _StaticRealProvider(response)
+    provider = ValidatingRealLLMProvider(delegate, _guard(), expected_provider="openai")
+
+    with pytest.raises(LLMResponsePolicyError) as captured:
+        asyncio.run(provider.generate_structured(_request()))
+    assert captured.value.code == "provider_response_invalid"
+    assert delegate.calls == 1
+
+
+def test_api_08_non_complete_response_fails_before_payload_schema_validation() -> None:
+    response = LLMResponse(
+        structured_payload={"wrong": True},
+        provider="openai",
+        model="fake-structured-model",
+        version="test-v1",
+        finish_reason="length",
+        usage=LLMUsage(input_tokens=1, output_tokens=1),
+    )
+    provider = ValidatingRealLLMProvider(
+        _StaticRealProvider(response),
+        _guard(),
+        expected_provider="openai",
+    )
+
+    with pytest.raises(LLMResponsePolicyError) as captured:
+        asyncio.run(provider.generate_structured(_request()))
+    assert captured.value.code == "provider_response_incomplete"
+
+
+def test_api_08_response_is_canonical_detached_data_and_schema_snapshot_cannot_drift() -> None:
+    response = LLMResponse(
+        structured_payload={"draft": "Cafe\u0301", "fixture": "b" * 12},
+        provider="openai",
+        model="fake-structured-model",
+        version="test-v1",
+        finish_reason="complete",
+        usage=LLMUsage(input_tokens=1, output_tokens=1),
+    )
+    provider = ValidatingRealLLMProvider(
+        _StaticRealProvider(response),
+        _guard(),
+        expected_provider="openai",
+    )
+
+    validated = asyncio.run(provider.generate_structured(_request()))
+    assert validated is not response
+    assert validated.structured_payload["draft"] == "Café"
+    response.structured_payload["draft"] = "mutated after return"
+    assert validated.structured_payload["draft"] == "Café"
+
+    class SchemaMutatingProvider:
+        async def generate_structured(self, request: LLMRequest) -> LLMResponse:
+            request.output_schema.clear()
+            request.output_schema.update(
+                {
+                    "$schema": DRAFT_2020_12_DIALECT,
+                    "$id": SCHEMA_ID,
+                    "type": "object",
+                }
+            )
+            return LLMResponse(
+                structured_payload={"wrong": True},
+                provider="openai",
+                model="fake-structured-model",
+                version="test-v1",
+                finish_reason="complete",
+                usage=LLMUsage(input_tokens=1, output_tokens=1),
+            )
+
+    mutating_provider = ValidatingRealLLMProvider(
+        SchemaMutatingProvider(),
+        _guard(),
+        expected_provider="openai",
+    )
+    with pytest.raises(RuntimePolicyViolation) as captured:
+        asyncio.run(mutating_provider.generate_structured(_request()))
+    assert captured.value.code == "output_schema_invalid"
+
+    class BudgetMutatingProvider:
+        async def generate_structured(self, request: LLMRequest) -> LLMResponse:
+            object.__setattr__(request.context, "max_output_tokens", 32_768)
+            return LLMResponse(
+                structured_payload={"draft": "valid", "fixture": "b" * 12},
+                provider="openai",
+                model="fake-structured-model",
+                version="test-v1",
+                finish_reason="complete",
+                usage=LLMUsage(input_tokens=1, output_tokens=129),
+            )
+
+    budget_mutating_provider = ValidatingRealLLMProvider(
+        BudgetMutatingProvider(),
+        _guard(),
+        expected_provider="openai",
+    )
+    with pytest.raises(LLMResponsePolicyError) as budget_error:
+        asyncio.run(budget_mutating_provider.generate_structured(_request()))
+    assert budget_error.value.code == "output_token_limit"
 
 
 def _fake_real_factory(_settings: LLMProviderSettings) -> LLMProvider:

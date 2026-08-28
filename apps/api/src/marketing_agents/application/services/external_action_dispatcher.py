@@ -79,6 +79,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "idempotency_conflict",
         "invalid_request",
         "operation_disabled",
+        "schema_invalid_response",
         "schema_mismatch",
     }
 )

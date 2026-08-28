@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -12,8 +13,10 @@ from pydantic import JsonValue
 
 from marketing_agents.application.policies.runtime_guard import RuntimePolicyGuard
 from marketing_agents.application.ports.llm import LLMRequest, LLMResponse, LLMUsage
-from marketing_agents.domain.canonical_json import CanonicalJsonError, canonical_json_bytes
+from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.schema_hash import require_schema_hash
 from marketing_agents.infrastructure.adapters.llm.validation import (
+    LLMRequestPolicyError,
     LLMResponsePolicyError,
     validate_llm_request,
     validate_llm_response,
@@ -71,6 +74,7 @@ class DeterministicRenderer(Protocol):
 class RendererRegistration:
     key: RendererKey
     version: str
+    output_schema_hash: str
     renderer: DeterministicRenderer
 
     def __post_init__(self) -> None:
@@ -78,6 +82,12 @@ class RendererRegistration:
             raise DeterministicRendererError(
                 "renderer version must be normalized and 1..100 characters"
             )
+        try:
+            require_schema_hash(self.output_schema_hash, "renderer output schema hash")
+        except ValueError as exc:
+            raise DeterministicRendererError(
+                "renderer output schema hash must be canonical"
+            ) from exc
 
 
 class DeterministicRendererRegistry:
@@ -125,6 +135,7 @@ def _fixture_projection(request: LLMRequest) -> dict[str, JsonValue]:
             [item.model_dump(mode="json") for item in request.tool_results],
         ),
         "output_schema_id": request.output_schema_id,
+        "output_schema_hash": request.output_schema_hash,
         "output_schema": cast(JsonValue, request.output_schema),
     }
 
@@ -153,52 +164,76 @@ class DeterministicLLMProvider:
         self._guard = guard
 
     async def generate_structured(self, request: LLMRequest) -> LLMResponse:
-        validate_llm_request(self._guard, request)
+        preflight = validate_llm_request(self._guard, request)
+        canonical_request = preflight.request
         registration = self._registry.resolve(
             RendererKey(
-                template_id=request.system_instructions.template_id,
-                output_schema_id=request.output_schema_id,
+                template_id=canonical_request.system_instructions.template_id,
+                output_schema_id=canonical_request.output_schema_id,
             )
         )
-        fixture_projection = _fixture_projection(request)
+        if registration.output_schema_hash != preflight.output_schema_hash:
+            raise LLMRequestPolicyError(
+                "renderer_schema_hash_mismatch",
+                "LLM output schema does not match the registered renderer contract",
+            )
+        fixture_projection = _fixture_projection(canonical_request)
         fixture_bytes = canonical_json_bytes(fixture_projection)
         context = DeterministicRenderContext(
             fixture_key=hashlib.sha256(FIXTURE_KEY_DOMAIN + fixture_bytes).hexdigest(),
             provider_version=self.version,
             renderer_version=registration.version,
         )
-        rendered = registration.renderer(request, context)
-        if not isinstance(rendered, dict):
-            raise DeterministicRendererError("deterministic renderer must return a JSON object")
-        payload = dict(rendered)
+        payload: dict[str, JsonValue] | None = None
+        payload_bytes = b""
+        renderer_output_invalid = False
         try:
-            payload_bytes = canonical_json_bytes(payload)
-        except CanonicalJsonError as exc:
-            raise DeterministicRendererError(
-                "deterministic renderer returned non-canonical JSON"
-            ) from exc
+            rendered = registration.renderer(canonical_request, context)
+            if type(rendered) is not dict:
+                raise TypeError("deterministic renderer returned a non-exact object")
+            payload_bytes = canonical_json_bytes(rendered)
+            plain_payload = json.loads(payload_bytes)
+            if type(plain_payload) is not dict:
+                raise TypeError("deterministic renderer returned a non-object")
+            payload = cast(dict[str, JsonValue], plain_payload)
+        except Exception:
+            renderer_output_invalid = True
+        if renderer_output_invalid or payload is None:
+            raise LLMResponsePolicyError(
+                "provider_response_invalid",
+                "deterministic renderer returned an invalid structured response",
+            )
 
-        self._guard.validate_output(payload, request.output_schema)
         output_tokens = max(1, (len(payload_bytes) + 3) // 4)
-        if output_tokens > request.context.max_output_tokens:
+        if output_tokens > canonical_request.context.max_output_tokens:
             raise LLMResponsePolicyError(
                 "output_token_limit",
                 "deterministic output exceeds the request token budget",
             )
-        response = LLMResponse(
-            structured_payload=payload,
-            provider=self.provider_id,
-            model=self.model_id,
-            version=self.version,
-            finish_reason="complete",
-            usage=LLMUsage(
-                input_tokens=max(1, (len(fixture_bytes) + 3) // 4),
-                output_tokens=output_tokens,
-            ),
-        )
+        response: LLMResponse | None = None
+        response_invalid = False
+        try:
+            response = LLMResponse(
+                structured_payload=payload,
+                provider=self.provider_id,
+                model=self.model_id,
+                version=self.version,
+                finish_reason="complete",
+                usage=LLMUsage(
+                    input_tokens=max(1, (len(fixture_bytes) + 3) // 4),
+                    output_tokens=output_tokens,
+                ),
+            )
+        except Exception:
+            response_invalid = True
+        if response_invalid or response is None:
+            raise LLMResponsePolicyError(
+                "provider_response_invalid",
+                "deterministic renderer returned an invalid structured response",
+            )
         return validate_llm_response(
             self._guard,
-            request,
+            preflight,
             response,
             expected_provider=self.provider_id,
         )

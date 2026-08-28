@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from math import ceil
 from typing import Any
 
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
-from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
-
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
+from marketing_agents.application.policies.json_schema import (
+    JsonSchemaPolicyError,
+    compile_json_schema,
+)
 from marketing_agents.application.ports.read_adapter import (
     ReadAdapter,
     ReadAdapterCancelledError,
@@ -29,6 +30,7 @@ from marketing_agents.application.ports.repositories import (
     AttemptReservationResult,
     ExecutionControlRepositoryConflict,
 )
+from marketing_agents.application.ports.runtime_inputs import RuntimeInputContract
 from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.domain.audit import (
     RUNTIME_CONTROL_DENIAL_CODES,
@@ -138,6 +140,22 @@ class ControlledReadCommand:
         )
 
 
+def _detached_read_command(
+    command: ControlledReadCommand,
+) -> ControlledReadCommand | None:
+    """Snapshot caller-owned command data before the executor reaches an await."""
+
+    if type(command) is not ControlledReadCommand:
+        return None
+    try:
+        return ControlledReadCommand(
+            step_id=command.step_id,
+            input_payload=command.input_payload,
+        )
+    except Exception:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class ControlledReadResult:
     classification: ReadExecutionClassification
@@ -234,14 +252,15 @@ class ControlledReadExecutor:
         *,
         audit_context: AuditContext,
     ) -> ControlledReadResult:
-        if type(command) is not ControlledReadCommand:
-            raise TypeError("controlled READ execution requires an exact command")
+        private_command = _detached_read_command(command)
+        if private_command is None:
+            raise TypeError("controlled READ execution requires a valid exact command")
         audit_context.verify_integrity()
         try:
-            reservation = await self._reserve(command, audit_context=audit_context)
+            reservation = await self._reserve(private_command, audit_context=audit_context)
         except ControlledReadExecutorError as exc:
             await self._record_runtime_control_denial(
-                command.step_id,
+                private_command.step_id,
                 exc,
                 audit_context=audit_context,
             )
@@ -257,15 +276,19 @@ class ControlledReadExecutor:
         timeout_seconds = (
             reserved.reservation.attempt.call_deadline_at - self._dependencies.utc_now()
         ).total_seconds()
+        adapter_request = _detached_read_request(reserved.request)
         try:
-            if timeout_seconds <= 0:
+            if adapter_request is None:
+                classification = ReadExecutionClassification.PERMANENT_FAILURE
+                safe_error_code = "invalid_request"
+            elif timeout_seconds <= 0:
                 classification = ReadExecutionClassification.TIMED_OUT
                 safe_error_code = "connector_timeout"
             else:
                 loop = asyncio.get_running_loop()
                 monotonic_deadline = loop.time() + timeout_seconds
                 async with asyncio.timeout(timeout_seconds):
-                    candidate = await self._adapter.execute(reserved.request)
+                    candidate = await self._adapter.execute(adapter_request)
                     returned_at = self._dependencies.utc_now()
                     returned_monotonic = loop.time()
                 if (
@@ -283,12 +306,20 @@ class ControlledReadExecutor:
                         reserved.operation,
                         reserved.output_contract,
                     )
-                    if runtime_denial_code is None:
-                        classification = ReadExecutionClassification.SUCCEEDED
-                        output = candidate
-                    else:
+                    if runtime_denial_code is not None:
                         classification = ReadExecutionClassification.PERMANENT_FAILURE
                         safe_error_code = runtime_denial_code
+                    else:
+                        canonical_candidate = _canonical_read_result(
+                            candidate,
+                            reserved.request,
+                        )
+                        if canonical_candidate is not None:
+                            classification = ReadExecutionClassification.SUCCEEDED
+                            output = canonical_candidate
+                        else:
+                            classification = ReadExecutionClassification.PERMANENT_FAILURE
+                            safe_error_code = "output_schema_invalid"
         except ReadAdapterTransientError as exc:
             classification = ReadExecutionClassification.TRANSIENT_FAILURE
             safe_error_code = normalize_attempt_error_code(
@@ -338,7 +369,7 @@ class ControlledReadExecutor:
             )
         except ControlledReadExecutorError as exc:
             await self._record_runtime_control_denial(
-                command.step_id,
+                private_command.step_id,
                 exc,
                 audit_context=audit_context,
             )
@@ -470,6 +501,14 @@ class ControlledReadExecutor:
                         "READ step lacks its exact immutable operation policy",
                         step_id=step.id,
                     )
+                sealed_operation = _detached_operation_policy(operation)
+                if sealed_operation is None:
+                    raise ControlledReadExecutorError(
+                        "execution_policy_invalid",
+                        "READ operation policy could not be detached safely",
+                        step_id=step.id,
+                    )
+                operation = sealed_operation
                 if control.policy_hash != step.plan_hash or control.started_at is None:
                     raise ControlledReadExecutorError(
                         "execution_not_started",
@@ -602,10 +641,15 @@ class ControlledReadExecutor:
                         "READ step differs from its sealed execution plan",
                         step_id=step.id,
                     )
+                contract_failure: ControlledReadExecutorError | None = None
+                declared_contract: ReadAdapterContract | None = None
+                raw_input_contract: RuntimeInputContract | None = None
+                raw_output_contract: RuntimeOutputContract | None = None
                 try:
                     expected_contract = ReadAdapterContract.from_operation(operation)
-                    declared_contract = self._adapter.contract_for(operation)
-                    output_contract = self._adapter.output_contract_for(operation)
+                    declared_contract = self._adapter.contract_for(replace(operation))
+                    raw_input_contract = self._adapter.input_contract_for(replace(operation))
+                    raw_output_contract = self._adapter.output_contract_for(replace(operation))
                 except ReadAdapterError as exc:
                     safe_code = (
                         exc.code
@@ -617,20 +661,27 @@ class ControlledReadExecutor:
                         }
                         else "adapter_contract_unavailable"
                     )
-                    raise ControlledReadExecutorError(
+                    contract_failure = ControlledReadExecutorError(
                         safe_code,
                         "READ adapter rejected the sealed operation contract",
                         step_id=step.id,
-                    ) from exc
-                except (TypeError, ValueError) as exc:
-                    raise ControlledReadExecutorError(
+                    )
+                except Exception:
+                    contract_failure = ControlledReadExecutorError(
                         "adapter_contract_invalid",
                         "READ adapter contract could not be validated",
                         step_id=step.id,
-                    ) from exc
+                    )
+                if contract_failure is not None:
+                    raise contract_failure
+                input_contract = _detached_input_contract(raw_input_contract)
+                output_contract = _detached_output_contract(raw_output_contract)
                 if (
                     type(declared_contract) is not ReadAdapterContract
                     or declared_contract != expected_contract
+                    or type(input_contract) is not RuntimeInputContract
+                    or input_contract.schema_id != expected_contract.request_schema_id
+                    or input_contract.classification is not expected_contract.data_classification
                     or type(output_contract) is not RuntimeOutputContract
                     or output_contract.schema_id != expected_contract.result_schema_id
                     or output_contract.schema_hash != operation.result_schema_hash
@@ -643,6 +694,14 @@ class ControlledReadExecutor:
                         "READ adapter contract differs from sealed execution policy",
                         step_id=step.id,
                     )
+                try:
+                    input_contract.validate(command.input_payload)
+                except JsonSchemaPolicyError as exc:
+                    raise ControlledReadExecutorError(
+                        "input_schema_invalid",
+                        "READ input does not conform to its declared request schema",
+                        step_id=step.id,
+                    ) from exc
                 reservation = await unit_of_work.execution_control.reserve_attempt(
                     AttemptReservationCommand(
                         attempt_id=self._dependencies.new_id("execution-attempt"),
@@ -1107,6 +1166,98 @@ def _safe_audit_retry_after(value: int | None) -> int | None:
     return None
 
 
+def _detached_operation_policy(
+    operation: OperationExecutionPolicy,
+) -> OperationExecutionPolicy | None:
+    """Revalidate one private policy copy before exposing disposable copies to adapters."""
+
+    if type(operation) is not OperationExecutionPolicy:
+        return None
+    try:
+        return replace(operation)
+    except Exception:
+        return None
+
+
+def _detached_input_contract(
+    contract: RuntimeInputContract | None,
+) -> RuntimeInputContract | None:
+    """Recompile one adapter declaration into a non-adapter-owned input snapshot."""
+
+    if type(contract) is not RuntimeInputContract:
+        return None
+    try:
+        return RuntimeInputContract(
+            schema_id=contract.schema_id,
+            schema_version=contract.schema_version,
+            schema=contract.schema,
+            classification=contract.classification,
+        )
+    except Exception:
+        return None
+
+
+def _detached_output_contract(
+    contract: RuntimeOutputContract | None,
+) -> RuntimeOutputContract | None:
+    """Recompile schema and provider facts into a non-adapter-owned output snapshot."""
+
+    if type(contract) is not RuntimeOutputContract:
+        return None
+    try:
+        return RuntimeOutputContract(
+            schema_id=contract.schema_id,
+            schema_version=contract.schema_version,
+            schema=contract.schema,
+            classification=contract.classification,
+            provider_kind=contract.provider_kind,
+            provider_mode=contract.provider_mode,
+            provider_name=contract.provider_name,
+            provider_version=contract.provider_version,
+        )
+    except Exception:
+        return None
+
+
+def _detached_read_contract(contract: ReadAdapterContract) -> ReadAdapterContract | None:
+    """Copy the sealed request contract so an adapter sees only a disposable object."""
+
+    if type(contract) is not ReadAdapterContract:
+        return None
+    try:
+        return replace(contract)
+    except Exception:
+        return None
+
+
+def _detached_read_request(request: ReadAdapterRequest) -> ReadAdapterRequest | None:
+    """Rebuild one adapter request with a separate contract and payload snapshot."""
+
+    if type(request) is not ReadAdapterRequest:
+        return None
+    contract = _detached_read_contract(request.contract)
+    if contract is None:
+        return None
+    try:
+        return ReadAdapterRequest(
+            attempt_id=request.attempt_id,
+            run_id=request.run_id,
+            step_id=request.step_id,
+            operation_key=request.operation_key,
+            policy_hash=request.policy_hash,
+            attempt_number=request.attempt_number,
+            call_deadline_at=request.call_deadline_at,
+            correlation_id=request.correlation_id,
+            requested_timeout_seconds=request.requested_timeout_seconds,
+            provenance_ids=request.provenance_ids,
+            input_classification=request.input_classification,
+            contract=contract,
+            input_payload=request.input_payload,
+        )
+    except Exception:
+        return None
+
+
 def _result_binds_request(result: ReadAdapterResult, request: ReadAdapterRequest) -> bool:
     return (
         type(result) is ReadAdapterResult
@@ -1122,6 +1273,37 @@ def _result_binds_request(result: ReadAdapterResult, request: ReadAdapterRequest
     )
 
 
+def _canonical_read_result(
+    result: ReadAdapterResult,
+    request: ReadAdapterRequest,
+) -> ReadAdapterResult | None:
+    """Detach one untrusted adapter result without retaining malformed content."""
+
+    try:
+        payload = json.loads(canonical_json_bytes(result.output_payload))
+        if not isinstance(payload, dict):
+            return None
+        contract = _detached_read_contract(request.contract)
+        if contract is None:
+            return None
+        return ReadAdapterResult(
+            attempt_id=request.attempt_id,
+            run_id=request.run_id,
+            step_id=request.step_id,
+            operation_key=request.operation_key,
+            policy_hash=request.policy_hash,
+            attempt_number=request.attempt_number,
+            contract=contract,
+            observation_id=result.observation_id,
+            provenance_ids=request.provenance_ids,
+            classification=contract.data_classification,
+            model_output_tokens=result.model_output_tokens,
+            output_payload=payload,
+        )
+    except Exception:
+        return None
+
+
 def _result_runtime_denial_code(
     result: ReadAdapterResult,
     operation: OperationExecutionPolicy,
@@ -1129,7 +1311,11 @@ def _result_runtime_denial_code(
 ) -> str | None:
     """Validate untrusted result budgets without retaining result content or sizes."""
 
-    if canonical_payload_size_bytes(result.output_payload) > operation.max_output_bytes:
+    try:
+        payload_bytes = canonical_json_bytes(result.output_payload)
+    except Exception:
+        return "output_schema_invalid"
+    if len(payload_bytes) > operation.max_output_bytes:
         return "output_payload_too_large"
     tokens = result.model_output_tokens
     if operation.kind is AttemptKind.MODEL:
@@ -1140,12 +1326,17 @@ def _result_runtime_denial_code(
     elif tokens is not None:
         return "model_output_tokens_invalid"
     try:
-        schema = json.loads(canonical_json_bytes(output_contract.schema))
-        Draft202012Validator.check_schema(schema)
-        plain_output = json.loads(canonical_json_bytes(result.output_payload))
-        if next(Draft202012Validator(schema).iter_errors(plain_output), None) is not None:
-            return "output_schema_invalid"
-    except (SchemaError, TypeError, ValueError):
+        compiled_schema = compile_json_schema(
+            output_contract.schema,
+            expected_schema_id=output_contract.schema_id,
+        )
+        plain_output = json.loads(payload_bytes)
+        compiled_schema.validate(
+            plain_output,
+            pointer_root="/output",
+            max_depth=64,
+        )
+    except Exception:
         return "output_schema_invalid"
     return None
 

@@ -99,13 +99,14 @@ class AuthorizedConnectorCommand[CommandT: BaseModel]:
     command: CommandT
 
 
-@dataclass(frozen=True)
-class ConnectorWriteResult:
-    """Safe receipt projection retained as a positional dataclass for compatibility."""
+class ConnectorWriteResult(BaseModel):
+    """Strict connector response DTO reconstructed after every WRITE call."""
 
-    receipt_id: str
-    status: str
-    safe_metadata: dict[str, JsonValue]
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    receipt_id: str = Field(min_length=1, max_length=240)
+    status: str = Field(min_length=1, max_length=100)
+    safe_metadata: dict[str, JsonValue] = Field(default_factory=dict, max_length=128)
 
 
 class MutatingConnector(Protocol):

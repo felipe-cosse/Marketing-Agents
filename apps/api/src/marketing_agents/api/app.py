@@ -33,6 +33,9 @@ from marketing_agents.api.routes.audit_events import router as audit_events_rout
 from marketing_agents.api.routes.catalog import router as catalog_router
 from marketing_agents.api.routes.health import router as health_router
 from marketing_agents.api.routes.instance_configuration import (
+    InstanceConfigurationRequestBoundsMiddleware,
+)
+from marketing_agents.api.routes.instance_configuration import (
     router as instance_configuration_router,
 )
 from marketing_agents.api.routes.manual_work import ManualWorkRequestBoundsMiddleware
@@ -103,6 +106,7 @@ def create_app(
         safe_request_validation_error,
     )
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
+    application.add_middleware(InstanceConfigurationRequestBoundsMiddleware)
     application.add_middleware(WebhookRequestBoundsMiddleware)
     application.add_middleware(
         TrustedHostMiddleware, allowed_hosts=list(active_settings.trusted_hosts)

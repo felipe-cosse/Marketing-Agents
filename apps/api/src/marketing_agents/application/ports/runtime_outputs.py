@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.application.policies.json_schema import compile_json_schema
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.schema_hash import canonical_schema_hash
-from marketing_agents.domain.validation import frozen_json_mapping, require_id
+from marketing_agents.domain.validation import require_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,17 +40,15 @@ class RuntimeOutputContract:
             raise ValueError("runtime output provider kind is unsupported")
         if self.provider_mode not in {"mock", "real", "local"}:
             raise ValueError("runtime output provider mode is unsupported")
-        encoded_schema = canonical_json_bytes(self.schema)
-        plain_schema = json.loads(encoded_schema)
-        if not isinstance(plain_schema, dict):
-            raise ValueError("runtime output JSON Schema must be an object")
-        object.__setattr__(
-            self, "schema", frozen_json_mapping(plain_schema, "runtime output JSON Schema")
+        compiled_schema = compile_json_schema(
+            self.schema,
+            expected_schema_id=self.schema_id,
         )
+        object.__setattr__(self, "schema", compiled_schema.schema)
         object.__setattr__(
             self,
             "schema_hash",
-            canonical_schema_hash(plain_schema),
+            canonical_schema_hash(compiled_schema.schema),
         )
 
 

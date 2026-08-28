@@ -24,6 +24,12 @@ from marketing_agents.api.schemas.manual_work import (
     ManualWorkProblem,
     ManualWorkRequestValidationError,
 )
+from marketing_agents.api.strict_json import (
+    StrictJsonTransportError,
+    strict_json_route_path,
+    strict_json_transport_headers_are_valid,
+    validate_strict_json_body,
+)
 from marketing_agents.application.services.idempotent_work_receipt import (
     WorkRunReceiptDisposition,
 )
@@ -180,18 +186,23 @@ class ManualWorkRequestBoundsMiddleware:
         if (
             scope["type"] != "http"
             or scope.get("method") != "POST"
-            or _MANUAL_DRY_RUN_PATH_PATTERN.fullmatch(str(scope.get("path", ""))) is None
+            or _MANUAL_DRY_RUN_PATH_PATTERN.fullmatch(strict_json_route_path(scope)) is None
         ):
             await self._app(scope, receive, send)
+            return
+        if not strict_json_transport_headers_are_valid(scope):
+            response = JSONResponse(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                content={"detail": "manual dry-run creation requires application/json"},
+                headers={"Cache-Control": _NO_STORE, "Vary": _VARY},
+            )
+            await response(scope, receive, send)
             return
         if self._declared_length_is_invalid(scope):
             await self._reject(scope, receive, send)
             return
 
         buffered = bytearray()
-        depth = 0
-        in_string = False
-        escaped = False
         while True:
             message = await receive()
             if message["type"] != "http.request":
@@ -202,25 +213,16 @@ class ManualWorkRequestBoundsMiddleware:
                 await self._reject(scope, receive, send)
                 return
             buffered.extend(chunk)
-            for byte in chunk:
-                if in_string:
-                    if escaped:
-                        escaped = False
-                    elif byte == 0x5C:
-                        escaped = True
-                    elif byte == 0x22:
-                        in_string = False
-                elif byte == 0x22:
-                    in_string = True
-                elif byte in {0x5B, 0x7B}:
-                    depth += 1
-                    if depth > _MAX_MANUAL_REQUEST_DEPTH:
-                        await self._reject(scope, receive, send)
-                        return
-                elif byte in {0x5D, 0x7D}:
-                    depth -= 1
             if not message.get("more_body", False):
                 break
+        try:
+            validate_strict_json_body(
+                bytes(buffered),
+                max_depth=_MAX_MANUAL_REQUEST_DEPTH,
+            )
+        except StrictJsonTransportError:
+            await self._reject(scope, receive, send)
+            return
 
         delivered = False
 
@@ -264,9 +266,7 @@ class ManualWorkRequestBoundsMiddleware:
 
 
 def _json_content_type(request: Request) -> None:
-    values = request.headers.getlist("content-type")
-    media_type = values[0].split(";", 1)[0].strip().casefold() if len(values) == 1 else ""
-    if media_type != "application/json":
+    if not strict_json_transport_headers_are_valid(request.scope):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="manual dry-run creation requires application/json",

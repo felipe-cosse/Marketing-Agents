@@ -857,6 +857,134 @@ async def test_api_06_excessively_deep_json_is_rejected_before_executor(path: st
     assert decision_executor.calls == []
 
 
+@pytest.mark.parametrize(
+    "body",
+    (
+        b'\xef\xbb\xbf{"expected_generation":0,"expected_payload_hash":"'
+        + ACTION_HASH.encode()
+        + b'"}',
+        b'{"expected_generation":0,"expected_generation":0,"expected_payload_hash":"'
+        + ACTION_HASH.encode()
+        + b'"}',
+        (
+            '{"expected_generation":0,"expected_payload_hash":"'
+            + ACTION_HASH
+            + '","é":1,"e\u0301":2}'
+        ).encode(),
+        b'{"expected_generation":0,"expected_payload_hash":"\xff"}',
+        b'{"expected_generation":NaN,"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}',
+        b'{"expected_generation":Infinity,"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}',
+        b'{"expected_generation":1e100000,"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}',
+        b'{"expected_generation":0,"expected_payload_hash":"\\ud800"}',
+    ),
+    ids=(
+        "bom",
+        "duplicate-key",
+        "unicode-normalization-collision",
+        "invalid-utf8",
+        "nan",
+        "infinity",
+        "numeric-overflow",
+        "lone-surrogate",
+    ),
+)
+@pytest.mark.asyncio
+async def test_api_08_api_06_rejects_non_strict_json_before_executor(body: bytes) -> None:
+    resource_executor = FakeApprovalResourceExecutor()
+    decision_executor = RejectingDecisionExecutor()
+
+    response = await _request(
+        _app(
+            resource_executor,
+            principal=_control_plane_principal(),
+            decision_executor=decision_executor,
+        ),
+        "POST",
+        f"/api/v1/external-actions/{ACTION_ID}/approval-requests",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "approval_input_invalid",
+            "message": "approval request input is invalid",
+        }
+    }
+    _assert_private(response)
+    assert resource_executor.request_calls == []
+    assert decision_executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_api_08_api_06_mounted_route_keeps_strict_json_boundary() -> None:
+    resource_executor = FakeApprovalResourceExecutor()
+    decision_executor = RejectingDecisionExecutor()
+    parent = FastAPI()
+    parent.mount(
+        "/mounted",
+        _app(
+            resource_executor,
+            principal=_control_plane_principal(),
+            decision_executor=decision_executor,
+        ),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=parent),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            f"/mounted/api/v1/external-actions/{ACTION_ID}/approval-requests",
+            content=(
+                b'{"expected_generation":0,"expected_generation":1,'
+                b'"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "approval_input_invalid"
+    _assert_private(response)
+    assert resource_executor.request_calls == []
+    assert decision_executor.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        {"Content-Type": "application/json; charset=iso-8859-1"},
+        {"Content-Type": "application/json; charset=utf-8; charset=utf-8"},
+    ),
+)
+async def test_api_08_api_06_rejects_encoded_or_ambiguous_json_transport(
+    headers: dict[str, str],
+) -> None:
+    resource_executor = FakeApprovalResourceExecutor()
+    decision_executor = RejectingDecisionExecutor()
+    response = await _request(
+        _app(
+            resource_executor,
+            principal=_control_plane_principal(),
+            decision_executor=decision_executor,
+        ),
+        "POST",
+        f"/api/v1/external-actions/{ACTION_ID}/approval-requests",
+        content=(
+            b'{"expected_generation":0,"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}'
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 415
+    assert response.json()["detail"]["code"] == "approval_json_required"
+    _assert_private(response)
+    assert resource_executor.request_calls == []
+    assert decision_executor.calls == []
+
+
 @pytest.mark.asyncio
 async def test_api_06_mutation_authority_fields_are_rejected_without_reflection() -> None:
     principal = _control_plane_principal()
@@ -903,13 +1031,20 @@ async def test_api_06_mutation_authority_fields_are_rejected_without_reflection(
 
 
 @pytest.mark.parametrize(
-    "unsupported",
-    ["\x00", "\x1f", "\x7f", "\x85", "\ud800"],
+    ("unsupported", "expected_code"),
+    [
+        ("\x00", "request_validation_failed"),
+        ("\x1f", "request_validation_failed"),
+        ("\x7f", "request_validation_failed"),
+        ("\x85", "request_validation_failed"),
+        ("\ud800", "approval_input_invalid"),
+    ],
     ids=["nul", "c0", "del", "c1", "lone-surrogate"],
 )
 @pytest.mark.asyncio
 async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_executor(
     unsupported: str,
+    expected_code: str,
 ) -> None:
     resource_executor = FakeApprovalResourceExecutor()
     decision_executor = RejectingDecisionExecutor()
@@ -936,7 +1071,7 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "request_validation_failed"
+    assert response.json()["detail"]["code"] == expected_code
     assert CANARY not in response.text
     _assert_private(response)
     assert decision_executor.calls == []

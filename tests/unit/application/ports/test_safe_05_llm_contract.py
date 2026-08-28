@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from marketing_agents.application.policies.json_schema import DRAFT_2020_12_DIALECT
 from marketing_agents.application.ports.llm import (
     LLMInvocationContext,
     LLMRequest,
@@ -14,6 +15,7 @@ from marketing_agents.application.ports.llm import (
     TrustedSystemInstructions,
     UntrustedToolResult,
 )
+from marketing_agents.domain.schema_hash import canonical_schema_hash
 from marketing_agents.security.content_trust import ExternalContentKind, UntrustedContentPart
 from pydantic import ValidationError
 
@@ -21,6 +23,11 @@ CATALOG_HASH = "a" * 64
 
 
 def _request() -> LLMRequest:
+    output_schema = {
+        "$schema": DRAFT_2020_12_DIALECT,
+        "$id": "schema:linkedin-draft:v1",
+        "type": "object",
+    }
     return LLMRequest(
         system_instructions=TrustedSystemInstructions(
             template_id="tpl.social-media.new-content.linkedin-post-drafter",
@@ -44,7 +51,8 @@ def _request() -> LLMRequest:
             ),
         ),
         output_schema_id="schema:linkedin-draft:v1",
-        output_schema={"type": "object"},
+        output_schema_hash=canonical_schema_hash(output_schema),
+        output_schema=output_schema,
         context=LLMInvocationContext(
             run_id="run:1",
             step_id="step:draft",
