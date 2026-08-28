@@ -1,0 +1,14 @@
+packages:
+  - apps/web
+
+autoInstallPeers: false
+confirmModulesPurge: false
+engineStrict: true
+minimumReleaseAgeExclude:
+  - '@vitejs/plugin-react@6.1.1'
+
+onlyBuiltDependencies:
+  - esbuild
+
+saveExact: true
+strictPeerDependencies: true

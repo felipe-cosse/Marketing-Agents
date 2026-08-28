@@ -1,0 +1,141 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-01",
+  "matrix_statement_sha256": "2e554ef6a69964dbc52e132aba943a0b8f4c37bfd3f62a951408a39c6957837f",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      ".github/workflows/ci.yml",
+      ".nvmrc",
+      "Makefile",
+      "apps/web/**",
+      "docs/adr/0009-frontend-hierarchy-layout.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-01.json",
+      "docs/verification/requirements/WEB-01.md",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/OrgChartCanvas.tsx",
+          "apps/web/src/features/org-chart/layout.ts",
+          "apps/web/src/features/org-chart/normalizeHierarchy.ts",
+          "apps/web/src/features/org-chart/presentation.ts",
+          "apps/web/src/features/org-chart/viewport.ts"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/e2e/web-01-org-chart.spec.ts",
+          "apps/web/config/proxyHeaders.test.ts",
+          "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+          "apps/web/src/features/org-chart/layout.test.ts",
+          "apps/web/src/features/org-chart/normalizeHierarchy.test.ts",
+          "apps/web/src/features/org-chart/presentation.test.ts",
+          "apps/web/src/features/org-chart/viewport.test.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-source-hierarchy",
+      "type": "contract",
+      "statement": "The same-origin hierarchy is runtime-validated, sorted only by authoritative display order, count-reconciled, and rendered as one root, five departments, twelve functions, thirty-six templates, and forty-three selectable instances. Community retains fourteen deployments as seven ordered pairs. API vendor notes remain in the model; only the exact terminal source-chart vendor annotation is removed from visible, title, and accessible copy.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/normalizeHierarchy.test.ts::WEB-01 hierarchy normalization > accepts and freezes the exact 5/12/36/43 contract",
+        "apps/web/src/features/org-chart/normalizeHierarchy.test.ts::WEB-01 hierarchy normalization > keeps seven independently addressable Community template pairs",
+        "apps/web/src/features/org-chart/presentation.test.ts::WEB-01 vendor-neutral purpose presentation > removes only a terminal source-chart vendor annotation",
+        "apps/web/scripts/run-web-01-witness.mjs::WEB-01 dependency-free implementation witness",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::WEB-01 interactive org chart canvas > renders exactly one root, five departments, twelve functions, and 43 instances",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 renders the complete ordered API hierarchy with no external requests"
+      ]
+    },
+    {
+      "id": "deterministic-bounded-interaction",
+      "type": "positive",
+      "statement": "A deterministic fixed hierarchy world uses computed department extents, non-interactive orthogonal connectors, and stable card geometry. Initial and explicit fit, bounded focal zoom, pointer and keyboard pan, resize preservation, minimal selection reveal, and independently selectable duplicate instances never refetch or relayout the hierarchy.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/layout.test.ts::WEB-01 deterministic hierarchy layout > produces the accepted 1480 by 754 world and exact horizontal extents",
+        "apps/web/src/features/org-chart/layout.test.ts::WEB-01 deterministic hierarchy layout > emits exactly 41 orthogonal non-random connectors",
+        "apps/web/src/features/org-chart/viewport.test.ts::WEB-01 bounded chart viewport > clamps extreme pan to the exact overscan bounds",
+        "apps/web/scripts/run-web-01-witness.mjs::WEB-01 dependency-free implementation witness",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::WEB-01 interactive org chart canvas > offers working zoom, fit, and keyboard pan controls",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 zoom, pan, fit, and duplicate selection remain bounded and local"
+      ]
+    },
+    {
+      "id": "real-local-browser-boundary",
+      "type": "negative_control",
+      "statement": "The Playwright-managed Chromium browser loads the production Vite preview and real FastAPI hierarchy only through the same-origin proxy, which strips every API-09 forwarding and identity assertion. The browser performs one stable application hierarchy request, makes no non-loopback request, and renders all forty-three cards at 1536 by 1024 and 1280 by 800.",
+      "test_refs": [
+        "apps/web/src/api/client.test.ts::WEB-01 centralized API client > issues only a same-origin no-store GET",
+        "apps/web/src/api/client.test.ts::WEB-01 centralized API client > rejects non-local path %s before fetch",
+        "apps/web/config/proxyHeaders.test.ts::WEB-01 Vite API proxy header boundary > strips every API-09 forwarding and identity assertion before the upstream request",
+        "apps/web/scripts/run-web-01-witness.mjs::WEB-01 dependency-free implementation witness",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 Vite preview strips API-09 forwarding and identity assertions",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 renders the complete ordered API hierarchy with no external requests",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 refits all 43 cards at a compact desktop viewport"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-01-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-01-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "exact-source-hierarchy",
+        "deterministic-bounded-interaction",
+        "real-local-browser-boundary"
+      ]
+    },
+    {
+      "id": "web-01-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-01-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "exact-source-hierarchy",
+        "deterministic-bounded-interaction",
+        "real-local-browser-boundary"
+      ]
+    },
+    {
+      "id": "web-01-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-01-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": ["real-local-browser-boundary"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/config/proxyHeaders.ts",
+      "apps/web/src/features/org-chart/layout.ts",
+      "apps/web/src/features/org-chart/presentation.ts",
+      "apps/web/src/features/org-chart/viewport.ts"
+    ],
+    "gate_id": "web-01-dependency-free-witness"
+  },
+  "limitations": [
+    "WEB-01 implements the wide and compact desktop graph only. Search and filters are owned by WEB-02, the detail inspector by WEB-03, the narrow semantic tree by WEB-07, and the complete accessibility acceptance surface by WEB-08; their accepted-concept controls are intentionally not rendered as inert UI here.",
+    "DEL-07 still owns a committed OpenAPI snapshot, generated TypeScript client, and drift gate. WEB-01 treats the transport body as unknown and fails closed through a narrow runtime hierarchy normalizer rather than claiming generated-client parity.",
+    "The exact 5/12/36/43 inventory and 12/6/5/14/6 distribution are release assertions. An authoritative catalog version that intentionally changes those source counts must update this requirement and its evidence rather than silently changing layout output.",
+    "The connection witness runs only Node 24 built-ins and imports the pure production TypeScript modules directly, so reverting implementation cannot be confused with a missing package-manager cache or node_modules dependency.",
+    "Browser verification uses local FastAPI, the production Vite preview and proxy, and the exact Chromium revision managed by pinned Playwright at 1536 by 1024 and 1280 by 800. It does not claim the separately distributed Chrome channel, Firefox, WebKit, a production reverse proxy, mobile tree behavior, or live external providers."
+  ]
+}

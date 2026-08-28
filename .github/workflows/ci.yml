@@ -39,6 +39,46 @@ jobs:
       - name: Verify backend
         run: make verify-backend
 
+  frontend:
+    needs: catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Activate pinned pnpm
+        run: corepack enable
+      - name: Acquire pinned frontend dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Verify frontend
+        run: make verify-web
+
+  browser:
+    needs: [catalog, backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.10.7
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Activate pinned pnpm
+        run: corepack enable
+      - name: Acquire pinned Python dependencies
+        run: uv sync --frozen --python 3.12
+      - name: Acquire pinned frontend dependencies
+        run: corepack pnpm install --frozen-lockfile
+      - name: Acquire Playwright-managed Chromium
+        run: corepack pnpm --dir apps/web browser:install:ci
+      - name: Verify the real browser/API boundary
+        run: make web-test-e2e
+
   governance:
     needs: catalog
     runs-on: ubuntu-latest

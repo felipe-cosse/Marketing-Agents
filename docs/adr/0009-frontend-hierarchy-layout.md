@@ -15,6 +15,8 @@ Use a deterministic custom tree layout rendered with semantic React components a
 
 No graph-library runtime or branding dependency is required. Layout and interaction logic need focused tests and a desktop/mobile fidelity comparison against the accepted concept images.
 
+WEB-01 realizes the desktop decision as a fixed `1480 × 754` world derived only from authoritative display order and containment. Twelve fixed-width function columns determine department extents; instance counts determine only vertical group height. A separate viewport algebra owns initial fit, bounded translation, focal zoom, keyboard pan, selection reveal, and resize behavior. Geometry never depends on font or DOM measurement, and catalog presentation/status changes are excluded from its structural cache key.
+
 ## Verification
 
 Component counts, keyboard traversal, focus, search/filter, responsive Playwright, Axe, XSS, reduced-motion, and visual review tests. Relates to ASM-021 and ASM-022.

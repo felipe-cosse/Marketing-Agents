@@ -5,7 +5,7 @@ export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance
+.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-e2e web-test-web-01-unit web-test-web-01-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -54,8 +54,42 @@ verify-ci-order:
 	$(UV) run python scripts/verify_ci_order.py
 
 test-network:
-	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.network.test_safe_11_network_isolation
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run python -m unittest tests.network.test_safe_11_network_isolation
 	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs
+
+web-bootstrap:
+	corepack pnpm install --frozen-lockfile
+	corepack pnpm --dir apps/web browser:install
+
+web-format:
+	corepack pnpm --dir apps/web format
+
+web-format-check:
+	corepack pnpm --dir apps/web format:check
+
+web-lint:
+	corepack pnpm --dir apps/web lint
+
+web-typecheck:
+	corepack pnpm --dir apps/web typecheck
+
+web-test:
+	corepack pnpm --dir apps/web test
+
+web-test-coverage:
+	corepack pnpm --dir apps/web test:coverage
+
+web-build:
+	corepack pnpm --dir apps/web build
+
+web-test-e2e:
+	node apps/web/scripts/run-web-01-e2e.mjs
+
+web-test-web-01-unit:
+	node apps/web/scripts/run-web-01-unit.mjs
+
+web-test-web-01-witness:
+	node apps/web/scripts/run-web-01-witness.mjs
 
 test: test-source test-tooling test-network
 
@@ -71,3 +105,5 @@ verify-requirement:
 verify-governance: format-check verify-source test-source test-tooling verify-history
 
 verify-backend: format-check lint typecheck test-backend
+
+verify-web: web-format-check web-lint web-typecheck web-test web-test-web-01-unit web-test-web-01-witness web-build
