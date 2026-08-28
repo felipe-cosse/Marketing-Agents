@@ -6,6 +6,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from marketing_agents.api.instance_configuration_etag import instance_configurat
 from marketing_agents.api.schemas.catalog import (
     AgentInstanceDetailResponse,
     AgentInstanceListResponse,
+    AgentInstanceRuntimeDetailResponse,
     AgentInstanceView,
     AgentTemplateDetailResponse,
     AgentTemplateListResponse,
@@ -38,6 +40,8 @@ from marketing_agents.api.schemas.catalog import (
     HierarchyDepartmentView,
     HierarchyFunctionView,
     HierarchyInstanceView,
+    InstanceRecentRunView,
+    InstanceRuntimeStatusView,
     RateLimitPolicyView,
     RetryPolicyView,
     ScheduleBindingView,
@@ -51,6 +55,11 @@ from marketing_agents.application.policies.catalog_authorization import (
 )
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSnapshot,
+)
+from marketing_agents.application.services.run_resources import (
+    InstanceRuntimeStatus,
+    InstanceStatusSummary,
+    RunResource,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
@@ -485,6 +494,101 @@ def _representation(label: str, payload: CatalogApiModel) -> CatalogRepresentati
         etag=_representation_etag(label, encoded),
         _seal=_REPRESENTATION_SEAL,
     )
+
+
+def enrich_instance_runtime_representation(
+    representation: CatalogRepresentation,
+    *,
+    instance_id: str,
+    status_summary: InstanceStatusSummary,
+    recent_runs: tuple[RunResource, ...],
+) -> CatalogRepresentation:
+    """Merge a bounded runtime overlay without changing any static representation."""
+
+    if (
+        type(representation) is not CatalogRepresentation
+        or not representation.is_valid_for(
+            AgentInstanceDetailResponse,
+            f"agent-instance:{instance_id}",
+        )
+        or type(status_summary) is not InstanceStatusSummary
+        or status_summary.scope != "single-local-installation"
+        or type(status_summary.items) is not tuple
+        or len(status_summary.items) != 1
+        or type(status_summary.items[0]) is not InstanceRuntimeStatus
+        or status_summary.items[0].instance_id != instance_id
+        or type(status_summary.etag) is not str
+        or re.fullmatch(
+            r'^"instance-status-sha256-v1:[0-9a-f]{64}"$',
+            status_summary.etag,
+        )
+        is None
+        or type(recent_runs) is not tuple
+        or len(recent_runs) > 5
+        or any(
+            type(item) is not RunResource or item.instance_id != instance_id for item in recent_runs
+        )
+        or tuple((item.created_at, item.run_id) for item in recent_runs)
+        != tuple(
+            sorted(
+                ((item.created_at, item.run_id) for item in recent_runs),
+                reverse=True,
+            )
+        )
+    ):
+        raise CatalogQueryUnavailable("instance runtime projection is unavailable")
+    status_item = status_summary.items[0]
+    expected_instance_url = f"/api/v1/agent-instances/{instance_id}"
+    expected_latest_run_url = (
+        None if status_item.latest_run_id is None else f"/api/v1/runs/{status_item.latest_run_id}"
+    )
+    latest = None if not recent_runs else recent_runs[0]
+    if (
+        status_item.instance_url != expected_instance_url
+        or status_item.latest_run_url != expected_latest_run_url
+        or any(item.run_url != f"/api/v1/runs/{item.run_id}" for item in recent_runs)
+        or (latest is None and status_item.status != "never_run")
+        or (latest is None and status_item.latest_run_id is not None)
+        or (
+            latest is not None
+            and (
+                status_item.latest_run_id != latest.run_id
+                or status_item.latest_run_state != latest.state
+                or status_item.latest_run_created_at != latest.created_at
+                or status_item.latest_run_updated_at != latest.updated_at
+                or status_item.status != latest.state
+            )
+        )
+    ):
+        raise CatalogQueryUnavailable("instance runtime projection is unavailable")
+    try:
+        static = AgentInstanceDetailResponse.model_validate_json(representation.content)
+        enriched = AgentInstanceRuntimeDetailResponse(
+            **static.model_dump(),
+            runtime_watermark=status_summary.etag[1:-1],
+            runtime_status=InstanceRuntimeStatusView(
+                status=status_item.status,
+                latest_run_id=status_item.latest_run_id,
+                latest_run_state=status_item.latest_run_state,
+                latest_run_created_at=status_item.latest_run_created_at,
+                latest_run_updated_at=status_item.latest_run_updated_at,
+                latest_run_url=status_item.latest_run_url,
+            ),
+            recent_runs=tuple(
+                InstanceRecentRunView(
+                    id=item.run_id,
+                    state=item.state,
+                    workflow_id=item.workflow_id,
+                    created_at=item.created_at,
+                    updated_at=item.updated_at,
+                    run_url=item.run_url,
+                )
+                for item in recent_runs
+            ),
+        )
+    except (TypeError, ValueError):
+        raise CatalogQueryUnavailable("instance runtime projection is unavailable") from None
+    return _representation(f"agent-instance-runtime:{instance_id}", enriched)
 
 
 def _resolved_capabilities(

@@ -960,9 +960,14 @@ def test_api_02_openapi_declares_all_static_typed_read_contracts(
     for path, (operation_id, schema_name) in expected.items():
         operation = openapi["paths"][path]["get"]
         assert operation["operationId"] == operation_id
-        assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
-            "$ref": f"#/components/schemas/{schema_name}"
-        }
+        response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        if path == "/api/v1/agent-instances/{instance_id}":
+            assert response_schema["anyOf"] == [
+                {"$ref": "#/components/schemas/AgentInstanceRuntimeDetailResponse"},
+                {"$ref": "#/components/schemas/AgentInstanceDetailResponse"},
+            ]
+        else:
+            assert response_schema == {"$ref": f"#/components/schemas/{schema_name}"}
         assert "304" in operation["responses"]
         assert operation["responses"]["503"]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/CatalogProblem"

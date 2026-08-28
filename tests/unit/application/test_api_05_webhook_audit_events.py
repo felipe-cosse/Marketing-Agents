@@ -332,7 +332,10 @@ def test_api_05_webhook_events_satisfy_the_portable_record_constraints() -> None
     try:
         Base.metadata.create_all(engine)
         with Session(engine) as session, session.begin():
-            session.add_all(_draft_to_record(event, None) for event in events)
+            session.add_all(
+                _draft_to_record(event, None, feed_sequence)
+                for feed_sequence, event in enumerate(events, start=1)
+            )
         with Session(engine) as session:
             stored = session.scalars(
                 select(AuditEventRecord).order_by(AuditEventRecord.global_sequence)

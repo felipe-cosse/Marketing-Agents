@@ -13,15 +13,20 @@ from fastapi.responses import JSONResponse, Response
 from marketing_agents.api.catalog_queries import (
     CatalogDocuments,
     CatalogQueryExecutor,
+    CatalogQueryUnavailable,
     CatalogRepresentation,
+    enrich_instance_runtime_representation,
 )
 from marketing_agents.api.dependencies import (
+    RunResourceExecutor,
     get_catalog_query_executor,
+    get_optional_run_resource_executor,
     require_catalog_principal,
 )
 from marketing_agents.api.schemas.catalog import (
     AgentInstanceDetailResponse,
     AgentInstanceListResponse,
+    AgentInstanceRuntimeDetailResponse,
     AgentTemplateDetailResponse,
     AgentTemplateListResponse,
     ApprovalPolicyListResponse,
@@ -34,6 +39,7 @@ from marketing_agents.api.schemas.catalog import (
 from marketing_agents.application.policies.catalog_authorization import (
     CatalogAuthorizationError,
 )
+from marketing_agents.application.services.run_resources import RunResourceServiceError
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 
 CATALOG_QUERY_TIMEOUT_SECONDS = 5.0
@@ -328,7 +334,7 @@ async def list_agent_instances(
 
 @router.get(
     "/agent-instances/{instance_id}",
-    response_model=AgentInstanceDetailResponse,
+    response_model=AgentInstanceRuntimeDetailResponse | AgentInstanceDetailResponse,
     operation_id="getAgentInstance",
     responses=_DETAIL_RESPONSES,
 )
@@ -336,6 +342,10 @@ async def get_agent_instance(
     instance_id: Annotated[str, Path(pattern=_INSTANCE_ID_PATTERN)],
     principal: Annotated[AuthenticatedPrincipal, Depends(require_catalog_principal)],
     executor: Annotated[CatalogQueryExecutor | None, Depends(get_catalog_query_executor)],
+    runtime_executor: Annotated[
+        RunResourceExecutor | None,
+        Depends(get_optional_run_resource_executor),
+    ],
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ) -> Response:
     documents = await _safe_documents(executor, principal)
@@ -347,6 +357,45 @@ async def get_agent_instance(
         return _problem()
     if representation is None:
         return _problem(not_found=True)
+    if runtime_executor is not None:
+        try:
+            runtime_status_before = await runtime_executor.read_instance_statuses(
+                (instance_id,),
+                principal=principal,
+            )
+            recent_runs = await runtime_executor.list_recent_instance_runs(
+                instance_id,
+                limit=5,
+                principal=principal,
+            )
+            runtime_status = await runtime_executor.read_instance_statuses(
+                (instance_id,),
+                principal=principal,
+            )
+            if runtime_status != runtime_status_before:
+                raise CatalogQueryUnavailable("instance runtime projection changed")
+            dynamic = enrich_instance_runtime_representation(
+                representation,
+                instance_id=instance_id,
+                status_summary=runtime_status,
+                recent_runs=recent_runs,
+            )
+        except (CatalogQueryUnavailable, RunResourceServiceError, TypeError, ValueError):
+            problem = _problem()
+            problem.headers["X-Content-Type-Options"] = "nosniff"
+            return problem
+        except Exception:
+            problem = _problem()
+            problem.headers["X-Content-Type-Options"] = "nosniff"
+            return problem
+        result = _representation_response(
+            dynamic,
+            AgentInstanceRuntimeDetailResponse,
+            f"agent-instance-runtime:{instance_id}",
+            if_none_match,
+        )
+        result.headers["X-Content-Type-Options"] = "nosniff"
+        return result
     return _representation_response(
         representation,
         AgentInstanceDetailResponse,

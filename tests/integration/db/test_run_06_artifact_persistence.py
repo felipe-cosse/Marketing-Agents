@@ -484,7 +484,13 @@ def test_run_06_artifact_schema_is_portable_and_repository_is_append_only() -> N
     public_methods = {
         name for name in dir(SQLAlchemyArtifactRepository) if not name.startswith("_")
     }
-    assert public_methods == {"add_or_get", "get", "list_for_run"}
+    assert public_methods == {
+        "add_or_get",
+        "get",
+        "get_inspectable",
+        "list_for_run",
+        "list_for_run_page",
+    }
 
     def accepts_port(factory: Callable[[AsyncSession], ArtifactRepository]) -> None:
         assert factory is SQLAlchemyArtifactRepository

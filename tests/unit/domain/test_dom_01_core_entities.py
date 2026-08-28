@@ -322,6 +322,7 @@ def test_dom_01_all_named_core_entities_construct_as_immutable_values() -> None:
         ),
         global_sequence=1,
         run_sequence=1,
+        feed_sequence=1,
     )
 
     entities = (

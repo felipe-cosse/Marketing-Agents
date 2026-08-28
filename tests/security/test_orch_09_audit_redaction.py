@@ -387,6 +387,7 @@ def test_orch_09_audit_repository_has_no_event_update_or_delete_surface() -> Non
         "get",
         "get_attempt_event",
         "get_mutation_event",
+        "list_feed",
         "list_run",
     }
 

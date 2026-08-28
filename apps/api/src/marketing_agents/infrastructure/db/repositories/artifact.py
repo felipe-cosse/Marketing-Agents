@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, cast
 
 from pydantic import ValidationError
@@ -15,9 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from marketing_agents.application.ports.repositories import (
     ArtifactInsertResult,
     ArtifactRepositoryConflict,
+    InspectableArtifact,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.entities import RunStep
 from marketing_agents.domain.provenance import ArtifactEnvelope
+from marketing_agents.domain.validation import require_id, require_utc
 from marketing_agents.infrastructure.db.models.artifact import (
     ArtifactParentRecord,
     ArtifactRecord,
@@ -141,6 +145,14 @@ class SQLAlchemyArtifactRepository:
             return None
         return await self._hydrate(record)
 
+    async def get_inspectable(self, artifact_id: str) -> InspectableArtifact | None:
+        require_id(artifact_id, "artifact ID")
+        artifact = await self.get(artifact_id)
+        if artifact is None:
+            return None
+        step_by_id = await self._validated_steps(artifact.provenance.run_id)
+        return self._inspectable(artifact, step_by_id)
+
     async def list_for_run(self, run_id: str) -> tuple[ArtifactEnvelope, ...]:
         statement = (
             select(ArtifactRecord)
@@ -149,6 +161,79 @@ class SQLAlchemyArtifactRepository:
         )
         records = tuple((await self._session.execute(statement)).scalars())
         return tuple([await self._hydrate(record) for record in records])
+
+    async def list_for_run_page(
+        self,
+        run_id: str,
+        *,
+        after_created_at: datetime | None,
+        after_artifact_id: str | None,
+        limit: int,
+    ) -> tuple[InspectableArtifact, ...]:
+        require_id(run_id, "artifact Run ID")
+        if (after_created_at is None) != (after_artifact_id is None):
+            raise ValueError("artifact cursor boundary must be complete")
+        if after_created_at is not None:
+            require_utc(after_created_at, "artifact cursor time")
+            require_id(cast(str, after_artifact_id), "artifact cursor ID")
+        if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 101:
+            raise ValueError("artifact page limit must be from 1 through 101")
+        statement = select(ArtifactRecord).where(ArtifactRecord.run_id == run_id)
+        if after_created_at is not None:
+            assert after_artifact_id is not None
+            statement = statement.where(
+                (ArtifactRecord.created_at > after_created_at)
+                | (
+                    (ArtifactRecord.created_at == after_created_at)
+                    & (ArtifactRecord.id > after_artifact_id)
+                )
+            )
+        statement = statement.order_by(ArtifactRecord.created_at, ArtifactRecord.id).limit(limit)
+        records = tuple((await self._session.execute(statement)).scalars())
+        if not records:
+            return ()
+        artifacts = tuple([await self._hydrate(record) for record in records])
+        step_by_id = await self._validated_steps(run_id)
+        return tuple(self._inspectable(artifact, step_by_id) for artifact in artifacts)
+
+    async def _validated_steps(self, run_id: str) -> dict[str, RunStep]:
+        from marketing_agents.infrastructure.db.repositories.step import (
+            SQLAlchemyRunStepRepository,
+            StepPersistenceConflict,
+        )
+
+        try:
+            snapshot = await SQLAlchemyRunStepRepository(self._session).get_inspectable_plan(run_id)
+        except StepPersistenceConflict as exc:
+            raise ArtifactPersistenceConflict(
+                "artifact_scope_mismatch",
+                "artifact producer plan could not be validated",
+            ) from exc
+        if snapshot is None:
+            raise ArtifactPersistenceConflict(
+                "artifact_scope_missing",
+                "artifact producer plan does not exist",
+            )
+        return {step.id: step for step in snapshot.steps}
+
+    @staticmethod
+    def _inspectable(
+        artifact: ArtifactEnvelope,
+        step_by_id: Mapping[str, RunStep],
+    ) -> InspectableArtifact:
+        step = step_by_id.get(artifact.provenance.step_id)
+        if step is None:
+            raise ArtifactPersistenceConflict(
+                "artifact_scope_missing",
+                "artifact producer step does not exist in its sealed plan",
+            )
+        try:
+            return InspectableArtifact(artifact=artifact, step=step)
+        except (TypeError, ValueError) as exc:
+            raise ArtifactPersistenceConflict(
+                "artifact_scope_mismatch",
+                "artifact producer step disagrees with its sealed provenance",
+            ) from exc
 
     async def add_or_get(self, artifact: ArtifactEnvelope) -> ArtifactInsertResult:
         if type(artifact) is not ArtifactEnvelope or not artifact.verify_payload():
