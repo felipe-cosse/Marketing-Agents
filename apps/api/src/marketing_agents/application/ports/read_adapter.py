@@ -19,6 +19,7 @@ from marketing_agents.domain.validation import (
     require_utc,
 )
 
+from .runtime_inputs import RuntimeInputContract
 from .runtime_outputs import RuntimeOutputContract
 
 
@@ -434,6 +435,13 @@ class ReadAdapterCancelledError(ReadAdapterError):
 class ReadAdapter(Protocol):
     def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
         """Declare exact support before any durable budget or attempt mutation."""
+        ...
+
+    def input_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeInputContract:
+        """Return the exact request schema used before durable reservation."""
         ...
 
     def output_contract_for(

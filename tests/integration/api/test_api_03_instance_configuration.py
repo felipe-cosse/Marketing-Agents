@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -445,6 +445,169 @@ async def test_api_03_patch_accepts_only_one_json_media_type(
     )
     assert accepted.status_code == 200
     assert len(executor.update_principals) == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        b'\xef\xbb\xbf{"enabled":false}',
+        b'{"enabled":true,"enabled":false}',
+        '{"é":1,"e\u0301":2}'.encode(),
+        b'{"variantLabel":"\xff"}',
+        b'{"enabled":NaN}',
+        b'{"enabled":Infinity}',
+        b'{"enabled":1e100000}',
+        b'{"variantLabel":"\\ud800"}',
+    ),
+    ids=(
+        "bom",
+        "duplicate-key",
+        "unicode-normalization-collision",
+        "invalid-utf8",
+        "nan",
+        "infinity",
+        "numeric-overflow",
+        "lone-surrogate",
+    ),
+)
+@pytest.mark.asyncio
+async def test_api_08_api_03_patch_rejects_non_strict_json_before_service_lookup(
+    compiled: CompiledCatalog,
+    defaults: tuple[InstanceConfiguration, ...],
+    target: InstanceConfiguration,
+    body: bytes,
+) -> None:
+    executor = _executor(defaults, compiled)
+
+    response = await _request(
+        _app(executor),
+        "PATCH",
+        _configuration_path(target.instance_id),
+        headers={
+            "Content-Type": "application/json",
+            "If-Match": instance_configuration_etag(target.configuration_revision),
+        },
+        content=body,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "configuration_invalid",
+        "message": "instance configuration is invalid",
+        "currentRevision": None,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["vary"] == "Authorization"
+    assert executor.read_principals == []
+    assert executor.update_principals == []
+
+
+@pytest.mark.asyncio
+async def test_api_08_api_03_mounted_patch_keeps_strict_json_boundary(
+    compiled: CompiledCatalog,
+    defaults: tuple[InstanceConfiguration, ...],
+    target: InstanceConfiguration,
+) -> None:
+    executor = _executor(defaults, compiled)
+    parent = FastAPI()
+    parent.mount("/mounted", _app(executor))
+    async with AsyncClient(
+        transport=ASGITransport(app=parent),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.patch(
+            "/mounted" + _configuration_path(target.instance_id),
+            content=b'{"enabled":true,"enabled":false}',
+            headers={
+                "Content-Type": "application/json",
+                "If-Match": instance_configuration_etag(target.configuration_revision),
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "configuration_invalid"
+    assert executor.read_principals == []
+    assert executor.update_principals == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        {"Content-Type": "application/json; charset=iso-8859-1"},
+        {"Content-Type": "application/json; charset=utf-8; charset=utf-8"},
+    ),
+)
+async def test_api_08_api_03_rejects_encoded_or_ambiguous_json_transport(
+    compiled: CompiledCatalog,
+    defaults: tuple[InstanceConfiguration, ...],
+    target: InstanceConfiguration,
+    headers: dict[str, str],
+) -> None:
+    executor = _executor(defaults, compiled)
+    response = await _request(
+        _app(executor),
+        "PATCH",
+        _configuration_path(target.instance_id),
+        content=b'{"enabled":false}',
+        headers={
+            **headers,
+            "If-Match": instance_configuration_etag(target.configuration_revision),
+        },
+    )
+
+    assert response.status_code == 415
+    assert response.json() == {"detail": "instance configuration requires application/json"}
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["vary"] == "Authorization"
+    assert executor.read_principals == []
+    assert executor.update_principals == []
+
+
+@pytest.mark.asyncio
+async def test_api_08_api_03_patch_bounds_depth_and_streamed_bytes_before_service_lookup(
+    compiled: CompiledCatalog,
+    defaults: tuple[InstanceConfiguration, ...],
+    target: InstanceConfiguration,
+) -> None:
+    executor = _executor(defaults, compiled)
+    app = _app(executor)
+    headers = {
+        "Content-Type": "application/json",
+        "If-Match": instance_configuration_etag(target.configuration_revision),
+    }
+    deep_body = b'{"variantLabel":' + (b"[" * 64) + b'"safe"' + (b"]" * 64) + b"}"
+
+    async def streamed_oversized_body() -> AsyncIterator[bytes]:
+        yield b'{"enabled":false}'
+        yield b" " * 1_048_576
+
+    deep = await _request(
+        app,
+        "PATCH",
+        _configuration_path(target.instance_id),
+        headers=headers,
+        content=deep_body,
+    )
+    oversized = await _request(
+        app,
+        "PATCH",
+        _configuration_path(target.instance_id),
+        headers=headers,
+        content=streamed_oversized_body(),
+    )
+
+    for response in (deep, oversized):
+        assert response.status_code == 422
+        assert response.json() == {
+            "code": "configuration_invalid",
+            "message": "instance configuration is invalid",
+            "currentRevision": None,
+        }
+        assert len(response.content) < 256
+    assert executor.read_principals == []
+    assert executor.update_principals == []
 
 
 @pytest.mark.asyncio

@@ -1309,11 +1309,73 @@ class MalformedResponseGateway:
 
     async def execute(self, authorization):  # type: ignore[no-untyped-def]
         result = await self.delegate.execute(authorization)
-        return ConnectorWriteResult(
+        return ConnectorWriteResult.model_construct(
             receipt_id=result.receipt_id,
             status=result.status,
             safe_metadata=cast(dict[str, JsonValue], {"invalid": object()}),
         )
+
+
+class _MalformedCommunityConnectorResponse:
+    def __init__(self, delegate: object, corruption: str) -> None:
+        self._delegate = delegate
+        self._corruption = corruption
+
+    async def send_message(self, request):  # type: ignore[no-untyped-def]
+        result = await self._delegate.send_message(request)  # type: ignore[attr-defined]
+        if self._corruption == "invalid_metadata":
+            return ConnectorWriteResult.model_construct(
+                receipt_id=result.receipt_id,
+                status=result.status,
+                safe_metadata={"invalid": object()},
+            )
+
+        def hostile_dump(**_kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("api-08-provider-secret-canary")
+
+        object.__setattr__(result, "model_dump", hostile_dump)
+        return result
+
+    async def share_material(self, request):  # type: ignore[no-untyped-def]
+        return await self._delegate.share_material(request)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corruption", ("invalid_metadata", "hostile_model_dump"))
+async def test_api_08_registry_gateway_rejects_malformed_write_result_after_one_effect(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    runtime = await _runtime(tmp_path / f"api-08-malformed-write-result-{corruption}.db")
+    clock = MutableClock()
+    action = await _released_action(runtime, clock, seed=1042)
+    ledger = DurableMockReceiptLedger(_uow_factory(runtime), clock)
+    original = MockConnectorBundle.create(REGISTRY, ledger)
+    bundle = replace(
+        original,
+        community=_MalformedCommunityConnectorResponse(  # type: ignore[arg-type]
+            original.community,
+            corruption,
+        ),
+    )
+    gateway = RegistryConnectorWriteGateway(
+        REGISTRY,
+        bundle,
+        binding_configuration_revisions={COMMUNITY_BINDING: 1},
+    )
+    try:
+        with pytest.raises(ConnectorDeliveryFailure) as captured:
+            await gateway.execute(_authorize_action(action, action.idempotency_key))
+        assert captured.value.code == "schema_invalid_response"
+        assert captured.value.request_may_have_left_process is True
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
+        assert "provider-secret-canary" not in str(captured.value)
+        assert "provider-secret-canary" not in repr(captured.value)
+        assert ledger.side_effect_count == 1
+        assert await _counts(runtime) == (1, 1)
+    finally:
+        await runtime.dispose()
 
 
 @pytest.mark.asyncio

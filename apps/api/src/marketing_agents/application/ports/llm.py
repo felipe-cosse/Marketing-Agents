@@ -60,6 +60,7 @@ class LLMRequest(BaseModel):
     retrieved_content: tuple[UntrustedContentPart, ...] = ()
     tool_results: tuple[UntrustedToolResult, ...] = ()
     output_schema_id: str = Field(min_length=1, max_length=240)
+    output_schema_hash: str = Field(pattern=r"^schema-sha256-v1:[0-9a-f]{64}$")
     output_schema: dict[str, JsonValue]
     context: LLMInvocationContext
 

@@ -8,6 +8,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from marketing_agents.application.policies.json_schema import compile_json_schema
 from marketing_agents.application.policies.write_authorization import (
     AuthorizedExternalWrite,
 )
@@ -29,6 +30,7 @@ from marketing_agents.application.ports.read_adapter import (
     ReadAdapterResult,
     ReadAdapterTransientError,
 )
+from marketing_agents.application.ports.runtime_inputs import RuntimeInputContract
 from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import ExternalAction
@@ -191,6 +193,31 @@ class RegistryConnectorReadAdapter:
             raise ReadAdapterPermanentError(
                 "adapter_contract_invalid",
                 "registered connector output schema is unavailable",
+            ) from None
+
+    def input_contract_for(
+        self,
+        operation: OperationExecutionPolicy,
+    ) -> RuntimeInputContract:
+        """Expose the registered parameter schema before any durable mutation."""
+
+        contract = self.contract_for(operation)
+        try:
+            registration = self._registry.resolve(operation.capability_id)
+            parameters_field = registration.request_type.model_fields.get("parameters")
+            parameters_type = None if parameters_field is None else parameters_field.annotation
+            if not isinstance(parameters_type, type) or not issubclass(parameters_type, BaseModel):
+                raise TypeError("registered READ parameters are not a model")
+            return RuntimeInputContract(
+                schema_id=contract.request_schema_id,
+                schema_version="v1",
+                schema=parameters_type.model_json_schema(),
+                classification=contract.data_classification,
+            )
+        except (ConnectorBundleConfigurationError, TypeError, ValueError):
+            raise ReadAdapterPermanentError(
+                "adapter_contract_invalid",
+                "registered connector input schema is unavailable",
             ) from None
 
     async def execute(self, request: ReadAdapterRequest) -> ReadAdapterResult:
@@ -426,7 +453,7 @@ class RegistryConnectorWriteGateway:
 
     async def execute(self, authorization: AuthorizedExternalWrite) -> ConnectorWriteResult:
         action = authorization.action
-        mapped_failure: ConnectorDeliveryFailure | None = None
+        request_failure: ConnectorDeliveryFailure | None = None
         try:
             registration = self._registry.resolve(action.capability_id)
             command = registration.request_type.model_validate_json(
@@ -434,28 +461,69 @@ class RegistryConnectorWriteGateway:
             )
             connector = getattr(self._bundle, action.connector_family)
             method = getattr(connector, registration.method_name)
-            return cast(
-                ConnectorWriteResult,
-                await method(
-                    AuthorizedConnectorCommand(
-                        authorization=authorization,
-                        command=command,
-                    )
-                ),
-            )
         except (ConnectorBundleConfigurationError, ConnectorPortError, ValidationError) as exc:
             code = getattr(exc, "code", "connector_request_rejected")
-            mapped_failure = ConnectorDeliveryFailure(
+            request_failure = ConnectorDeliveryFailure(
                 str(code) if code in _SAFE_CONNECTOR_CODES else "connector_request_rejected",
                 "connector rejected the exact authorized request",
                 request_may_have_left_process=False,
             )
         except Exception:
-            mapped_failure = ConnectorDeliveryFailure(
+            request_failure = ConnectorDeliveryFailure(
+                "connector_request_rejected",
+                "connector request could not be constructed from its registered schema",
+                request_may_have_left_process=False,
+            )
+        if request_failure is not None:
+            raise request_failure from None
+
+        delivery_failure: ConnectorDeliveryFailure | None = None
+        try:
+            raw_result = await method(
+                AuthorizedConnectorCommand(
+                    authorization=authorization,
+                    command=command,
+                )
+            )
+        except ConnectorPortError as exc:
+            code = exc.code if exc.code in _SAFE_CONNECTOR_CODES else "connector_request_rejected"
+            delivery_failure = ConnectorDeliveryFailure(
+                code,
+                "connector rejected the exact authorized request",
+                request_may_have_left_process=False,
+            )
+        except Exception:
+            delivery_failure = ConnectorDeliveryFailure(
                 "connector_delivery_uncertain",
                 "connector delivery failed after invocation began",
                 request_may_have_left_process=True,
             )
-        if mapped_failure is None:  # pragma: no cover - successful path returns above
-            raise AssertionError("connector failure mapping lost its classified result")
-        raise mapped_failure from None
+        if delivery_failure is not None:
+            raise delivery_failure from None
+
+        response_failure: ConnectorDeliveryFailure | None = None
+        try:
+            if type(raw_result) is not ConnectorWriteResult:
+                raise TypeError("connector WRITE returned the wrong response type")
+            validated_result = ConnectorWriteResult.model_validate_json(
+                canonical_json_bytes(raw_result.model_dump(mode="json")),
+                strict=True,
+            )
+            compile_json_schema(ConnectorWriteResult.model_json_schema()).validate(
+                validated_result.model_dump(mode="json"),
+                pointer_root="/output",
+                max_depth=64,
+            )
+            return validated_result
+        except Exception:
+            # The provider call may already have produced its external effect. A
+            # malformed response is therefore ambiguous and must reconcile only
+            # through the authoritative durable receipt.
+            response_failure = ConnectorDeliveryFailure(
+                "schema_invalid_response",
+                "connector returned a response outside its registered result schema",
+                request_may_have_left_process=True,
+            )
+        if response_failure is not None:
+            raise response_failure from None
+        return validated_result

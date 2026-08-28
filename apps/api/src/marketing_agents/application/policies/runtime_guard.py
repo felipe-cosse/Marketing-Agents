@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Self
 
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from marketing_agents.application.policies.json_schema import (
+    JsonSchemaPolicyError,
+    compile_json_schema,
+)
+from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.runtime_policy import payload_fields_within_byte_limit
 from marketing_agents.security.content_trust import UntrustedContentPart
-
-_SAFE_POINTER_TOKEN = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 
 
 class RuntimePolicyViolation(ValueError):
@@ -82,14 +83,6 @@ class AttemptContext(BaseModel):
         return self
 
 
-def _json_depth(value: Any) -> int:
-    if isinstance(value, Mapping):
-        return 1 + max((_json_depth(item) for item in value.values()), default=0)
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return 1 + max((_json_depth(item) for item in value), default=0)
-    return 1
-
-
 class RuntimePolicyGuard:
     def __init__(self, policy: RuntimePolicySnapshot) -> None:
         self._policy = policy
@@ -146,30 +139,24 @@ class RuntimePolicyGuard:
         max_bytes: int,
         direction: str,
     ) -> None:
+        encoded = b""
+        plain_payload: Any = None
+        invalid_json = False
         try:
-            encoded = json.dumps(
-                payload,
-                allow_nan=False,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-        except (TypeError, ValueError) as exc:
-            raise RuntimePolicyViolation("invalid_json", "payload is not strict JSON") from exc
+            encoded = canonical_json_bytes(payload)
+            plain_payload = json.loads(encoded)
+        except Exception:
+            invalid_json = True
+        if invalid_json:
+            raise RuntimePolicyViolation("invalid_json", "payload is not strict JSON")
         if len(encoded) > max_bytes:
             raise RuntimePolicyViolation(
                 f"{direction}_byte_limit",
                 "payload byte limit exceeded",
                 pointer=f"/{direction}",
             )
-        if _json_depth(payload) > self._policy.max_json_depth:
-            raise RuntimePolicyViolation(
-                "json_depth_limit",
-                "payload nesting limit exceeded",
-                pointer=f"/{direction}",
-            )
         if direction == "input" and not payload_fields_within_byte_limit(
-            payload,
+            plain_payload,
             self._policy.max_input_field_bytes,
         ):
             raise RuntimePolicyViolation(
@@ -177,23 +164,36 @@ class RuntimePolicyGuard:
                 "input payload field exceeds its byte limit",
                 pointer="/input",
             )
-        validator = Draft202012Validator(schema)
-        error = next(iter(validator.iter_errors(payload)), None)
-        if error is not None:
-            pointer = f"/{direction}"
-            tokens: list[str] = []
-            for part in error.absolute_path:
-                if isinstance(part, int) and not isinstance(part, bool) and part >= 0:
-                    tokens.append(str(part))
-                elif isinstance(part, str) and _SAFE_POINTER_TOKEN.fullmatch(part):
-                    tokens.append(part.replace("~", "~0").replace("/", "~1"))
-                else:
-                    tokens = []
-                    break
-            if tokens:
-                pointer += "/" + "/".join(tokens)
+        pointer_root = f"/{direction}"
+        policy_failure: tuple[str, str, str] | None = None
+        try:
+            compiled_schema = compile_json_schema(schema)
+            compiled_schema.validate(
+                plain_payload,
+                pointer_root=pointer_root,
+                max_depth=self._policy.max_json_depth,
+            )
+        except JsonSchemaPolicyError as exc:
+            if exc.code == "json_depth_limit":
+                policy_failure = (
+                    "json_depth_limit",
+                    "payload nesting limit exceeded",
+                    exc.pointer or pointer_root,
+                )
+            else:
+                message = (
+                    "payload does not conform to its schema"
+                    if exc.code == "instance_invalid"
+                    else "payload schema is invalid"
+                )
+                policy_failure = (
+                    f"{direction}_schema_invalid",
+                    message,
+                    exc.pointer or pointer_root,
+                )
+        if policy_failure is not None:
             raise RuntimePolicyViolation(
-                f"{direction}_schema_invalid",
-                "payload does not conform to its schema",
-                pointer=pointer,
+                policy_failure[0],
+                policy_failure[1],
+                pointer=policy_failure[2],
             )

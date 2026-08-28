@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from marketing_agents.api.dependencies import (
     InstanceConfigurationExecutor,
@@ -29,6 +30,12 @@ from marketing_agents.api.schemas.instance_configuration import (
     InstanceConfigurationView,
     ScheduleBindingView,
     TriggerBindingView,
+)
+from marketing_agents.api.strict_json import (
+    StrictJsonTransportError,
+    strict_json_route_path,
+    strict_json_transport_headers_are_valid,
+    validate_strict_json_body,
 )
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSchema,
@@ -51,8 +58,11 @@ _INSTANCE_ID_PATTERN = r"^inst\.[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+\.[0-9]{2}$"
 _NO_STORE = "no-store"
 _VARY = "Authorization"
 _MAX_IF_MATCH_LENGTH = 200
+_MAX_CONFIGURATION_REQUEST_BYTES = 1_048_576
+_MAX_CONFIGURATION_JSON_DEPTH = 64
 _QUERY_TIMEOUT_SECONDS = 5.0
 _CONFIGURATION_ETAG_PATTERN = re.compile(r'^"instance-configuration-v1-[1-9][0-9]*"$')
+_CONFIGURATION_PATH_PATTERN = re.compile(r"^/api/v1/agent-instances/[^/]+/configuration$")
 _IF_MATCH_OPENAPI_PARAMETER: dict[str, object] = {
     "name": "If-Match",
     "in": "header",
@@ -166,9 +176,7 @@ router = APIRouter(prefix="/api/v1/agent-instances", tags=["instance-configurati
 
 
 def _json_content_type(request: Request) -> None:
-    values = request.headers.getlist("content-type")
-    media_type = values[0].split(";", 1)[0].strip().casefold() if len(values) == 1 else ""
-    if media_type != "application/json":
+    if not strict_json_transport_headers_are_valid(request.scope):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="instance configuration requires application/json",
@@ -254,6 +262,98 @@ def _problem_response(
         content=problem.model_dump(mode="json", by_alias=True),
         headers={"Cache-Control": _NO_STORE, "Vary": _VARY},
     )
+
+
+class InstanceConfigurationRequestBoundsMiddleware:
+    """Bound and validate configuration JSON before FastAPI parses it."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "PATCH"
+            or _CONFIGURATION_PATH_PATTERN.fullmatch(strict_json_route_path(scope)) is None
+        ):
+            await self._app(scope, receive, send)
+            return
+        if not strict_json_transport_headers_are_valid(scope):
+            response = JSONResponse(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                content={"detail": "instance configuration requires application/json"},
+                headers={"Cache-Control": _NO_STORE, "Vary": _VARY},
+            )
+            await response(scope, receive, send)
+            return
+        if self._declared_length_is_invalid(scope):
+            await self._reject(scope, receive, send)
+            return
+
+        buffered = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self._reject(scope, receive, send)
+                return
+            chunk = message.get("body", b"")
+            if (
+                type(chunk) is not bytes
+                or len(buffered) + len(chunk) > _MAX_CONFIGURATION_REQUEST_BYTES
+            ):
+                await self._reject(scope, receive, send)
+                return
+            buffered.extend(chunk)
+            if not message.get("more_body", False):
+                break
+        try:
+            validate_strict_json_body(
+                bytes(buffered),
+                max_depth=_MAX_CONFIGURATION_JSON_DEPTH,
+            )
+        except StrictJsonTransportError:
+            await self._reject(scope, receive, send)
+            return
+
+        delivered = False
+
+        async def bounded_receive() -> Message:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {
+                    "type": "http.request",
+                    "body": bytes(buffered),
+                    "more_body": False,
+                }
+            return await receive()
+
+        await self._app(scope, bounded_receive, send)
+
+    @staticmethod
+    def _declared_length_is_invalid(scope: Scope) -> bool:
+        values = [
+            value for name, value in scope.get("headers", ()) if name.lower() == b"content-length"
+        ]
+        if not values:
+            return False
+        if len(values) != 1:
+            return True
+        try:
+            raw = values[0].decode("ascii")
+            parsed = int(raw)
+        except (UnicodeDecodeError, ValueError):
+            return True
+        return str(parsed) != raw or parsed < 0 or parsed > _MAX_CONFIGURATION_REQUEST_BYTES
+
+    @staticmethod
+    async def _reject(scope: Scope, receive: Receive, send: Send) -> None:
+        response = _problem_response(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            code="configuration_invalid",
+            message="instance configuration is invalid",
+        )
+        await response(scope, receive, send)
 
 
 def _service_problem(error: InstanceConfigurationServiceError) -> JSONResponse:

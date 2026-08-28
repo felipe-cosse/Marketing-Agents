@@ -372,6 +372,93 @@ async def test_api_04_requires_one_application_json_media_type(
     assert accepted.status_code == 202
 
 
+@pytest.mark.parametrize(
+    "body",
+    (
+        b'\xef\xbb\xbf{"input":{}}',
+        b'{"input":{"first":1},"input":{"second":2}}',
+        '{"input":{"é":1,"e\u0301":2}}'.encode(),
+        b'{"input":{"topic":"\xff"}}',
+        b'{"input":{"score":NaN}}',
+        b'{"input":{"score":Infinity}}',
+        b'{"input":{"score":1e100000}}',
+        b'{"input":{"topic":"\\ud800"}}',
+    ),
+    ids=(
+        "bom",
+        "duplicate-key",
+        "unicode-normalization-collision",
+        "invalid-utf8",
+        "nan",
+        "infinity",
+        "numeric-overflow",
+        "lone-surrogate",
+    ),
+)
+@pytest.mark.asyncio
+async def test_api_08_api_04_rejects_non_strict_json_before_executor(body: bytes) -> None:
+    executor = FakeManualDryRunExecutor()
+
+    response = await _request(
+        _app(executor),
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "dry_run_input_invalid",
+        "message": "manual dry-run input is invalid",
+    }
+    assert executor.commands == []
+
+
+@pytest.mark.asyncio
+async def test_api_08_api_04_mounted_route_keeps_strict_json_boundary() -> None:
+    executor = FakeManualDryRunExecutor()
+    parent = FastAPI()
+    parent.mount("/mounted", _app(executor))
+    async with AsyncClient(
+        transport=ASGITransport(app=parent),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/mounted" + PATH,
+            content=b'{"input":{"first":1},"input":{"second":2}}',
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "dry_run_input_invalid"
+    assert executor.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {"Content-Type": "application/json", "Content-Encoding": "gzip"},
+        {"Content-Type": "application/json; charset=iso-8859-1"},
+        {"Content-Type": "application/json; charset=utf-8; charset=utf-8"},
+    ),
+)
+async def test_api_08_api_04_rejects_encoded_or_ambiguous_json_transport(
+    headers: dict[str, str],
+) -> None:
+    executor = FakeManualDryRunExecutor()
+    response = await _request(
+        _app(executor),
+        content=b'{"input":{"topic":"caf\xc3\xa9"}}',
+        headers=headers,
+    )
+
+    assert response.status_code == 415
+    assert response.json() == {"detail": "manual dry-run creation requires application/json"}
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["vary"] == "Authorization"
+    assert executor.commands == []
+
+
 @pytest.mark.asyncio
 async def test_api_04_rejects_deep_json_before_recursive_command_normalization() -> None:
     executor = FakeManualDryRunExecutor()
