@@ -27,6 +27,8 @@ MANIFEST_ROOT = Path("docs/verification/requirements")
 ID_RE = re.compile(r"^[A-Z]+-[0-9]{2}$")
 FEATURE_SUBJECT_RE = re.compile(r"^\[([A-Z]+-[0-9]{2})\]\s+\S")
 MERGE_SUBJECT_RE = re.compile(r"^merge:\s+([A-Z]+-[0-9]{2})\s+\S", re.IGNORECASE)
+LEGACY_MERGE_SUBJECT_RE = re.compile(r"^\[([A-Z]+-[0-9]{2})\]\s+Merge\s+\S")
+GIT_SHA1_RE = re.compile(r"^[a-f0-9]{40}$")
 CLAIM_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 SHELL_META_RE = re.compile(r"[;&|`$><\n\r]")
@@ -207,6 +209,41 @@ def _expect_keys(value: dict[str, Any], required: set[str], optional: set[str], 
         raise EvidenceError(f"{label}: missing fields {', '.join(missing)}")
     if extra:
         raise EvidenceError(f"{label}: unknown fields {', '.join(extra)}")
+
+
+def legacy_merge_subject_exceptions(policy: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    raw = policy.get("legacy_merge_subject_exceptions", {})
+    if not isinstance(raw, dict):
+        raise EvidenceError("policy.legacy_merge_subject_exceptions: expected object")
+    parsed: dict[str, tuple[str, str]] = {}
+    requirement_ids: set[str] = set()
+    for commit_sha, exception in raw.items():
+        if not isinstance(commit_sha, str) or not GIT_SHA1_RE.fullmatch(commit_sha):
+            raise EvidenceError(
+                "policy.legacy_merge_subject_exceptions: keys must be full lowercase 40-hex commit SHAs"
+            )
+        label = f"policy.legacy_merge_subject_exceptions[{commit_sha}]"
+        if not isinstance(exception, dict):
+            raise EvidenceError(f"{label}: expected object")
+        _expect_keys(exception, {"requirement_id", "subject"}, set(), label)
+        requirement_id = exception["requirement_id"]
+        subject = exception["subject"]
+        if not isinstance(requirement_id, str) or not ID_RE.fullmatch(requirement_id):
+            raise EvidenceError(f"{label}: invalid requirement ID")
+        if not isinstance(subject, str):
+            raise EvidenceError(f"{label}: subject must be a string")
+        if not subject or subject != subject.strip() or len(subject) > 240:
+            raise EvidenceError(f"{label}: subject must be nonempty, trimmed, and at most 240 characters")
+        if MERGE_SUBJECT_RE.match(subject):
+            raise EvidenceError(f"{label}: canonical merge subjects cannot be legacy exceptions")
+        legacy_match = LEGACY_MERGE_SUBJECT_RE.match(subject)
+        if not legacy_match or legacy_match.group(1) != requirement_id:
+            raise EvidenceError(f"{label}: requirement ID/legacy subject mismatch")
+        if requirement_id in requirement_ids:
+            raise EvidenceError(f"policy.legacy_merge_subject_exceptions: duplicate requirement ID {requirement_id}")
+        requirement_ids.add(requirement_id)
+        parsed[commit_sha] = (requirement_id, subject)
+    return parsed
 
 
 def _string_list(value: Any, label: str, *, minimum: int = 0, maximum: int = 64) -> list[str]:
@@ -690,13 +727,23 @@ def validate_history(
     target = repo.resolve(ref)
     matrix = load_matrix(root, repo, target)
     mainline = repo.first_parent_commits(baseline, target)
+    legacy_exceptions = legacy_merge_subject_exceptions(policy)
+    used_legacy_exceptions: set[str] = set()
+    accepted_mainline_merge_shas: set[str] = set()
     seen: set[str] = set()
     topology: list[tuple[str, str, str, str]] = []
     for commit in mainline:
         match = MERGE_SUBJECT_RE.match(commit.subject)
-        if not match:
-            raise EvidenceError(f"mainline commit {commit.sha[:12]} is not a requirement merge: {commit.subject}")
-        requirement_id = match.group(1).upper()
+        if match:
+            requirement_id = match.group(1).upper()
+        else:
+            legacy_exception = legacy_exceptions.get(commit.sha)
+            if legacy_exception is None:
+                raise EvidenceError(f"mainline commit {commit.sha[:12]} is not a requirement merge: {commit.subject}")
+            requirement_id, expected_subject = legacy_exception
+            if commit.subject != expected_subject:
+                raise EvidenceError(f"mainline commit {commit.sha[:12]} does not match its exact legacy subject")
+            used_legacy_exceptions.add(commit.sha)
         if requirement_id not in matrix:
             raise EvidenceError(f"unknown requirement merge ID {requirement_id}")
         if requirement_id in seen:
@@ -711,10 +758,26 @@ def validate_history(
         if repo.tree(commit.sha) != repo.tree(feature):
             raise EvidenceError(f"{requirement_id}: merge tree differs from the feature tree")
         topology.append((requirement_id, base, feature, commit.sha))
+        accepted_mainline_merge_shas.add(commit.sha)
+
+    unused_candidates = set(legacy_exceptions) - used_legacy_exceptions
+    current_main = repo.resolve("main")
+    future_mainline_commits: set[str] = set()
+    if target != current_main:
+        current_mainline = repo.output("rev-list", "--first-parent", current_main).splitlines()
+        if target in current_mainline:
+            future_mainline_commits = set(current_mainline[: current_mainline.index(target)])
+    future_legacy_exceptions = unused_candidates & future_mainline_commits
+    unused_legacy_exceptions = sorted(unused_candidates - future_legacy_exceptions)
+    if unused_legacy_exceptions:
+        raise EvidenceError(f"unused legacy merge subject exceptions: {', '.join(unused_legacy_exceptions)}")
 
     feature_subject_counts: dict[str, int] = {}
-    raw_subjects = repo.output("log", target, "--format=%s")
-    for subject in raw_subjects.splitlines():
+    raw_subjects = repo.output("log", target, "--format=%H%x1f%s")
+    for line in raw_subjects.splitlines():
+        commit_sha, subject = line.split("\x1f", 1)
+        if commit_sha in accepted_mainline_merge_shas:
+            continue
         match = FEATURE_SUBJECT_RE.match(subject)
         if match:
             key = match.group(1)

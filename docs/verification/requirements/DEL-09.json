@@ -1,0 +1,99 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-09",
+  "matrix_statement_sha256": "b98d74d0b64b566a107be51d55b316b229d9892e3b85f75233941410a4a99618",
+  "evidence_class": "tooling_control",
+  "scope": {
+    "allowed_path_globs": [
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/implementation/requirement-branch-workflow.md",
+      "docs/verification/requirement-policy.json",
+      "docs/verification/requirements/DEL-09.json",
+      "docs/verification/requirements/DEL-09.md",
+      "scripts/verify_requirement_evidence.py",
+      "tests/tooling/test_verify_requirement_evidence.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "docs/verification/requirement-policy.json",
+          "scripts/verify_requirement_evidence.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/tooling/test_verify_requirement_evidence.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-legacy-merge-exception",
+      "type": "contract",
+      "statement": "History validation recognizes the legacy API-06 merge subject only when its full commit SHA, requirement ID, and subject exactly match the configured exception.",
+      "test_refs": [
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_canonical_merge_subject_remains_valid",
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_accepts_exact_legacy_merge_subject_exception"
+      ]
+    },
+    {
+      "id": "legacy-exception-fails-closed",
+      "type": "negative_control",
+      "statement": "Short or incorrect SHAs, malformed or unused entries, subject or requirement near misses, future commits, and invalid merge topology remain rejected.",
+      "test_refs": [
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_rejects_wrong_or_short_exception_sha",
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_rejects_subject_and_requirement_id_near_misses",
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_rejects_same_legacy_subject_on_different_future_commit",
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_rejects_malformed_and_unused_exceptions",
+        "tests/tooling/test_verify_requirement_evidence.py::RequirementEvidenceToolTests.test_del_09_legacy_exception_preserves_two_parent_check"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-09-tooling",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "tests.tooling.test_verify_requirement_evidence"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "exact-legacy-merge-exception",
+        "legacy-exception-fails-closed"
+      ]
+    },
+    {
+      "id": "del-09-current-history",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/verify_requirement_evidence.py",
+        "history",
+        "--ref",
+        "main",
+        "--allow-incomplete"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_enforced",
+      "covers": ["exact-legacy-merge-exception"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "docs/verification/requirement-policy.json",
+      "scripts/verify_requirement_evidence.py"
+    ],
+    "gate_id": "del-09-tooling"
+  },
+  "limitations": [
+    "The historical API-06 subject remains noncanonical; this exception does not rename it, authorize a history rewrite, or permit any future subject mismatch."
+  ]
+}

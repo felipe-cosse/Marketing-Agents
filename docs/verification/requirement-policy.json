@@ -4,7 +4,13 @@
   "legacy_bootstrap_ids": ["SRC-01", "SRC-02", "SRC-03", "EXEC-01", "EXEC-02"],
   "legacy_manifests_added_by": "DEL-08",
   "strict_protocol_starts_at": "DEL-08",
-  "protected_carrier_ids": ["DEL-08", "EXEC-08"],
+  "legacy_merge_subject_exceptions": {
+    "ce04fecc475f72c182e61722e69c26af1438669b": {
+      "requirement_id": "API-06",
+      "subject": "[API-06] Merge immutable approval control API"
+    }
+  },
+  "protected_carrier_ids": ["DEL-08", "DEL-09", "EXEC-08"],
   "protected_path_globs": [
     "docs/verification/schema/**",
     "docs/verification/requirement-policy.json",
@@ -44,6 +50,7 @@
     "SRC-03": {"evidence_class": "decision_record", "connection_witness": false},
     "EXEC-01": {"evidence_class": "process_gate", "connection_witness": false},
     "EXEC-02": {"evidence_class": "decision_record", "connection_witness": false},
-    "DEL-08": {"evidence_class": "tooling_control", "connection_witness": true}
+    "DEL-08": {"evidence_class": "tooling_control", "connection_witness": true},
+    "DEL-09": {"evidence_class": "tooling_control", "connection_witness": true}
   }
 }
