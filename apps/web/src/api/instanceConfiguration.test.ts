@@ -244,7 +244,10 @@ function problemResponse(
 ): Response {
   return new Response(JSON.stringify(problemBody(status, code, optional)), {
     status,
-    headers: { "Content-Type": "application/problem+json; charset=utf-8" },
+    headers: {
+      "Content-Type": "application/problem+json; charset=utf-8",
+      "X-Correlation-ID": CORRELATION_ID,
+    },
   });
 }
 
@@ -277,6 +280,12 @@ describe("local session contract", () => {
       normalizeLocalSession({
         ...sessionBody(),
         roles: ["viewer", "local_admin"],
+      }),
+    ).toThrow();
+    expect(() =>
+      normalizeLocalSession({
+        ...sessionBody(),
+        connectorMode: " mock",
       }),
     ).toThrow();
   });

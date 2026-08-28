@@ -140,6 +140,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     null,
   );
   const [configurationDirty, setConfigurationDirty] = useState(false);
+  const [dryRunDirty, setDryRunDirty] = useState(false);
   const [pendingSelection, setPendingSelection] =
     useState<PendingSelection | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -172,7 +173,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const handleSelectionChange = useCallback(
     (instanceId: string | null) => {
       if (instanceId === selectedInstanceId) return;
-      if (configurationDirty) {
+      if (configurationDirty || dryRunDirty) {
         setPendingSelection({
           instanceId,
           restoreFocusId: instanceId === null ? selectedInstanceId : null,
@@ -181,7 +182,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       }
       setSelectedInstanceId(instanceId);
     },
-    [configurationDirty, selectedInstanceId],
+    [configurationDirty, dryRunDirty, selectedInstanceId],
   );
   useFilteredFocus({
     sourceHierarchy: hierarchy,
@@ -270,7 +271,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   );
   const closeInspector = useCallback(() => {
     if (selectedInstanceId === null) return;
-    if (configurationDirty) {
+    if (configurationDirty || dryRunDirty) {
       setPendingSelection({
         instanceId: null,
         restoreFocusId: selectedInstanceId,
@@ -282,25 +283,32 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     requestAnimationFrame(() => {
       if (!focusInstanceCard(restoreFocusId)) searchRef.current?.focus();
     });
-  }, [configurationDirty, selectedInstanceId]);
+  }, [configurationDirty, dryRunDirty, selectedInstanceId]);
   const keepEditing = useCallback(() => {
     setPendingSelection(null);
     requestAnimationFrame(() => {
       const inspector = document.querySelector("#agent-inspector");
+      const editorSelector =
+        configurationDirty && !dryRunDirty
+          ? 'form[aria-label="Deployment configuration editor"]'
+          : dryRunDirty && !configurationDirty
+            ? 'form[aria-label="Manual dry-run input"]'
+            : "form";
       const editorTarget = inspector?.querySelector<HTMLElement>(
-        "form input:not(:disabled), form select:not(:disabled), form button:not(:disabled)",
+        `${editorSelector} input:not(:disabled), ${editorSelector} textarea:not(:disabled), ${editorSelector} select:not(:disabled), ${editorSelector} button:not(:disabled)`,
       );
       const fallback = inspector?.querySelector<HTMLElement>(
         "button:not(:disabled)",
       );
       (editorTarget ?? fallback)?.focus();
     });
-  }, []);
+  }, [configurationDirty, dryRunDirty]);
   const discardAndContinue = useCallback(() => {
     if (pendingSelection === null) return;
     const { instanceId, restoreFocusId } = pendingSelection;
     setPendingSelection(null);
     setConfigurationDirty(false);
+    setDryRunDirty(false);
     setSelectedInstanceId(instanceId);
     requestAnimationFrame(() => {
       const focusId = instanceId ?? restoreFocusId;
@@ -373,10 +381,18 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
           )}
           onClose={closeInspector}
           onConfigurationDirtyChange={setConfigurationDirty}
+          onDryRunDirtyChange={setDryRunDirty}
         />
       )}
       <UnsavedConfigurationDialog
         open={pendingSelection !== null}
+        changeKind={
+          configurationDirty && dryRunDirty
+            ? "multiple"
+            : dryRunDirty
+              ? "dry-run"
+              : "configuration"
+        }
         destinationLabel={
           pendingSelection?.instanceId === null
             ? "close this inspector"

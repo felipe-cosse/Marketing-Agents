@@ -1,4 +1,13 @@
-const SESSION_PATH = "/api/v1/session";
+import {
+  clearLocalSession as clearSharedLocalSession,
+  fetchLocalSession as fetchSharedLocalSession,
+  localApiResponseError,
+  LocalApiRequestError,
+  normalizeLocalSession as normalizeSharedLocalSession,
+  sendLocalJsonMutation,
+  type LocalSession,
+} from "./localSession";
+
 const CONFIGURATION_SCHEMA_SUFFIX = "/configuration-schema";
 const CONFIGURATION_SUFFIX = "/configuration";
 
@@ -7,29 +16,12 @@ const INSTANCE_ID_PATTERN =
 const TEMPLATE_ID_PATTERN = /^tpl\.[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+$/u;
 const CONFIGURATION_ETAG_PATTERN =
   /^"instance-configuration-v1-([1-9][0-9]*)"$/u;
-const AUTHORITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,239}$/u;
-const SAFE_CODE_PATTERN = /^[a-z][a-z0-9_]{0,127}$/u;
-const CORRELATION_ID_PATTERN = /^correlation\.api\.[0-9a-f]{32}$/u;
 const CONNECTOR_FAMILY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CONNECTOR_BINDING_ID_PATTERN = /^[A-Za-z0-9._-]+$/u;
 const EVENT_SOURCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u;
-const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/u;
 const CONFIGURATION_SCHEMA_DESCRIPTION =
   "Structural deployment PATCH schema. The API additionally enforces registered bindings, recurrence validity, and exact trigger/schedule value consistency.";
 
-const SESSION_FIELDS = new Set([
-  "actorId",
-  "roles",
-  "scopes",
-  "authMode",
-  "environment",
-  "modelMode",
-  "connectorMode",
-  "networkPermission",
-  "warning",
-  "csrfToken",
-  "csrfHeaderName",
-]);
 const CONFIGURATION_SCHEMA_RESPONSE_FIELDS = new Set([
   "projectionVersion",
   "instanceId",
@@ -95,22 +87,6 @@ const CONNECTOR_VIEW_FIELDS = new Set([
   "bindingId",
   "enabled",
 ]);
-const PROBLEM_REQUIRED_FIELDS = new Set([
-  "type",
-  "title",
-  "status",
-  "detail",
-  "instance",
-  "code",
-  "correlation_id",
-]);
-const PROBLEM_OPTIONAL_FIELDS = new Set([
-  "field_errors",
-  "retry_after_seconds",
-  "current_resource_version",
-]);
-const FIELD_ERROR_FIELDS = new Set(["pointer", "code", "message"]);
-
 const NULL_SCHEMA_FIELDS = new Set(["type"]);
 const BOOLEAN_SCHEMA_FIELDS = new Set(["type"]);
 const BOOLEAN_DEFAULT_SCHEMA_FIELDS = new Set(["type", "default"]);
@@ -128,18 +104,7 @@ const ENUM_SCHEMA_FIELDS = new Set(["enum"]);
 
 export type SupportedTriggerType = "manual" | "webhook" | "schedule";
 export type MisfirePolicy = "skip" | "run_once";
-
-export interface LocalSession {
-  readonly actorId: string;
-  readonly roles: readonly string[];
-  readonly scopes: readonly string[];
-  readonly authMode: "local";
-  readonly environment: "local" | "test" | "production";
-  readonly modelMode: "mock" | "real";
-  readonly connectorMode: string;
-  readonly networkPermission: boolean;
-  readonly warning: "Local identity — not production authentication";
-}
+export type { LocalSession } from "./localSession";
 
 export interface ConnectorFamilyOption {
   readonly connectorFamily: string;
@@ -279,21 +244,7 @@ export class InstanceConfigurationRequestError extends Error {
   }
 }
 
-interface SessionEnvelope {
-  readonly session: LocalSession;
-  readonly csrfToken: string;
-  readonly csrfHeaderName: "X-CSRF-Token";
-}
-
-interface SafeProblem {
-  readonly code: string;
-  readonly currentResourceVersion: number | string | null;
-  readonly fieldErrors: readonly InstanceConfigurationFieldError[];
-}
-
 type JsonObject = Record<string, unknown>;
-
-let currentSession: SessionEnvelope | undefined;
 
 class ContractViolation extends Error {
   constructor(message: string) {
@@ -421,106 +372,8 @@ function validateIdentifier(
   return identifier;
 }
 
-function validateSortedAuthorities(
-  value: unknown,
-  label: string,
-  minimum: number,
-  maximum: number,
-): readonly string[] {
-  if (
-    !Array.isArray(value) ||
-    value.length < minimum ||
-    value.length > maximum
-  ) {
-    throw new ContractViolation(`${label} must be a bounded array`);
-  }
-  const authorities = value.map((item, index) => {
-    const authority = asString(item, `${label}[${String(index)}]`);
-    if (!AUTHORITY_PATTERN.test(authority)) {
-      throw new ContractViolation(`${label} contains an invalid authority`);
-    }
-    return authority;
-  });
-  if (
-    new Set(authorities).size !== authorities.length ||
-    authorities.some(
-      (authority, index) =>
-        index > 0 && (authorities[index - 1] ?? authority) >= authority,
-    )
-  ) {
-    throw new ContractViolation(`${label} must be unique and sorted`);
-  }
-  return Object.freeze(authorities);
-}
-
-function normalizeLocalSessionEnvelope(value: unknown): SessionEnvelope {
-  const record = asRecord(value, "session");
-  assertExactFields(record, SESSION_FIELDS, "session");
-  const actorId = asString(record.actorId, "session.actorId");
-  if (!AUTHORITY_PATTERN.test(actorId)) {
-    throw new ContractViolation("session.actorId is invalid");
-  }
-  const roles = validateSortedAuthorities(record.roles, "session.roles", 1, 64);
-  const scopes = validateSortedAuthorities(
-    record.scopes,
-    "session.scopes",
-    0,
-    128,
-  );
-  assertLiteral(record.authMode, "local", "session.authMode");
-  if (
-    record.environment !== "local" &&
-    record.environment !== "test" &&
-    record.environment !== "production"
-  ) {
-    throw new ContractViolation("session.environment is unsupported");
-  }
-  if (record.modelMode !== "mock" && record.modelMode !== "real") {
-    throw new ContractViolation("session.modelMode is unsupported");
-  }
-  const connectorMode = asTrimmedString(
-    record.connectorMode,
-    "session.connectorMode",
-    64,
-  );
-  const networkPermission = asBoolean(
-    record.networkPermission,
-    "session.networkPermission",
-  );
-  assertLiteral(
-    record.warning,
-    "Local identity — not production authentication",
-    "session.warning",
-  );
-  const csrfToken = asString(record.csrfToken, "session.csrfToken");
-  if (!CSRF_TOKEN_PATTERN.test(csrfToken)) {
-    throw new ContractViolation("session.csrfToken is invalid");
-  }
-  assertLiteral(
-    record.csrfHeaderName,
-    "X-CSRF-Token",
-    "session.csrfHeaderName",
-  );
-  const session: LocalSession = Object.freeze({
-    actorId,
-    roles,
-    scopes,
-    authMode: "local",
-    environment: record.environment,
-    modelMode: record.modelMode,
-    connectorMode,
-    networkPermission,
-    warning: "Local identity — not production authentication",
-  });
-  return Object.freeze({
-    session,
-    csrfToken,
-    csrfHeaderName: "X-CSRF-Token",
-  });
-}
-
 export function normalizeLocalSession(value: unknown): LocalSession {
-  return normalizeLocalSessionEnvelope(value).session;
+  return normalizeSharedLocalSession(value);
 }
 
 function assertNullSchema(value: unknown, label: string): void {
@@ -1573,105 +1426,6 @@ function normalizeConfigurationResult(
   });
 }
 
-function safeString(value: unknown, maximum: number): string | null {
-  return typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maximum
-    ? value
-    : null;
-}
-
-function normalizeFieldErrors(
-  value: unknown,
-): readonly InstanceConfigurationFieldError[] {
-  if (!Array.isArray(value) || value.length > 32) return Object.freeze([]);
-  const errors: InstanceConfigurationFieldError[] = [];
-  for (const item of value) {
-    try {
-      const record = asRecord(item, "problem field error");
-      assertExactFields(record, FIELD_ERROR_FIELDS, "problem field error");
-      const pointer = asString(record.pointer, "problem field error pointer");
-      const code = asString(record.code, "problem field error code");
-      const message = asString(record.message, "problem field error message");
-      if (
-        pointer.length > 1_000 ||
-        !/^\/(?:body|path|query|header|cookie|request|input(?:\/[A-Za-z0-9_.-]{1,100}){0,64})$/u.test(
-          pointer,
-        ) ||
-        !SAFE_CODE_PATTERN.test(code) ||
-        message.length > 240
-      ) {
-        return Object.freeze([]);
-      }
-      errors.push(Object.freeze({ pointer, code, message }));
-    } catch {
-      return Object.freeze([]);
-    }
-  }
-  return Object.freeze(errors);
-}
-
-function normalizeSafeProblem(
-  value: unknown,
-  status: number,
-): SafeProblem | null {
-  try {
-    const record = asRecord(value, "problem");
-    assertAllowedAndRequiredFields(
-      record,
-      PROBLEM_REQUIRED_FIELDS,
-      PROBLEM_OPTIONAL_FIELDS,
-      "problem",
-    );
-    const code = asString(record.code, "problem.code");
-    const correlationId = asString(
-      record.correlation_id,
-      "problem.correlation_id",
-    );
-    if (
-      !SAFE_CODE_PATTERN.test(code) ||
-      record.status !== status ||
-      record.type !== `urn:marketing-agents:problem:${code}` ||
-      !CORRELATION_ID_PATTERN.test(correlationId) ||
-      record.instance !== `urn:marketing-agents:request:${correlationId}` ||
-      safeString(record.title, 120) === null ||
-      safeString(record.detail, 500) === null
-    ) {
-      return null;
-    }
-    let currentResourceVersion: number | string | null = null;
-    if (hasOwn(record, "current_resource_version")) {
-      const current = record.current_resource_version;
-      if (
-        (typeof current === "number" &&
-          Number.isSafeInteger(current) &&
-          current >= 0) ||
-        (typeof current === "string" &&
-          current.length <= 128 &&
-          /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/u.test(current))
-      ) {
-        currentResourceVersion = current;
-      } else {
-        return null;
-      }
-    }
-    if (hasOwn(record, "retry_after_seconds")) {
-      asInteger(
-        record.retry_after_seconds,
-        "problem.retry_after_seconds",
-        0,
-        86_400,
-      );
-    }
-    const fieldErrors = hasOwn(record, "field_errors")
-      ? normalizeFieldErrors(record.field_errors)
-      : Object.freeze([]);
-    return Object.freeze({ code, currentResourceVersion, fieldErrors });
-  } catch {
-    return null;
-  }
-}
-
 function errorMessage(status: number, code: string): string {
   if (code === "configuration_revision_conflict") {
     return "The instance configuration changed. Reload it and try again.";
@@ -1692,36 +1446,30 @@ function errorMessage(status: number, code: string): string {
   return "The local API could not complete this request.";
 }
 
+function configurationRequestError(
+  error: LocalApiRequestError,
+): InstanceConfigurationRequestError {
+  const message =
+    error.status === 0 ||
+    error.code === "invalid_json_response" ||
+    error.code === "invalid_session_response"
+      ? error.message
+      : errorMessage(error.status, error.code);
+  return new InstanceConfigurationRequestError(
+    error.status,
+    error.code,
+    message,
+    {
+      currentResourceVersion: error.currentResourceVersion,
+      fieldErrors: error.fieldErrors,
+    },
+  );
+}
+
 async function responseError(
   response: Response,
 ): Promise<InstanceConfigurationRequestError> {
-  let problem: SafeProblem | null = null;
-  if (
-    response.headers
-      .get("Content-Type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() === "application/problem+json"
-  ) {
-    try {
-      problem = normalizeSafeProblem(
-        (await response.json()) as unknown,
-        response.status,
-      );
-    } catch {
-      problem = null;
-    }
-  }
-  const code = problem?.code ?? "api_request_failed";
-  return new InstanceConfigurationRequestError(
-    response.status,
-    code,
-    errorMessage(response.status, code),
-    {
-      currentResourceVersion: problem?.currentResourceVersion ?? null,
-      fieldErrors: problem?.fieldErrors ?? [],
-    },
-  );
+  return configurationRequestError(await localApiResponseError(response));
 }
 
 function assertJsonSuccess(response: Response, label: string): void {
@@ -1777,39 +1525,17 @@ function getRequestInit(
 }
 
 export function clearLocalSession(): void {
-  currentSession = undefined;
+  clearSharedLocalSession();
 }
 
 export async function fetchLocalSession(
   signal?: AbortSignal,
 ): Promise<LocalSession> {
-  const response = await sameOriginFetch(
-    SESSION_PATH,
-    getRequestInit("GET", { Accept: "application/json" }, signal),
-  );
-  if (!response.ok) throw await responseError(response);
-  assertJsonSuccess(response, "local session");
-  let body: unknown;
   try {
-    body = (await response.json()) as unknown;
-  } catch {
-    throw new InstanceConfigurationRequestError(
-      response.status,
-      "invalid_json_response",
-      "The local API returned an invalid local session.",
-    );
-  }
-  try {
-    const normalized = normalizeLocalSessionEnvelope(body);
-    currentSession = normalized;
-    return normalized.session;
+    return await fetchSharedLocalSession(signal);
   } catch (error) {
-    if (!(error instanceof ContractViolation)) throw error;
-    throw new InstanceConfigurationRequestError(
-      response.status,
-      "invalid_session_response",
-      "The local API returned an invalid local session.",
-    );
+    if (!(error instanceof LocalApiRequestError)) throw error;
+    throw configurationRequestError(error);
   }
 }
 
@@ -1877,41 +1603,6 @@ function validateConfigurationEtag(value: string): string {
   return value;
 }
 
-async function requiredSession(signal?: AbortSignal): Promise<SessionEnvelope> {
-  if (currentSession === undefined) await fetchLocalSession(signal);
-  if (currentSession === undefined) {
-    throw new InstanceConfigurationRequestError(
-      0,
-      "invalid_session_response",
-      "The local API returned an invalid local session.",
-    );
-  }
-  return currentSession;
-}
-
-async function sendConfigurationPatch(
-  path: string,
-  configurationEtag: string,
-  body: string,
-  session: SessionEnvelope,
-  signal?: AbortSignal,
-): Promise<Response> {
-  return await sameOriginFetch(
-    path,
-    getRequestInit(
-      "PATCH",
-      {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "If-Match": configurationEtag,
-        [session.csrfHeaderName]: session.csrfToken,
-      },
-      signal,
-      body,
-    ),
-  );
-}
-
 export async function updateInstanceConfiguration(input: {
   readonly instanceId: string;
   readonly configurationEtag: string;
@@ -1937,29 +1628,22 @@ export async function updateInstanceConfiguration(input: {
   const patch = serializeInstanceConfigurationPatch(input.patch);
   const requestBody = JSON.stringify(patch);
   const path = `/api/v1/agent-instances/${encodeURIComponent(instanceId)}${CONFIGURATION_SUFFIX}`;
-  let session = await requiredSession(input.signal);
-  let response = await sendConfigurationPatch(
-    path,
-    configurationEtag,
-    requestBody,
-    session,
-    input.signal,
-  );
-  if (!response.ok) {
-    const firstError = await responseError(response);
-    if (firstError.status !== 403 || firstError.code !== "csrf_token_invalid") {
-      throw firstError;
-    }
-    await fetchLocalSession(input.signal);
-    session = await requiredSession(input.signal);
-    response = await sendConfigurationPatch(
+  let response: Response;
+  try {
+    response = await sendLocalJsonMutation({
       path,
-      configurationEtag,
-      requestBody,
-      session,
-      input.signal,
-    );
-    if (!response.ok) throw await responseError(response);
+      method: "PATCH",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "If-Match": configurationEtag,
+      },
+      body: requestBody,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  } catch (error) {
+    if (!(error instanceof LocalApiRequestError)) throw error;
+    throw configurationRequestError(error);
   }
   assertJsonSuccess(response, "instance configuration response");
   let body: unknown;

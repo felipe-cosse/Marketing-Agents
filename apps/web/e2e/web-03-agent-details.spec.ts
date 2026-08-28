@@ -285,6 +285,7 @@ async function installBoundary(page: Page): Promise<{
         await route.fulfill({
           status: 409,
           contentType: "application/problem+json",
+          headers: { "X-Correlation-ID": CORRELATION_ID },
           body: JSON.stringify(
             problem(409, "configuration_revision_conflict", {
               current_resource_version: 3,

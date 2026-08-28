@@ -1,0 +1,143 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-04",
+  "matrix_statement_sha256": "489907d0754fd7f4517282ba19712ed2b0be849f67e9df56ce9ca16cce6d3765",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-04.json",
+      "docs/verification/requirements/WEB-04.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/localSession.ts",
+          "apps/web/src/api/manualDryRun.ts",
+          "apps/web/src/features/dry-run/schemaModel.ts",
+          "apps/web/src/features/dry-run/DryRunPanel.tsx",
+          "apps/web/src/features/dry-run/SchemaForm.tsx",
+          "apps/web/src/features/instance-detail/AgentDetailPane.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/api/manualDryRun.test.ts",
+          "apps/web/src/features/dry-run/schemaModel.test.ts",
+          "apps/web/src/features/dry-run/schemaValidation.test.ts",
+          "apps/web/src/features/dry-run/DryRunPanel.test.tsx",
+          "apps/web/e2e/web-04-dry-run.spec.ts",
+          "apps/web/scripts/run-web-04-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-schema-generated-input",
+      "type": "contract",
+      "statement": "The selected template input schema compiles into a closed, bounded form model covering the documented primitive, nested-object, enum, array, default, bound, format, sensitivity, and presentation subset. Unsupported or unsafe schemas fail closed, and every one of the 36 catalog input schemas compiles through the production boundary.",
+      "test_refs": [
+        "apps/web/src/features/dry-run/schemaModel.test.ts::WEB-04 input-schema compiler > compiles nested fields, enums, bounded arrays, annotations, and stable pointers",
+        "apps/web/src/features/dry-run/schemaModel.test.ts::WEB-04 input-schema compiler > enforces depth, property-count, and array-size safety caps",
+        "apps/web/src/features/dry-run/schemaValidation.test.ts::WEB-04 schema validation > normalizes numeric drafts, omits optional blanks, and returns frozen JSON",
+        "apps/web/src/features/dry-run/schemaValidation.test.ts::WEB-04 schema validation > returns concrete pointer issues without reflecting sensitive values",
+        "apps/web/src/features/dry-run/SchemaForm.test.tsx::WEB-04 SchemaForm > renders nested bounded arrays, formats, booleans, and exact actions",
+        "apps/web/scripts/run-web-04-witness.mjs::WEB-04 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "strict-private-dry-run-mutation",
+      "type": "negative_control",
+      "statement": "Manual dry-run admission sends only the selected instance, normalized input, and execution mode through a same-origin no-store mutation. One memory-only CSRF cache owns exactly one stale-token retry, the serialized body and opaque idempotency key remain identical across an exact retry, and strict receipts or Problem Details never expose secret session material.",
+      "test_refs": [
+        "apps/web/src/api/manualDryRun.test.ts::WEB-04 manual dry-run transport > WEB-04 posts the exact private mutation and returns a cross-bound receipt",
+        "apps/web/src/api/manualDryRun.test.ts::WEB-04 manual dry-run transport > WEB-04 reuses the one session token cache populated by the public session API",
+        "apps/web/src/api/manualDryRun.test.ts::WEB-04 manual dry-run transport > WEB-04 refreshes one invalid CSRF token and replays the identical body and key",
+        "apps/web/src/api/manualDryRun.test.ts::WEB-04 manual dry-run transport > WEB-04 exposes only strict Problem Details field errors",
+        "apps/web/src/features/dry-run/mapProblemDetails.test.ts::WEB-04 problem-detail field mapping > drops foreign, unknown, wildcard, escaped, unsafe, and out-of-range pointers",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > retains the retry key and draft on server errors, then rotates after an edit",
+        "apps/web/scripts/run-web-04-witness.mjs::WEB-04 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "accessible-truthful-inspector-workflow",
+      "type": "positive",
+      "statement": "An authorized operator receives a source-authoritative, accessible inspector form with required and sensitive help, focused client/server errors, mock-mode and manual-trigger gates, dirty-navigation protection, truthful abort and accepted-receipt states, authoritative runtime revalidation, a persistent primary action, and unchanged wide or compact chart geometry.",
+      "test_refs": [
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > blocks an explicitly disabled manual binding but allows an absent binding",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > renders a safe explicit error for an unsupported input schema",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > uses connector mode alone to expose mock execution",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > focuses client errors without calling the API",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > stops waiting without claiming cancellation and safely reuses the retry key",
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx::WEB-04 DryRunPanel > shows only an accepted receipt, clears sensitive input, and announces clean state",
+        "apps/web/e2e/web-04-dry-run.spec.ts::WEB-04 schema form preserves input, maps server errors, and creates one strict dry run"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-04-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-04-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-schema-generated-input",
+        "strict-private-dry-run-mutation",
+        "accessible-truthful-inspector-workflow"
+      ]
+    },
+    {
+      "id": "web-04-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-04-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-schema-generated-input",
+        "strict-private-dry-run-mutation"
+      ]
+    },
+    {
+      "id": "web-04-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-04-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "bounded-schema-generated-input",
+        "strict-private-dry-run-mutation",
+        "accessible-truthful-inspector-workflow"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/localSession.ts",
+      "apps/web/src/api/manualDryRun.ts",
+      "apps/web/src/features/dry-run/*.ts",
+      "apps/web/src/features/dry-run/*.tsx",
+      "apps/web/src/features/instance-detail/AgentDetailPane.tsx",
+      "apps/web/src/features/instance-detail/AgentInspector.tsx",
+      "apps/web/src/features/instance-detail/UnsavedConfigurationDialog.tsx",
+      "apps/web/src/features/org-chart/OrgChartPage.tsx"
+    ],
+    "gate_id": "web-04-dependency-free-witness"
+  },
+  "limitations": [
+    "WEB-04 owns schema-driven manual dry-run input and the accepted admission receipt. WEB-05 owns approval decisions, WEB-06 owns the SPA run timeline and artifact viewer, WEB-07 owns the narrow semantic tree, and WEB-08 owns exhaustive accessibility acceptance.",
+    "The accepted receipt links to the authoritative run API resource and explicitly does not claim execution, publication, delivery, or completion. A dedicated run timeline route does not exist until WEB-06.",
+    "The browser gate uses real hierarchy, instance-detail, session, status, and production Vite boundaries. It overlays only deterministic same-origin dry-run 422 and 202 POST responses because default create_app intentionally has no manual-work service composition.",
+    "Sensitive input remains in controlled React memory while the form is open and is cleared after acceptance. Browser storage, URL state, query caches, logs, and error messages do not receive submitted values.",
+    "Client validation is advisory. The server remains authoritative for the same schema, authorization, idempotency, admission, approval, and external-effect controls."
+  ]
+}
