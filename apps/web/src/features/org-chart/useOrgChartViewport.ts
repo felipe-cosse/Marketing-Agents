@@ -157,6 +157,17 @@ export function useOrgChartViewport({
     return () => observer.disconnect();
   }, [bounds, structuralKey]);
 
+  useLayoutEffect(() => {
+    const size = sizeRef.current;
+    if (keyRef.current === structuralKey) {
+      return;
+    }
+    keyRef.current = structuralKey;
+    if (size !== null) {
+      setTransform(fitTransform(size, bounds));
+    }
+  }, [bounds, structuralKey]);
+
   useEffect(() => {
     const size = sizeRef.current;
     if (selectedRect !== null && size !== null) {

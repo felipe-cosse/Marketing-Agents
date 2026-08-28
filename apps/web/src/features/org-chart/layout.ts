@@ -1,4 +1,8 @@
-import type { NormalizedHierarchy } from "./model";
+import type { AgentDepartment } from "./model";
+
+interface LayoutHierarchyInput {
+  readonly departments: readonly AgentDepartment[];
+}
 
 export const GEOMETRY = Object.freeze({
   worldWidth: 1480,
@@ -85,9 +89,29 @@ function line(
 }
 
 export function layoutHierarchy(
-  hierarchy: NormalizedHierarchy,
+  hierarchy: LayoutHierarchyInput,
 ): HierarchyLayout {
-  let departmentX = 0;
+  const contentWidth = hierarchy.departments.reduce(
+    (width, department, index) =>
+      width +
+      department.functions.length * GEOMETRY.functionWidth +
+      Math.max(0, department.functions.length - 1) * GEOMETRY.functionGapX +
+      (index === 0 ? 0 : GEOMETRY.departmentGapX),
+    0,
+  );
+  const worldWidth = Math.max(contentWidth, GEOMETRY.rootWidth);
+  const tallestInstanceCount = hierarchy.departments.reduce(
+    (maximum, department) =>
+      Math.max(
+        maximum,
+        ...department.functions.map(
+          (agentFunction) => agentFunction.instances.length,
+        ),
+      ),
+    0,
+  );
+  const worldHeight = GEOMETRY.cardGroupTop + groupHeight(tallestInstanceCount);
+  let departmentX = (worldWidth - contentWidth) / 2;
   const instanceById = new Map<string, InstanceLayout>();
   const departments: DepartmentLayout[] = [];
 
@@ -142,7 +166,7 @@ export function layoutHierarchy(
         x: departmentX,
         y: GEOMETRY.departmentTop,
         width: extentWidth,
-        height: GEOMETRY.worldHeight - GEOMETRY.departmentTop,
+        height: worldHeight - GEOMETRY.departmentTop,
         header: Object.freeze({
           x: center - GEOMETRY.departmentWidth / 2,
           y: GEOMETRY.departmentTop,
@@ -155,16 +179,14 @@ export function layoutHierarchy(
     departmentX += extentWidth + GEOMETRY.departmentGapX;
   }
 
-  const firstDepartment = departments[0];
-  const lastDepartment = departments.at(-1);
-  if (firstDepartment === undefined || lastDepartment === undefined) {
+  if (departments.length === 0) {
     throw new Error("The normalized hierarchy must contain departments.");
   }
 
   const departmentCenters = departments.map(
     (department) => department.x + department.width / 2,
   );
-  const rootX = GEOMETRY.worldWidth / 2 - GEOMETRY.rootWidth / 2;
+  const rootX = worldWidth / 2 - GEOMETRY.rootWidth / 2;
   const root = Object.freeze({
     x: rootX,
     y: GEOMETRY.rootTop,
@@ -175,16 +197,16 @@ export function layoutHierarchy(
   const lines: LayoutLine[] = [
     line(
       "root-trunk",
-      GEOMETRY.worldWidth / 2,
+      worldWidth / 2,
       GEOMETRY.rootHeight,
-      GEOMETRY.worldWidth / 2,
+      worldWidth / 2,
       GEOMETRY.rootBusY,
     ),
     line(
       "root-bus",
       departmentCenters[0] ?? 0,
       GEOMETRY.rootBusY,
-      departmentCenters.at(-1) ?? GEOMETRY.worldWidth,
+      departmentCenters.at(-1) ?? worldWidth,
       GEOMETRY.rootBusY,
     ),
   ];
@@ -249,8 +271,8 @@ export function layoutHierarchy(
     bounds: Object.freeze({
       x: 0,
       y: 0,
-      width: GEOMETRY.worldWidth,
-      height: GEOMETRY.worldHeight,
+      width: worldWidth,
+      height: worldHeight,
     }),
     root,
     departments: Object.freeze(departments),

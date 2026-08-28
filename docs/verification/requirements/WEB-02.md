@@ -1,0 +1,11 @@
+# WEB-02 verification
+
+WEB-02 adds a concept-aligned desktop toolbar to the verified organization chart. Search is URL-backed and indexes display name, the vendor-neutral presented purpose, stable instance and template IDs, and capability labels. Department, department-constrained function, deployment state, recent-run state, and capability filters use stable IDs, compose with AND semantics, preserve authoritative source order, and retain the root and matching department/function ancestors. Clear actions restore the exact unfiltered 5/12/43 hierarchy.
+
+The URL parser treats query state as untrusted input. It bounds total and search lengths, applies Unicode NFKC normalization and whitespace cleanup, rejects repeated scalar values, removes unsupported IDs and enums, clears a function that does not belong to its selected department, and serializes only supported fields in a fixed order. Search typing replaces history while committed filters and Clear all create navigable entries. Empty projections bypass graph layout, retain usable controls, and restore focus to the nearest visible ancestor or search when nodes or self-removing controls disappear.
+
+Recent-run state is independent from deployment state and from the stable hierarchy query. Its endpoint-specific client validates the exact snake-case response, scope, strong watermark, all 43 instance IDs in hierarchy order, state/null coherence, timestamps, and derived same-origin links. Polls send `If-None-Match`, retain the prior object on a matching `304`, pause in the background through TanStack Query, and never invalidate or refetch the hierarchy. Missing status never implies `never_run`; loading, stale, and unavailable states are explicit.
+
+The dependency-free witness imports and executes the production URL parser, option derivation, hierarchy projector, and status normalizer using Node 24 built-ins. Component and integration tests cover controls, history, focus, selection, empty recovery, and exact request counts. Playwright rebuilds the production Vite application, uses the real local hierarchy API, provides a deterministic same-origin status boundary, and verifies search, all filter dimensions, conditional polling, focus, URL navigation, no external requests, and fitted 1536×1024 and 1280×800 scenes.
+
+Machine authority: [`WEB-02.json`](WEB-02.json).
