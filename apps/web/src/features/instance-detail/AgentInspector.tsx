@@ -22,6 +22,7 @@ export interface AgentInspectorProps {
   readonly error: Error | null;
   readonly onRetry: () => void;
   readonly onClose: () => void;
+  readonly dryRunControls?: ReactNode;
   readonly configurationControls?: ReactNode;
   readonly id?: string;
 }
@@ -110,11 +111,13 @@ function DetailContent({
   detail,
   departmentName,
   functionName,
+  dryRunControls,
   configurationControls,
 }: {
   readonly detail: AgentInstanceDetail;
   readonly departmentName: string;
   readonly functionName: string;
+  readonly dryRunControls: ReactNode | undefined;
   readonly configurationControls: ReactNode | undefined;
 }): React.JSX.Element {
   const { instance, template } = detail;
@@ -149,6 +152,8 @@ function DetailContent({
           </Field>
         </Metadata>
       </section>
+
+      {dryRunControls}
 
       <section
         className="agent-inspector__section"
@@ -428,6 +433,7 @@ export function AgentInspector({
   error,
   onRetry,
   onClose,
+  dryRunControls,
   configurationControls,
   id = DEFAULT_INSPECTOR_ID,
 }: AgentInspectorProps): React.JSX.Element {
@@ -528,6 +534,7 @@ export function AgentInspector({
             detail={detail}
             departmentName={departmentName}
             functionName={functionName}
+            dryRunControls={dryRunControls}
             configurationControls={configurationControls}
           />
         ) : null}

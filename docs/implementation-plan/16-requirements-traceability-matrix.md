@@ -102,7 +102,7 @@ Allowed status values:
 | WEB-01 | Interactive pan/zoom chart with all 5/12/43. | 12 | OrgChart canvas/layout | UI/browser exact-count tests | verified |
 | WEB-02 | Search/filter department/function/status/capability. | 12 | Toolbar/query state | Component/browser tests | verified |
 | WEB-03 | Agent details include all required metadata/recent runs. | 09, 12 | Detail API/panel | Completeness tests | verified |
-| WEB-04 | Dry-run form generated from input schema. | 12 | SchemaForm | Field/server-error tests | planned |
+| WEB-04 | Dry-run form generated from input schema. | 12 | SchemaForm | Field/server-error tests | verified |
 | WEB-05 | Approval queue. | 12 | Approval feature | UI/Email tests | planned |
 | WEB-06 | Run timeline and artifact viewer. | 12 | Runs/artifacts features | Timeline/XSS tests | planned |
 | WEB-07 | Responsive list/tree fallback. | 12 | OrgTreeFallback | Mobile Playwright test | planned |

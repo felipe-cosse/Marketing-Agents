@@ -8,6 +8,7 @@ import {
 } from "../../api/agentInstanceDetail";
 import { CATALOG_HIERARCHY_QUERY_KEY } from "../../api/catalogHierarchy";
 import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
+import { DryRunPanel } from "../dry-run/DryRunPanel";
 import type { NormalizedHierarchy } from "../org-chart/model";
 import { AgentInspector } from "./AgentInspector";
 import { InstanceConfigurationEditor } from "./InstanceConfigurationEditor";
@@ -19,7 +20,13 @@ interface AgentDetailPaneProps {
   readonly runtimeStatus: InstanceRuntimeStatus | undefined;
   readonly onClose: () => void;
   readonly onConfigurationDirtyChange: (dirty: boolean) => void;
+  readonly onDryRunDirtyChange: (dirty: boolean) => void;
 }
+
+const INSTANCE_STATUS_QUERY_KEY = [
+  "agent-instances",
+  "status-summary",
+] as const;
 
 function detailIdentity(
   hierarchy: NormalizedHierarchy,
@@ -56,6 +63,7 @@ export function AgentDetailPane({
   runtimeStatus,
   onClose,
   onConfigurationDirtyChange,
+  onDryRunDirtyChange,
 }: AgentDetailPaneProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const identity = useMemo(
@@ -109,6 +117,16 @@ export function AgentDetailPane({
     ]);
   };
 
+  const refreshAfterDryRun = async (): Promise<void> => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: INSTANCE_STATUS_QUERY_KEY,
+        exact: true,
+      }),
+      queryClient.invalidateQueries({ queryKey, exact: true }),
+    ]);
+  };
+
   return (
     <AgentInspector
       summary={selected.instance}
@@ -119,6 +137,16 @@ export function AgentDetailPane({
       error={detailQuery.error}
       onRetry={() => void refreshDetail()}
       onClose={onClose}
+      dryRunControls={
+        detailQuery.data === undefined ? undefined : (
+          <DryRunPanel
+            key={`${detailQuery.data.instance.id}:${detailQuery.data.template.inputSchemaId}:${detailQuery.data.catalogHash}`}
+            detail={detailQuery.data}
+            onDirtyChange={onDryRunDirtyChange}
+            onRuntimeMayHaveChanged={refreshAfterDryRun}
+          />
+        )
+      }
       configurationControls={
         detailQuery.data === undefined ? undefined : (
           <InstanceConfigurationEditor
