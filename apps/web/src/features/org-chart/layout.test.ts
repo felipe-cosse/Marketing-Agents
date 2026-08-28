@@ -150,4 +150,48 @@ describe("WEB-01 deterministic hierarchy layout", () => {
       layoutHierarchy(hierarchy).departments,
     );
   });
+
+  // WEB-02 keeps filtered projections connected and independently fitted.
+  it("derives connected bounds for a filtered one-agent projection", () => {
+    const firstDepartment = hierarchy.departments[0];
+    const firstFunction = firstDepartment?.functions[0];
+    const firstInstance = firstFunction?.instances[0];
+    expect(firstDepartment).toBeDefined();
+    expect(firstFunction).toBeDefined();
+    expect(firstInstance).toBeDefined();
+    if (
+      firstDepartment === undefined ||
+      firstFunction === undefined ||
+      firstInstance === undefined
+    ) {
+      return;
+    }
+    const projection = {
+      ...hierarchy,
+      departments: [
+        {
+          ...firstDepartment,
+          instanceCount: 1,
+          templateCount: 1,
+          functions: [
+            {
+              ...firstFunction,
+              instances: [firstInstance],
+            },
+          ],
+        },
+      ],
+    };
+    const layout = layoutHierarchy(projection);
+    expect(layout.bounds).toEqual({ x: 0, y: 0, width: 148, height: 314 });
+    expect(layout.root.x).toBe(0);
+    expect(layout.lines).toHaveLength(7);
+    expect(
+      layout.lines.every((edge) => edge.x1 === edge.x2 || edge.y1 === edge.y2),
+    ).toBe(true);
+    expect(layout.instanceById.get(firstInstance.id)).toMatchObject({
+      x: 22,
+      y: 230,
+    });
+  });
 });

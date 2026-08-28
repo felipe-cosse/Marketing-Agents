@@ -1,30 +1,46 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 
 import { CanvasControls } from "./CanvasControls";
 import { HierarchyStage } from "./HierarchyStage";
 import { layoutHierarchy } from "./layout";
-import type { NormalizedHierarchy } from "./model";
+import type { ProjectedHierarchy } from "./projectHierarchy";
 import { useOrgChartViewport } from "./useOrgChartViewport";
 
 interface OrgChartCanvasProps {
-  readonly hierarchy: NormalizedHierarchy;
+  readonly hierarchy: ProjectedHierarchy;
   readonly selectedInstanceId: string | null;
   readonly onSelectionChange: (instanceId: string | null) => void;
+  readonly toolbar?: ReactNode;
+  readonly emptyTitle?: string;
+  readonly emptyMessage?: string;
+  readonly onClearFilters?: () => void;
 }
+
+const EMPTY_BOUNDS = Object.freeze({
+  x: 0,
+  y: 0,
+  width: 148,
+  height: 314,
+});
 
 export function OrgChartCanvas({
   hierarchy,
   selectedInstanceId,
   onSelectionChange,
+  toolbar,
+  emptyTitle = "No agents match",
+  emptyMessage = "No agents match your search and filters.",
+  onClearFilters,
 }: OrgChartCanvasProps): React.JSX.Element {
   const layout = useMemo(
-    () => layoutHierarchy(hierarchy),
+    () =>
+      hierarchy.departments.length === 0 ? null : layoutHierarchy(hierarchy),
     // The key intentionally excludes status and presentation metadata.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hierarchy.structuralKey],
   );
   const selectedRect =
-    selectedInstanceId === null
+    selectedInstanceId === null || layout === null
       ? null
       : (layout.instanceById.get(selectedInstanceId) ?? null);
   const clearSelection = useCallback(
@@ -33,7 +49,7 @@ export function OrgChartCanvas({
   );
   const { containerRef, transform, fit, zoomIn, zoomOut, pointerHandlers } =
     useOrgChartViewport({
-      bounds: layout.bounds,
+      bounds: layout?.bounds ?? EMPTY_BOUNDS,
       structuralKey: hierarchy.structuralKey,
       selectedRect,
       onClearSelection: clearSelection,
@@ -42,13 +58,15 @@ export function OrgChartCanvas({
   return (
     <section className="chart-surface" aria-labelledby="org-chart-title">
       <div className="chart-toolbar">
-        <div className="inventory-summary" aria-label="Catalog inventory">
-          <span className="inventory-summary__dot" aria-hidden="true" />
-          <strong>Complete catalog</strong>
-          <span>5 departments</span>
-          <span>12 functions</span>
-          <span>43 deployed agents</span>
-        </div>
+        {toolbar ?? (
+          <div className="inventory-summary" aria-label="Catalog inventory">
+            <span className="inventory-summary__dot" aria-hidden="true" />
+            <strong>Complete catalog</strong>
+            <span>5 departments</span>
+            <span>12 functions</span>
+            <span>43 deployed agents</span>
+          </div>
+        )}
         <CanvasControls
           zoom={transform.zoom}
           onZoomIn={zoomIn}
@@ -74,21 +92,33 @@ export function OrgChartCanvas({
         tabIndex={0}
         {...pointerHandlers}
       >
-        <div
-          className="org-chart-transform"
-          style={{
-            transform: `translate3d(${String(transform.translateX)}px, ${String(
-              transform.translateY,
-            )}px, 0) scale(${String(transform.zoom)})`,
-          }}
-        >
-          <HierarchyStage
-            hierarchy={hierarchy}
-            layout={layout}
-            selectedInstanceId={selectedInstanceId}
-            onSelect={onSelectionChange}
-          />
-        </div>
+        {layout === null ? (
+          <div className="catalog-empty-state" role="region" aria-live="polite">
+            <strong>{emptyTitle}</strong>
+            <p>{emptyMessage}</p>
+            {onClearFilters === undefined ? null : (
+              <button type="button" onClick={onClearFilters}>
+                Clear search and filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <div
+            className="org-chart-transform"
+            style={{
+              transform: `translate3d(${String(transform.translateX)}px, ${String(
+                transform.translateY,
+              )}px, 0) scale(${String(transform.zoom)})`,
+            }}
+          >
+            <HierarchyStage
+              hierarchy={hierarchy}
+              layout={layout}
+              selectedInstanceId={selectedInstanceId}
+              onSelect={onSelectionChange}
+            />
+          </div>
+        )}
       </div>
     </section>
   );

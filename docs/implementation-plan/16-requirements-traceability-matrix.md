@@ -100,7 +100,7 @@ Allowed status values:
 | API-08 | Validate every input and structured output. | 02, 05, 09, 10 | Schema validation boundaries | API-08 manifest + negative schema/runtime/adapter tests | verified |
 | API-09 | Bound retries/timeouts and expose terminal errors. | 05, 09 | Policies/problem responses | Failure tests | verified |
 | WEB-01 | Interactive pan/zoom chart with all 5/12/43. | 12 | OrgChart canvas/layout | UI/browser exact-count tests | verified |
-| WEB-02 | Search/filter department/function/status/capability. | 12 | Toolbar/query state | Component/browser tests | planned |
+| WEB-02 | Search/filter department/function/status/capability. | 12 | Toolbar/query state | Component/browser tests | verified |
 | WEB-03 | Agent details include all required metadata/recent runs. | 09, 12 | Detail API/panel | Completeness tests | planned |
 | WEB-04 | Dry-run form generated from input schema. | 12 | SchemaForm | Field/server-error tests | planned |
 | WEB-05 | Approval queue. | 12 | Approval feature | UI/Email tests | planned |

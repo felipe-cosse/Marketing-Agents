@@ -3,10 +3,10 @@ import { memo } from "react";
 import { AgentCard } from "./AgentCard";
 import { AgentsIcon } from "./icons";
 import type { HierarchyLayout } from "./layout";
-import type { NormalizedHierarchy } from "./model";
+import type { ProjectedHierarchy } from "./projectHierarchy";
 
 interface HierarchyStageProps {
-  readonly hierarchy: NormalizedHierarchy;
+  readonly hierarchy: ProjectedHierarchy;
   readonly layout: HierarchyLayout;
   readonly selectedInstanceId: string | null;
   readonly onSelect: (instanceId: string) => void;
@@ -46,6 +46,8 @@ function HierarchyStageComponent({
       <div
         className="root-node"
         data-node-kind="root"
+        data-node-id="root"
+        tabIndex={-1}
         style={{
           left: layout.root.x,
           top: layout.root.y,
@@ -81,6 +83,9 @@ function HierarchyStageComponent({
             <h2
               id={`department-${department.id}`}
               className="department-header"
+              data-focus-node-kind="department"
+              data-node-id={department.id}
+              tabIndex={-1}
               style={{
                 left: departmentLayout.header.x,
                 top: departmentLayout.header.y,
@@ -118,6 +123,9 @@ function HierarchyStageComponent({
                   <h3
                     id={`function-${agentFunction.id}`}
                     className="function-header"
+                    data-focus-node-kind="function"
+                    data-node-id={agentFunction.id}
+                    tabIndex={-1}
                     style={{
                       left: 0,
                       top: functionLayout.header.y - functionLayout.y,

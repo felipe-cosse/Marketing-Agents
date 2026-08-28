@@ -32,6 +32,7 @@ export function AgentCard({
       aria-label={accessibleName}
       aria-pressed={selected}
       data-instance-id={instance.id}
+      data-node-id={instance.id}
       data-node-kind="instance"
       data-source-ordinal={instance.sourceOrdinal}
       data-template-id={instance.templateId}

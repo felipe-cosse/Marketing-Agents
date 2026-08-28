@@ -1,0 +1,142 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-02",
+  "matrix_statement_sha256": "52951a6df5e611ea231501f22ef33a0eaf13027f723228063813835455351c84",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-02.json",
+      "docs/verification/requirements/WEB-02.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/instanceStatusSummary.ts",
+          "apps/web/src/features/org-chart/CatalogToolbar.tsx",
+          "apps/web/src/features/org-chart/filterUrl.ts",
+          "apps/web/src/features/org-chart/OrgChartPage.tsx",
+          "apps/web/src/features/org-chart/projectHierarchy.ts"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/e2e/web-02-search-filter.spec.ts",
+          "apps/web/src/api/instanceStatusSummary.test.ts",
+          "apps/web/src/features/org-chart/CatalogToolbar.test.tsx",
+          "apps/web/src/features/org-chart/OrgChartPage.test.tsx",
+          "apps/web/src/features/org-chart/projectHierarchy.test.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "search-filter-contract",
+      "type": "contract",
+      "statement": "Search indexes only presented display name, purpose, stable instance and template IDs, and capability labels. Department, department-constrained function, deployment, recent-run, and capability filters compose with AND semantics over stable IDs while retaining authoritative source order.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/filterUrl.test.ts::WEB-02 canonical filter URL > cleans Unicode whitespace and serializes supported fields in fixed order",
+        "apps/web/src/features/org-chart/projectHierarchy.test.ts::WEB-02 hierarchy projection > never searches raw source-vendor evidence removed by presentation",
+        "apps/web/src/features/org-chart/projectHierarchy.test.ts::WEB-02 hierarchy projection > applies department, function, deployment, run state, and capability with AND semantics",
+        "apps/web/src/features/org-chart/CatalogToolbar.test.tsx::WEB-02 catalog toolbar presentation > keeps options in source order and constrains Function by Department",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-02 OrgChartPage integration > wires search and constrained filters without refetching hierarchy, then clears all",
+        "apps/web/e2e/web-02-search-filter.spec.ts::WEB-02 canonical deep links and presentation-safe search preserve source order",
+        "apps/web/e2e/web-02-search-filter.spec.ts::WEB-02 filters compose with AND semantics, clear empty results, and restore focus safely",
+        "apps/web/scripts/run-web-02-witness.mjs::WEB-02 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "url-focus-ancestor-safety",
+      "type": "positive",
+      "statement": "Bounded canonical URL state rejects duplicates and invalid cross-department functions, uses replace for search and push for committed filters, preserves matching ancestors and source order, recomputes connected filtered bounds, keeps empty-state controls usable, and restores removed focus and selection safely.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/filterUrl.test.ts::WEB-02 canonical filter URL > rejects repeated scalars, invalid IDs, and a function outside its department",
+        "apps/web/src/features/org-chart/projectHierarchy.test.ts::WEB-02 hierarchy projection > retains only matching ancestors and exact source order",
+        "apps/web/src/features/org-chart/layout.test.ts::WEB-01 deterministic hierarchy layout > derives connected bounds for a filtered one-agent projection",
+        "apps/web/src/features/org-chart/useFilteredFocus.test.tsx::WEB-02 filtered focus repair > moves a removed instance to its retained function and clears selection",
+        "apps/web/src/features/org-chart/useFilteredFocus.test.tsx::WEB-02 filtered focus repair > moves focus to search when filtering removes every ancestor",
+        "apps/web/src/features/org-chart/CatalogToolbar.test.tsx::WEB-02 catalog toolbar presentation > restores focus when a removable filter or Clear all disappears",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-02 OrgChartPage integration > restores pushed filter state through history back and forward",
+        "apps/web/e2e/web-02-search-filter.spec.ts::WEB-02 full hierarchy remains fitted at wide and compact desktop sizes",
+        "apps/web/scripts/run-web-02-witness.mjs::WEB-02 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "independent-runtime-status-refresh",
+      "type": "negative_control",
+      "statement": "A separate strict snake-case status boundary cross-binds exactly the 43 hierarchy IDs in order, validates coherent states and links, conditionally polls with strong ETags, preserves prior object identity on 304, treats missing status as unknown, and never refetches the stable hierarchy.",
+      "test_refs": [
+        "apps/web/src/api/instanceStatusSummary.test.ts::WEB-02 instance status normalization > accepts, cross-binds, camel-cases, and freezes the exact ordered 43-item response",
+        "apps/web/src/api/instanceStatusSummary.test.ts::WEB-02 conditional instance status transport > issues a bounded same-origin GET and requires the response ETag to match the body",
+        "apps/web/src/api/instanceStatusSummary.test.ts::WEB-02 conditional instance status transport > sends a quoted conditional ETag and returns prior object identity on a matching 304",
+        "apps/web/src/features/org-chart/projectHierarchy.test.ts::WEB-02 hierarchy projection > does not treat a missing runtime status as never run and supports empty results",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-02 OrgChartPage integration > joins runtime status for run filtering and recovers from an empty result",
+        "apps/web/e2e/web-02-search-filter.spec.ts::WEB-02 history and conditional polling never refetch the hierarchy",
+        "apps/web/scripts/run-web-02-witness.mjs::WEB-02 dependency-free implementation witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-02-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-02-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "search-filter-contract",
+        "url-focus-ancestor-safety",
+        "independent-runtime-status-refresh"
+      ]
+    },
+    {
+      "id": "web-02-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-02-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "search-filter-contract",
+        "url-focus-ancestor-safety",
+        "independent-runtime-status-refresh"
+      ]
+    },
+    {
+      "id": "web-02-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-02-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "search-filter-contract",
+        "url-focus-ancestor-safety",
+        "independent-runtime-status-refresh"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/instanceStatusSummary.ts",
+      "apps/web/src/features/org-chart/filterUrl.ts",
+      "apps/web/src/features/org-chart/filters.ts",
+      "apps/web/src/features/org-chart/projectHierarchy.ts"
+    ],
+    "gate_id": "web-02-dependency-free-witness"
+  },
+  "limitations": [
+    "WEB-02 owns the wide and compact desktop search/filter toolbar only. The detail inspector remains WEB-03, dry-run WEB-04, approvals WEB-05, run views WEB-06, narrow tree WEB-07, and complete accessibility acceptance WEB-08.",
+    "The recent-run filter is disabled until a valid status summary exists. A run-filter deep link retains its URL state but shows an explicit loading or unavailable state; a missing or failed status response is never presented as never_run.",
+    "Browser evidence uses the real production Vite preview and real hierarchy API, with a deterministic same-origin status route so ETag, 304, polling, and run-state membership are reproducible even when a fresh local runtime store is unavailable.",
+    "The strict 43-ID status binding is intentionally catalog-version-specific. An authorized catalog inventory change must update the hierarchy and WEB-02 evidence together rather than silently accepting partial or reordered runtime status.",
+    "DEL-07 still owns the generated TypeScript API client and drift gate. WEB-02 validates the status transport from unknown through a narrow endpoint-specific normalizer without claiming generated-client parity."
+  ]
+}

@@ -20,11 +20,15 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "node scripts/run-web-01-e2e.mjs",
+    "test:e2e": "node scripts/run-web-e2e.mjs",
     "test:web-01": "pnpm test:web-01:unit && pnpm test:web-01:e2e",
     "test:web-01:e2e": "node scripts/run-web-01-e2e.mjs",
     "test:web-01:unit": "node scripts/run-web-01-unit.mjs",
-    "test:web-01:witness": "node scripts/run-web-01-witness.mjs"
+    "test:web-01:witness": "node scripts/run-web-01-witness.mjs",
+    "test:web-02": "pnpm test:web-02:unit && pnpm test:web-02:e2e",
+    "test:web-02:e2e": "node scripts/run-web-02-e2e.mjs",
+    "test:web-02:unit": "node scripts/run-web-02-unit.mjs",
+    "test:web-02:witness": "node scripts/run-web-02-witness.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.102.8",
