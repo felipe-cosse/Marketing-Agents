@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from marketing_agents.api.correlation import request_correlation_id
 from marketing_agents.api.dependencies import (
     ApprovalDecisionExecutor,
     ApprovalResourceExecutor,
@@ -640,7 +641,7 @@ async def create_approval_request(
     _transport: Annotated[None, Depends(_require_json_transport)],
     body: ApprovalRequestInput,
 ) -> ApprovalRequestResponse:
-    correlation_id = f"correlation.approval-request-api.{secrets.token_hex(16)}"
+    correlation_id = request_correlation_id(request)
     try:
         command = ApprovalRequestCommand(
             action_id=action_id,
@@ -738,6 +739,7 @@ async def create_approval_request(
 async def _decide(
     *,
     approval_id: str,
+    request: Request,
     body: ApprovalDecisionInput,
     decision: ApprovalDecisionKind,
     principal: AuthenticatedPrincipal,
@@ -745,7 +747,7 @@ async def _decide(
     resource_executor: ApprovalResourceExecutor | None,
     response: Response,
 ) -> ApprovalDecisionResourceResponse | ApprovalDecisionResponse:
-    correlation_id = f"correlation.approval-api.{secrets.token_hex(16)}"
+    correlation_id = request_correlation_id(request)
     try:
         command = ApprovalDecisionCommand(
             request_id=approval_id,
@@ -890,6 +892,7 @@ async def _decide(
 )
 async def approve_approval(
     approval_id: Annotated[str, Path(pattern=_RESOURCE_ID_PATTERN)],
+    request: Request,
     response: Response,
     principal: Annotated[
         AuthenticatedPrincipal,
@@ -908,6 +911,7 @@ async def approve_approval(
 ) -> ApprovalDecisionResourceResponse | ApprovalDecisionResponse:
     return await _decide(
         approval_id=approval_id,
+        request=request,
         body=body,
         decision=ApprovalDecisionKind.APPROVE,
         principal=principal,
@@ -931,6 +935,7 @@ async def approve_approval(
 )
 async def reject_approval(
     approval_id: Annotated[str, Path(pattern=_RESOURCE_ID_PATTERN)],
+    request: Request,
     response: Response,
     principal: Annotated[
         AuthenticatedPrincipal,
@@ -949,6 +954,7 @@ async def reject_approval(
 ) -> ApprovalDecisionResourceResponse | ApprovalDecisionResponse:
     return await _decide(
         approval_id=approval_id,
+        request=request,
         body=body,
         decision=ApprovalDecisionKind.REJECT,
         principal=principal,

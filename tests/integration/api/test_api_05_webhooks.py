@@ -26,6 +26,8 @@ from marketing_agents.config import Settings
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.webhook import WebhookReceipt, WebhookReceiptDelivery
 
+from tests.support.api import assert_problem
+
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG_ROOT = ROOT / "catalog" / "v1"
 SOURCE = "source.api05"
@@ -183,7 +185,7 @@ async def test_api_05_preserves_exact_body_and_headers_without_local_identity() 
     assert command.raw_body == RAW_BODY
     assert command.source == SOURCE
     assert command.trigger_id == TRIGGER_ID
-    assert command.correlation_id.startswith("correlation.webhook-api.")
+    assert command.correlation_id == response.headers["x-correlation-id"]
     assert ("x-webhook-timestamp", "1787776200") in command.received_headers
     assert ("x-webhook-signature", "v1=" + ("a" * 64)) in command.received_headers
     assert (
@@ -260,11 +262,46 @@ async def test_api_05_maps_service_errors_to_non_reflective_stable_problems(
 
     response = await _request(_app(executor))
 
-    assert response.status_code == expected_status
-    assert response.json()["code"] == expected_code
-    assert response.json().get("pointer") == pointer
+    payload = assert_problem(
+        response,
+        status_code=expected_status,
+        code=expected_code,
+    )
+    expected_field_errors = (
+        [
+            {
+                "pointer": pointer,
+                "code": expected_code,
+                "message": "invalid request field",
+            }
+        ]
+        if pointer is not None
+        else None
+    )
+    assert payload.get("field_errors") == expected_field_errors
     assert CANARY not in response.text
     assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_api_09_rate_limit_problem_preserves_retry_contract() -> None:
+    executor = FakeWebhookAdmissionExecutor()
+    executor.error = WebhookAdmissionServiceError(
+        "webhook_rate_limited",
+        CANARY,
+        retry_after_seconds=17,
+    )
+
+    response = await _request(_app(executor))
+
+    payload = assert_problem(
+        response,
+        status_code=429,
+        code="webhook_rate_limited",
+    )
+    assert response.headers.get_list("retry-after") == ["17"]
+    assert payload["retry_after_seconds"] == 17
+    assert CANARY not in response.text
 
 
 @pytest.mark.asyncio
@@ -287,8 +324,7 @@ async def test_api_05_requires_one_unencoded_application_json_transport(
 
     response = await _request(_app(executor), headers=headers)
 
-    assert response.status_code == 415
-    assert response.json() == {"detail": "webhook requires unencoded application/json"}
+    assert_problem(response, status_code=415, code="media_type_unsupported")
     assert response.headers["cache-control"] == "no-store"
     assert executor.commands == []
 
@@ -325,8 +361,7 @@ async def test_api_05_raw_body_limit_accepts_boundary_and_rejects_buffered_and_c
 
     oversized = b"x" * (MAX_WEBHOOK_BODY_BYTES + 1)
     rejected = await _request(_app(executor), content=oversized)
-    assert rejected.status_code == 413
-    assert rejected.json()["code"] == "webhook_body_too_large"
+    assert_problem(rejected, status_code=413, code="webhook_body_too_large")
     assert rejected.headers["cache-control"] == "no-store"
     assert len(executor.commands) == 1
 
@@ -335,8 +370,7 @@ async def test_api_05_raw_body_limit_accepts_boundary_and_rejects_buffered_and_c
         yield b"x" * (MAX_WEBHOOK_BODY_BYTES // 2 + 1)
 
     streamed = await _request(_app(executor), content=streamed_oversized_body())
-    assert streamed.status_code == 413
-    assert streamed.json()["code"] == "webhook_body_too_large"
+    assert_problem(streamed, status_code=413, code="webhook_body_too_large")
     assert streamed.headers["cache-control"] == "no-store"
     assert len(executor.commands) == 1
 
@@ -362,8 +396,7 @@ async def test_api_05_rejects_ambiguous_or_invalid_declared_lengths_before_servi
         headers=[*_headers(), *content_length_headers],
     )
 
-    assert response.status_code == 413
-    assert response.json()["code"] == "webhook_body_too_large"
+    assert_problem(response, status_code=413, code="webhook_body_too_large")
     assert executor.commands == []
 
 
@@ -404,11 +437,7 @@ async def test_api_05_timeout_cancels_executor_and_returns_bounded_503(
 
     response = await _request(_app(executor))
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "code": "webhook_unavailable",
-        "message": "webhook admission is temporarily unavailable",
-    }
+    assert_problem(response, status_code=503, code="webhook_unavailable")
     assert response.headers["cache-control"] == "no-store"
     assert executor.cancelled is True
 
@@ -416,24 +445,23 @@ async def test_api_05_timeout_cancels_executor_and_returns_bounded_503(
 @pytest.mark.asyncio
 async def test_api_05_missing_sync_failing_and_invalid_results_fail_closed() -> None:
     missing = await _request(_app(None))
-    assert missing.status_code == 503
+    assert_problem(missing, status_code=503, code="service_unavailable")
 
     synchronous = SynchronousWebhookAdmissionExecutor()
     sync_response = await _request(_app(synchronous))
-    assert sync_response.status_code == 503
+    assert_problem(sync_response, status_code=503, code="service_unavailable")
     assert synchronous.called is False
 
     failing = FakeWebhookAdmissionExecutor()
     failing.error = RuntimeError(CANARY)
     failure = await _request(_app(failing))
-    assert failure.status_code == 503
+    assert_problem(failure, status_code=503, code="webhook_unavailable")
     assert CANARY not in failure.text
 
     wrong_type = FakeWebhookAdmissionExecutor()
     wrong_type.result_mutator = lambda _result, _command: object()
     invalid = await _request(_app(wrong_type))
-    assert invalid.status_code == 503
-    assert invalid.json()["code"] == "webhook_unavailable"
+    assert_problem(invalid, status_code=503, code="webhook_unavailable")
 
     mismatched = FakeWebhookAdmissionExecutor()
 
@@ -443,8 +471,7 @@ async def test_api_05_missing_sync_failing_and_invalid_results_fail_closed() -> 
 
     mismatched.result_mutator = change_source
     mismatch = await _request(_app(mismatched))
-    assert mismatch.status_code == 503
-    assert mismatch.json()["code"] == "webhook_unavailable"
+    assert_problem(mismatch, status_code=503, code="webhook_unavailable")
 
 
 def test_api_05_openapi_exposes_only_exact_webhook_transport_contract() -> None:
@@ -522,7 +549,9 @@ def test_api_05_openapi_exposes_only_exact_webhook_transport_contract() -> None:
         "413",
         "415",
         "422",
+        "429",
         "503",
+        "default",
     }
     assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/WebhookAdmissionResponse"

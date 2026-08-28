@@ -13,6 +13,7 @@ from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.config import Settings
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 
+from tests.support.api import assert_problem
 from tests.support.identity import FalseyStaticIdentityProvider, human_principal
 
 
@@ -110,7 +111,7 @@ async def test_run_10_spoofed_identity_and_forwarded_headers_fail_before_provide
     ["Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"],
 )
 @pytest.mark.asyncio
-async def test_run_10_non_identity_proxy_headers_remain_api_09_scope(
+async def test_api_09_direct_mode_proxy_headers_fail_before_provider(
     header_name: str,
 ) -> None:
     provider = FalseyStaticIdentityProvider(human_principal())
@@ -123,8 +124,8 @@ async def test_run_10_non_identity_proxy_headers_remain_api_09_scope(
             "/_run-10/principal",
             headers={header_name: "proxy-metadata"},
         )
-    assert response.status_code == 200
-    assert len(provider.evidence) == 1
+    assert_problem(response, status_code=400, code="forwarded_header_forbidden")
+    assert provider.evidence == []
 
 
 @pytest.mark.parametrize(
@@ -179,5 +180,4 @@ async def test_run_10_missing_identity_provider_returns_generic_unauthorized() -
         base_url="http://testserver",
     ) as client:
         response = await client.get("/_run-10/principal")
-    assert response.status_code == 401
-    assert response.json() == {"detail": "authentication required"}
+    assert_problem(response, status_code=401, code="authentication_required")

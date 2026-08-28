@@ -36,6 +36,7 @@ from marketing_agents.domain.audit import (
     TERMINAL_RUNTIME_CONTROL_DENIAL_CODES,
     AuditContext,
     AuditEventDraft,
+    RunTerminalFailureOrigin,
 )
 from marketing_agents.domain.entities import (
     ExternalAction,
@@ -762,6 +763,20 @@ class ExternalActionDispatcher:
                 "external action completion differs from its exact WRITE authority",
             )
 
+        cleanup = None
+        if result is None and run.state is RunState.EXECUTING:
+            assert reason_code is not None
+            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                unit_of_work,
+                run_id=run.id,
+                failed_step_id=step.id,
+                plan_hash=step.plan_hash,
+                failure_code=reason_code,
+                focal_action_id=previous.id,
+                occurred_at=occurred_at,
+                audit_context=self._dispatch_audit_context(lease_owner, previous),
+            )
+
         if result is not None:
             completed = await unit_of_work.external_actions.complete_succeeded(
                 action_id=previous.id,
@@ -834,7 +849,13 @@ class ExternalActionDispatcher:
                 "write_completion_time_invalid",
                 "external action and WRITE step completion times diverged",
             )
-        if not await unit_of_work.run_steps.apply_transition(
+        if cleanup is not None:
+            if cleanup.denied_step != step_transition.step:
+                raise ExternalActionDispatchError(
+                    "write_completion_step_conflict",
+                    "terminal cleanup differs from the focal WRITE step conclusion",
+                )
+        elif not await unit_of_work.run_steps.apply_transition(
             expected_run_version=run.version,
             expected_run_state=run.state,
             expected_version=step.version,
@@ -856,15 +877,17 @@ class ExternalActionDispatcher:
             action_event = factory.action_outcome_unknown(previous, completed)
         else:
             action_event = factory.action_failed(previous, completed)
-        await unit_of_work.audits.append_many(
-            (
-                action_event,
+        step_and_run_events = (
+            cleanup.audit_events
+            if cleanup is not None
+            else (
                 factory.step_transition(
                     step_transition.step,
                     step_transition.transition,
                 ),
             )
         )
+        await unit_of_work.audits.append_many((action_event, *step_and_run_events))
         return ExternalActionDispatchResult(completed, disposition)
 
     async def _complete_failure(
@@ -1054,14 +1077,13 @@ class ExternalActionDispatcher:
                     "terminal action lacks its exact executing WRITE step",
                 )
             if run.state is RunState.CANCELLED:
-                reason_code = "run_cancelled_after_call_start"
-            elif (
-                run.state is RunState.FAILED
-                and run.terminal_reason_code in TERMINAL_RUNTIME_CONTROL_DENIAL_CODES
-            ):
-                reason_code = "runtime_control_denied_after_call_start"
+                terminal_reason_code: str | None = "run_cancelled_after_call_start"
+            elif run.state is RunState.FAILED:
+                # Receipt reconciliation is authoritative and occurs before this
+                # optional provenance is needed for a no-receipt terminal reason.
+                terminal_reason_code = None
             elif control.cancel_requested_at is not None:
-                reason_code = "run_cancelled_after_call_start"
+                terminal_reason_code = "run_cancelled_after_call_start"
             else:
                 return None
 
@@ -1104,6 +1126,11 @@ class ExternalActionDispatcher:
                     await unit_of_work.commit()
                     return completed
             else:
+                if terminal_reason_code is None:
+                    terminal_reason_code = await self._failed_parent_call_reason(
+                        unit_of_work,
+                        run,
+                    )
                 completed = await self._finalize_write_outcome_in_uow(
                     unit_of_work,
                     previous=current,
@@ -1111,7 +1138,7 @@ class ExternalActionDispatcher:
                     step=step,
                     lease_owner=lease.owner,
                     occurred_at=now,
-                    reason_code=reason_code,
+                    reason_code=terminal_reason_code,
                     outcome_unknown=True,
                 )
                 if completed is not None:
@@ -1119,6 +1146,50 @@ class ExternalActionDispatcher:
                     return completed
         latest = await self._load_required(snapshot.id)
         return _terminal_dispatch_result(latest)
+
+    @staticmethod
+    async def _failed_parent_call_reason(
+        unit_of_work: UnitOfWork,
+        run: Run,
+    ) -> str:
+        """Resolve no-receipt closure provenance from the exact failed-Run mutation."""
+
+        failure_event = await unit_of_work.audits.get_mutation_event(
+            "run",
+            run.id,
+            run.version,
+        )
+        if (
+            failure_event is None
+            or failure_event.event_type != "run.transitioned"
+            or failure_event.run_id != run.id
+            or failure_event.aggregate_id != run.id
+            or failure_event.mutation_version != run.version
+            or failure_event.occurred_at != run.updated_at
+            or failure_event.previous_state != RunState.EXECUTING.value
+            or failure_event.new_state != RunState.FAILED.value
+            or failure_event.reason_code != run.terminal_reason_code
+            or failure_event.safe_metadata.values.get("command") != "fail"
+        ):
+            raise ExternalActionDispatchError(
+                "terminal_parent_audit_invalid",
+                "failed parent Run lacks its exact terminal mutation witness",
+            )
+        raw_origin = failure_event.safe_metadata.values.get("terminal_failure_origin")
+        if raw_origin is None:
+            return "parent_run_failed_after_call_start"
+        try:
+            failure_origin = RunTerminalFailureOrigin(raw_origin)
+        except (TypeError, ValueError) as exc:
+            raise ExternalActionDispatchError(
+                "terminal_parent_audit_invalid",
+                "failed parent Run has an invalid terminal failure origin",
+            ) from exc
+        return (
+            "runtime_control_denied_after_call_start"
+            if failure_origin is RunTerminalFailureOrigin.RUNTIME_CONTROL
+            else "parent_run_failed_after_call_start"
+        )
 
     async def _reconcile_durable_receipt(
         self,

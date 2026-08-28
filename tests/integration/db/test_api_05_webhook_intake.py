@@ -23,6 +23,9 @@ from marketing_agents.application.services.webhook_intake import (
     WebhookAdmissionService,
     WebhookAdmissionServiceError,
 )
+from marketing_agents.application.services.webhook_rate_limit import (
+    ProcessLocalWebhookAdmissionRateLimiter,
+)
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.enums import TriggerKind, WorkMode
 from marketing_agents.domain.instance_configuration import InstanceTriggerBinding
@@ -207,6 +210,9 @@ def _service(
     mapper: _CountingStrictMapper | None = None,
     ids: _IncrementingIds | None = None,
     fault_after_webhook_audit: bool = False,
+    admission_rate_max_calls: int = 60,
+    admission_rate_window_seconds: int = 60,
+    admission_rate_limiter: ProcessLocalWebhookAdmissionRateLimiter | None = None,
 ) -> WebhookAdmissionService:
     installed_mapper = mapper or _CountingStrictMapper()
     verifier = HmacSha256WebhookSignatureVerifier(
@@ -219,6 +225,8 @@ def _service(
         signature_verifier=verifier,
         verifier_config=WebhookVerifierConfig(secret_reference=SECRET_REFERENCE),
         mapper=installed_mapper,
+        admission_rate_max_calls=admission_rate_max_calls,
+        admission_rate_window_seconds=admission_rate_window_seconds,
     )
     dependencies = OrchestrationDependencies(
         _FixedClock(),
@@ -237,6 +245,7 @@ def _service(
             mock_connectors_active=True,
         ),
         current_catalog_hash=catalog.content_hash,
+        admission_rate_limiter=admission_rate_limiter,
     )
 
 
@@ -379,6 +388,117 @@ async def test_api_05_authenticated_intake_creates_two_target_receipt_without_au
             *(item.digest_key_version for item in works),
         )
         assert all(value not in audit_projection for value in forbidden_values)
+    finally:
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_api_09_authenticated_rate_denial_is_audited_before_429_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    catalog = _catalog()
+    runtime = await _runtime(tmp_path / "webhook-rate-limited.db")
+    await _seed(runtime, catalog)
+    await _set_target_bindings(runtime, enabled=True, configuration_revision=2)
+    mapper = _CountingStrictMapper()
+    service = _service(
+        runtime,
+        catalog,
+        ids_label="rate-limited",
+        mapper=mapper,
+        admission_rate_max_calls=1,
+        admission_rate_window_seconds=60,
+    )
+    allowed_body = _body(event_id="event.api-09.rate.allowed")
+    denied_canary = "api-09-rate-denied-raw-content-canary"
+    denied_body = _body(
+        event_id="event.api-09.rate.denied",
+        request_id="request-api-09-rate-denied",
+        source_content=denied_canary,
+    )
+    try:
+        await service.submit(
+            _command(
+                allowed_body,
+                correlation_id="correlation.api-09.rate.allowed",
+            )
+        )
+        before = await _counts(runtime)
+
+        with pytest.raises(WebhookAdmissionServiceError) as denied:
+            await service.submit(
+                _command(
+                    denied_body,
+                    correlation_id="correlation.api-09.rate.denied",
+                )
+            )
+
+        assert denied.value.code == "webhook_rate_limited"
+        assert denied.value.retry_after_seconds == 60
+        assert mapper.calls == 1
+        after = await _counts(runtime)
+        assert after[:5] == before[:5]
+        assert after[5] == before[5] + 2
+        assert (await _audit_event_types(runtime))[-2:] == (
+            "webhook.signature_validated",
+            "ingress.rate_limited",
+        )
+        async with runtime.session_factory() as session:
+            rate_event = (
+                await session.execute(
+                    select(AuditEventRecord).where(
+                        AuditEventRecord.event_type == "ingress.rate_limited"
+                    )
+                )
+            ).scalar_one()
+            audit_rows = tuple((await session.execute(select(AuditEventRecord))).scalars())
+        assert rate_event.reason_code == "rate_limit_exhausted"
+        assert rate_event.outcome == "rejected"
+        assert rate_event.safe_metadata == {
+            "source": SOURCE,
+            "trigger_id": TRIGGER_ID,
+            "webhook_attempt_id": rate_event.safe_metadata["webhook_attempt_id"],
+            "retry_after_seconds": 60,
+        }
+        rendered = repr(audit_rows)
+        for forbidden in (
+            denied_body.decode(),
+            denied_canary,
+            _signature(denied_body),
+            SECRET,
+            SECRET_REFERENCE,
+            "event.api-09.rate.denied",
+        ):
+            assert forbidden not in rendered
+
+        limiter = ProcessLocalWebhookAdmissionRateLimiter()
+        assert limiter.consume(
+            source=SOURCE,
+            observed_at=NOW,
+            max_calls=1,
+            window_seconds=60,
+        ).allowed
+        fault_mapper = _CountingStrictMapper()
+        faulting = _service(
+            runtime,
+            catalog,
+            ids_label="rate-audit-fault",
+            mapper=fault_mapper,
+            fault_after_webhook_audit=True,
+            admission_rate_max_calls=1,
+            admission_rate_window_seconds=60,
+            admission_rate_limiter=limiter,
+        )
+        with pytest.raises(WebhookAdmissionServiceError) as unavailable:
+            await faulting.submit(
+                _command(
+                    denied_body,
+                    correlation_id="correlation.api-09.rate.audit-fault",
+                )
+            )
+        assert unavailable.value.code == "webhook_service_unavailable"
+        assert fault_mapper.calls == 0
+        assert await _counts(runtime) == after
     finally:
         await runtime.dispose()
 

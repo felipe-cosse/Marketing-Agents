@@ -25,6 +25,7 @@ from marketing_agents.domain.audit import (
     AuditContext,
     AuditEventDraft,
     AuditOutcome,
+    RunTerminalFailureOrigin,
     _issue_audit_event_draft,
     _manual_audit_aggregate_id,
     _runtime_control_denial_aggregate_id,
@@ -91,6 +92,24 @@ def _webhook_signature_metadata(
         "trigger_id": trigger_id,
         "webhook_attempt_id": webhook_attempt_id,
     }
+
+
+def _webhook_rate_limit_metadata(
+    *,
+    source: str,
+    trigger_id: str,
+    webhook_attempt_id: str,
+    retry_after_seconds: int,
+) -> dict[str, Any]:
+    metadata = _webhook_signature_metadata(
+        source=source,
+        trigger_id=trigger_id,
+        webhook_attempt_id=webhook_attempt_id,
+    )
+    if type(retry_after_seconds) is not int or not 1 <= retry_after_seconds <= 3_600:
+        raise ValueError("webhook rate-limit retry delay must be a bounded positive integer")
+    metadata["retry_after_seconds"] = retry_after_seconds
+    return metadata
 
 
 def _webhook_receipt_metadata(
@@ -334,6 +353,38 @@ class AuditEventFactory:
             ),
             mutation_version=None,
             reason_code="webhook_authentication_failed",
+        )
+
+    def webhook_rate_limited(
+        self,
+        *,
+        source: str,
+        trigger_id: str,
+        webhook_attempt_id: str,
+        retry_after_seconds: int,
+        occurred_at: datetime,
+    ) -> AuditEventDraft:
+        """Witness authenticated admission throttling without retaining source content."""
+
+        _require_webhook_audit_context(self._context, rejected_signature=False)
+        return self._build(
+            run_id=None,
+            event_type="ingress.rate_limited",
+            aggregate_type="webhook_ingress",
+            aggregate_id=_webhook_audit_aggregate_id(
+                webhook_attempt_id=webhook_attempt_id,
+                event_type="ingress.rate_limited",
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=_webhook_rate_limit_metadata(
+                source=source,
+                trigger_id=trigger_id,
+                webhook_attempt_id=webhook_attempt_id,
+                retry_after_seconds=retry_after_seconds,
+            ),
+            mutation_version=None,
+            reason_code="rate_limit_exhausted",
         )
 
     def webhook_received(
@@ -909,6 +960,8 @@ class AuditEventFactory:
         self,
         run: Run,
         transition: RunStateTransition,
+        *,
+        terminal_failure_origin: RunTerminalFailureOrigin | None = None,
     ) -> AuditEventDraft:
         if type(run) is not Run or type(transition) is not RunStateTransition:
             raise ValueError("run audit requires exact persisted lifecycle contracts")
@@ -930,6 +983,20 @@ class AuditEventFactory:
         else:
             event_type = "run.transitioned"
             metadata = {"command": transition.command.value}
+        if terminal_failure_origin is not None:
+            if (
+                type(terminal_failure_origin) is not RunTerminalFailureOrigin
+                or transition.command is not RunLifecycleCommand.FAIL
+                or transition.previous_state is not RunState.EXECUTING
+                or transition.new_state is not RunState.FAILED
+            ):
+                raise ValueError(
+                    "terminal failure origin requires one executing-to-failed Run transition"
+                )
+            metadata = {
+                **metadata,
+                "terminal_failure_origin": terminal_failure_origin.value,
+            }
         return self._build(
             run_id=transition.run_id,
             event_type=event_type,
@@ -1987,7 +2054,7 @@ class AuditEventFactory:
             or cancelled.call_started_at is not None
             or cancelled.result is not None
             or cancelled.terminal_reason_code
-            not in {"operator_cancelled", "runtime_control_denied"}
+            not in {"operator_cancelled", "parent_run_failed", "runtime_control_denied"}
             or previous.result is not None
             or previous.terminal_reason_code is not None
             or previous.superseded_by_action_id is not None
@@ -2292,6 +2359,7 @@ class AuditEventFactory:
             not in {
                 "connector_delivery_uncertain",
                 "connector_timeout",
+                "parent_run_failed_after_call_start",
                 "run_cancelled_after_call_start",
                 "runtime_control_denied_after_call_start",
                 "stale_delivery_outcome_unknown",

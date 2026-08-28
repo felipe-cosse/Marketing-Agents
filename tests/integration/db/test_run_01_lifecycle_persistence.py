@@ -548,6 +548,8 @@ async def test_run_01_two_sessions_receive_one_primary_run_and_initial_transitio
 async def test_run_01_two_sessions_allow_exactly_one_expected_version_transition(
     tmp_path: Path,
 ) -> None:
+    """API-09 bounds rejection-audit retries without replacing the stale-CAS result."""
+
     runtime = await _runtime(tmp_path / "cas-race.db")
     barrier = AsyncBarrier(2)
 

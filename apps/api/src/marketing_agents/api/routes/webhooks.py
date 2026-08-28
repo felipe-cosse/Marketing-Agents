@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import re
-import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from marketing_agents.api.correlation import request_correlation_id
 from marketing_agents.api.dependencies import (
     WebhookAdmissionExecutor,
     get_webhook_admission_executor,
@@ -103,6 +103,11 @@ _RESPONSES: dict[int | str, dict[str, object]] = {
     status.HTTP_422_UNPROCESSABLE_CONTENT: {
         "model": WebhookProblem,
         "description": "The authenticated envelope or mapped workflow input is invalid.",
+    },
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": WebhookProblem,
+        "description": "The authenticated webhook source exhausted its admission window.",
+        "headers": {"Retry-After": {"schema": {"type": "integer", "minimum": 1, "maximum": 3_600}}},
     },
     status.HTTP_503_SERVICE_UNAVAILABLE: {
         "model": WebhookProblem,
@@ -250,6 +255,14 @@ def _service_problem(error: WebhookAdmissionServiceError) -> JSONResponse:
             code="webhook_idempotency_conflict",
             message="the authenticated event identity is already bound to different content",
         )
+    if error.code == "webhook_rate_limited" and error.retry_after_seconds is not None:
+        response = _problem_response(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            code="webhook_rate_limited",
+            message="webhook admission rate limit exceeded",
+        )
+        response.headers["Retry-After"] = str(error.retry_after_seconds)
+        return response
     if error.code in {
         "input_byte_limit",
         "input_field_too_large",
@@ -316,7 +329,7 @@ async def admit_webhook_event(
             trigger_id=trigger_id,
             raw_body=await request.body(),
             received_headers=_received_headers(request),
-            correlation_id=f"correlation.webhook-api.{secrets.token_hex(16)}",
+            correlation_id=request_correlation_id(request),
         )
     except WebhookAdmissionServiceError as error:
         return _service_problem(error)

@@ -27,6 +27,7 @@ from marketing_agents.application.services import (
     DispatchDisposition,
     ExternalActionDispatcher,
     RunCancellationCoordinator,
+    RunCancellationCoordinatorError,
 )
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.entities import ExternalAction
@@ -325,31 +326,34 @@ async def test_run_03_terminal_provider_failure_closes_write_step_atomically(
             stored_action = await unit_of_work.external_actions.get(action.id)
             timeline = await unit_of_work.audits.list_run(action.run_id)
 
-        assert stored_run is not None and stored_run.state is RunState.EXECUTING
+        assert stored_run is not None and stored_run.state is RunState.FAILED
+        assert stored_run.terminal_reason_code == reason
         assert stored_step is not None and stored_step.state is StepState.FAILED
         assert stored_step.terminal_reason_code == reason
         assert stored_action == completed.action
-        assert [event.event_type for event in timeline[-2:]] == [
+        assert [event.event_type for event in timeline[-3:]] == [
             event_type,
             "step.transitioned",
+            "run.transitioned",
         ]
+        assert timeline[-3].reason_code == reason
         assert timeline[-2].reason_code == reason
         assert timeline[-1].reason_code == reason
-        assert timeline[-2].occurred_at == timeline[-1].occurred_at
+        assert timeline[-3].occurred_at == timeline[-2].occurred_at == timeline[-1].occurred_at
 
         clock.tick(1)
-        cancelled = await RunCancellationCoordinator(dependencies).request(
-            action.run_id,
-            audit_context=_context(f"run-03.failure.{outcome_unknown}.cancel"),
-        )
-        assert cancelled.cancelled_action_ids == ()
-        assert cancelled.preserved_action_ids == (action.id,)
-        assert cancelled.succeeded_effect_count == 0
-        assert cancelled.outcome_unknown_effect_count == int(outcome_unknown)
+        with pytest.raises(RunCancellationCoordinatorError) as rejected:
+            await RunCancellationCoordinator(dependencies).request(
+                action.run_id,
+                audit_context=_context(f"run-03.failure.{outcome_unknown}.cancel"),
+            )
+        assert rejected.value.code == "terminal_state_immutable"
         async with dependencies.unit_of_work() as unit_of_work:
             preserved_action = await unit_of_work.external_actions.get(action.id)
             cancelled_timeline = await unit_of_work.audits.list_run(action.run_id)
         assert preserved_action == completed.action
+        assert len(cancelled_timeline) == len(timeline) + 1
+        assert cancelled_timeline[-1].event_type == "run.transition_rejected"
         assert not any(
             event.event_type == "action.cancelled" and event.action_id == action.id
             for event in cancelled_timeline

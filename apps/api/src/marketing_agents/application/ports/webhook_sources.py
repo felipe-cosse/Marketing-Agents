@@ -14,6 +14,11 @@ from marketing_agents.application.ports.webhooks import (
 )
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
 
+DEFAULT_WEBHOOK_ADMISSION_RATE_MAX_CALLS = 60
+DEFAULT_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS = 60
+MAX_WEBHOOK_ADMISSION_RATE_MAX_CALLS = 10_000
+MAX_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS = 3_600
+
 
 class WebhookEnvelopeMappingError(ValueError):
     def __init__(self, code: str, message: str, *, pointer: str | None = None) -> None:
@@ -50,6 +55,8 @@ class WebhookSourceDefinition:
     signature_verifier: WebhookSignatureVerifier = field(repr=False)
     verifier_config: WebhookVerifierConfig = field(repr=False)
     mapper: WebhookEnvelopeMapper = field(repr=False)
+    admission_rate_max_calls: int = DEFAULT_WEBHOOK_ADMISSION_RATE_MAX_CALLS
+    admission_rate_window_seconds: int = DEFAULT_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS
 
     def __post_init__(self) -> None:
         require_webhook_source_id(self.source, "webhook source definition source")
@@ -63,6 +70,18 @@ class WebhookSourceDefinition:
             raise ValueError("webhook source definition requires an envelope mapper")
         if getattr(self.mapper, "version", None) != self.mapper_version:
             raise ValueError("webhook mapper version must match its immutable implementation")
+        if (
+            type(self.admission_rate_max_calls) is not int
+            or not 1 <= self.admission_rate_max_calls <= MAX_WEBHOOK_ADMISSION_RATE_MAX_CALLS
+        ):
+            raise ValueError("webhook admission rate call bound is invalid")
+        if (
+            type(self.admission_rate_window_seconds) is not int
+            or not 1
+            <= self.admission_rate_window_seconds
+            <= MAX_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS
+        ):
+            raise ValueError("webhook admission rate window is invalid")
 
 
 class WebhookSourceRegistry(Protocol):
@@ -70,6 +89,10 @@ class WebhookSourceRegistry(Protocol):
 
 
 __all__ = [
+    "DEFAULT_WEBHOOK_ADMISSION_RATE_MAX_CALLS",
+    "DEFAULT_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS",
+    "MAX_WEBHOOK_ADMISSION_RATE_MAX_CALLS",
+    "MAX_WEBHOOK_ADMISSION_RATE_WINDOW_SECONDS",
     "MappedWebhookEnvelope",
     "WebhookEnvelopeMapper",
     "WebhookEnvelopeMappingError",

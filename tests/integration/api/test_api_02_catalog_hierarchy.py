@@ -33,6 +33,7 @@ from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 
+from tests.support.api import assert_problem
 from tests.support.identity import (
     StaticIdentityProvider,
     human_principal,
@@ -719,11 +720,11 @@ async def test_api_02_static_list_and_detail_routes_are_typed_and_prompt_free(
         "/api/v1/agent-instances/inst.unknown.group.missing.01",
     )
     for response in (missing_template, missing_instance):
-        assert response.status_code == 404
-        assert response.json() == {
-            "code": "catalog_resource_not_found",
-            "message": "catalog resource was not found",
-        }
+        assert_problem(
+            response,
+            status_code=404,
+            code="catalog_resource_not_found",
+        )
 
     first_id, second_id = (item.id for item in compiled.templates[:2])
     swapped = dict(documents.template_details)
@@ -806,11 +807,7 @@ async def test_api_02_catalog_source_failures_are_sanitized(
     )
     for query in queries:
         response = await _get(_app(query), path)
-        assert response.status_code == 503
-        assert response.json() == {
-            "code": "catalog_unavailable",
-            "message": "catalog is temporarily unavailable",
-        }
+        assert_problem(response, status_code=503, code="catalog_unavailable")
         assert response.headers["cache-control"] == "no-store"
         assert canary not in response.text
         assert "private-user" not in response.text
@@ -846,7 +843,8 @@ async def test_api_02_blocking_projection_and_sync_query_cannot_escape_timeout(
     app = _app(service)
     timed_out = await asyncio.gather(*(_get(app, "/api/v1/catalog") for _index in range(5)))
     assert {response.status_code for response in timed_out} == {503}
-    assert {response.json()["code"] for response in timed_out} == {"catalog_unavailable"}
+    for response in timed_out:
+        assert_problem(response, status_code=503, code="catalog_unavailable")
     assert compiler_calls == 1
 
     sync_query = BlockingSyncCatalogQuery(documents)
@@ -895,8 +893,7 @@ async def test_api_02_catalog_routes_require_human_control_plane_reader_before_l
         query = StaticCatalogQuery(documents)
         for path in read_paths:
             response = await _get(_app(query, principal=denied), path)
-            assert response.status_code == 403
-            assert response.json() == {"detail": "catalog read is forbidden"}
+            assert_problem(response, status_code=403, code="request_forbidden")
         assert query.principals == []
 
     compiler_called = False
@@ -917,8 +914,7 @@ async def test_api_02_catalog_routes_require_human_control_plane_reader_before_l
     )
     del missing_identity.state.identity_provider
     response = await _get(missing_identity, "/api/v1/catalog")
-    assert response.status_code == 401
-    assert response.json() == {"detail": "authentication required"}
+    assert_problem(response, status_code=401, code="authentication_required")
 
     spoof_query = StaticCatalogQuery(documents)
     spoofed = await _get(
@@ -969,8 +965,8 @@ def test_api_02_openapi_declares_all_static_typed_read_contracts(
         else:
             assert response_schema == {"$ref": f"#/components/schemas/{schema_name}"}
         assert "304" in operation["responses"]
-        assert operation["responses"]["503"]["content"]["application/json"]["schema"] == {
-            "$ref": "#/components/schemas/CatalogProblem"
+        assert operation["responses"]["503"]["content"] == {
+            "application/problem+json": {"schema": {"$ref": "#/components/schemas/ProblemDetails"}}
         }
         for response_status in ("200", "304"):
             headers = operation["responses"][response_status]["headers"]

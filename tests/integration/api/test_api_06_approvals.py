@@ -56,6 +56,7 @@ from tests.integration.db.test_run_08_approval_persistence import (
     _runtime,
     _seed_run_and_plan,
 )
+from tests.support.api import api_request, assert_problem, browser_request
 from tests.support.identity import StaticIdentityProvider, human_principal, service_principal
 
 NOW = datetime(2026, 8, 26, 21, 0, tzinfo=UTC)
@@ -324,11 +325,7 @@ async def _request(
     path: str,
     **kwargs: Any,
 ) -> Response:
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as client:
-        return await client.request(method, path, **kwargs)
+    return await api_request(app, method, path, **kwargs)
 
 
 async def _stream_chunks(chunks: tuple[bytes, ...]) -> AsyncIterator[bytes]:
@@ -338,7 +335,8 @@ async def _stream_chunks(chunks: tuple[bytes, ...]) -> AsyncIterator[bytes]:
 
 def _assert_private(response: Response) -> None:
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["vary"] == "Authorization"
+    vary = [token.strip() for token in response.headers["vary"].split(",")]
+    assert vary.count("Authorization") == 1
 
 
 @pytest.mark.asyncio
@@ -483,8 +481,7 @@ async def test_api_06_read_role_scope_matrix_denies_before_executor(
     executor = FakeApprovalResourceExecutor()
     response = await _request(_app(executor, principal=principal), "GET", path)
 
-    assert response.status_code == 403
-    assert response.json() == {"detail": "approval read is forbidden"}
+    assert_problem(response, status_code=403, code="request_forbidden")
     _assert_private(response)
     assert executor.list_calls == []
     assert executor.read_calls == []
@@ -499,8 +496,7 @@ async def test_api_06_missing_identity_is_unauthorized_before_resource_lookup() 
         "/api/v1/approvals",
     )
 
-    assert response.status_code == 401
-    assert response.json() == {"detail": "authentication required"}
+    assert_problem(response, status_code=401, code="authentication_required")
     _assert_private(response)
     assert executor.list_calls == []
 
@@ -516,8 +512,7 @@ async def test_api_06_untrusted_host_rejection_remains_private() -> None:
         headers={"Host": "untrusted.example.invalid"},
     )
 
-    assert response.status_code == 400
-    assert response.text == "Invalid host header"
+    assert_problem(response, status_code=400, code="host_header_invalid")
     _assert_private(response)
     assert response.headers["vary"].split(",").count("Authorization") == 1
     assert executor.list_calls == []
@@ -564,8 +559,7 @@ async def test_api_06_request_role_scope_matrix_denies_before_executor(
         },
     )
 
-    assert response.status_code == 403
-    assert response.json() == {"detail": "approval request creation is forbidden"}
+    assert_problem(response, status_code=403, code="request_forbidden")
     _assert_private(response)
     assert executor.request_calls == []
 
@@ -628,7 +622,7 @@ async def test_api_06_existing_and_renewed_requests_return_authoritative_locatio
     assert command.action_id == ACTION_ID
     assert command.expected_generation == expected_generation
     assert command.expected_action_hash == ACTION_HASH
-    assert command.correlation_id.startswith("correlation.approval-request-api.")
+    assert command.correlation_id.startswith("correlation.api.")
 
 
 @pytest.mark.parametrize(
@@ -691,13 +685,7 @@ async def test_api_06_request_result_must_bind_reusable_lifecycle_and_requester(
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": {
-            "code": "approval_service_unavailable",
-            "message": "approval service is unavailable",
-        }
-    }
+    assert_problem(response, status_code=503, code="approval_service_unavailable")
     _assert_private(response)
     assert len(executor.request_calls) == 1
 
@@ -745,14 +733,12 @@ async def test_api_06_mutations_require_one_application_json_media_type() -> Non
                 content=body,
                 headers=headers,
             )
-            assert response.status_code == 415
+            assert_problem(
+                response,
+                status_code=403,
+                code="browser_request_forbidden",
+            )
             _assert_private(response)
-            assert response.json() == {
-                "detail": {
-                    "code": "approval_json_required",
-                    "message": "approval mutations require application/json",
-                }
-            }
 
     assert resource_executor.request_calls == []
     assert decision_executor.calls == []
@@ -807,13 +793,7 @@ async def test_api_06_mutation_body_limit_rejects_declared_and_streamed_oversize
     )
 
     for response in (declared, streamed):
-        assert response.status_code == 413
-        assert response.json() == {
-            "detail": {
-                "code": "approval_body_too_large",
-                "message": "approval request body exceeds the allowed size",
-            }
-        }
+        assert_problem(response, status_code=413, code="approval_body_too_large")
         _assert_private(response)
     assert executor.request_calls == []
     assert decision_executor.calls == []
@@ -845,13 +825,7 @@ async def test_api_06_excessively_deep_json_is_rejected_before_executor(path: st
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "detail": {
-            "code": "approval_input_invalid",
-            "message": "approval request input is invalid",
-        }
-    }
+    assert_problem(response, status_code=422, code="approval_input_invalid")
     _assert_private(response)
     assert executor.request_calls == []
     assert decision_executor.calls == []
@@ -905,13 +879,7 @@ async def test_api_08_api_06_rejects_non_strict_json_before_executor(body: bytes
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "detail": {
-            "code": "approval_input_invalid",
-            "message": "approval request input is invalid",
-        }
-    }
+    assert_problem(response, status_code=422, code="approval_input_invalid")
     _assert_private(response)
     assert resource_executor.request_calls == []
     assert decision_executor.calls == []
@@ -922,20 +890,24 @@ async def test_api_08_api_06_mounted_route_keeps_strict_json_boundary() -> None:
     resource_executor = FakeApprovalResourceExecutor()
     decision_executor = RejectingDecisionExecutor()
     parent = FastAPI()
+    child = _app(
+        resource_executor,
+        principal=_control_plane_principal(),
+        decision_executor=decision_executor,
+    )
     parent.mount(
         "/mounted",
-        _app(
-            resource_executor,
-            principal=_control_plane_principal(),
-            decision_executor=decision_executor,
-        ),
+        child,
     )
     async with AsyncClient(
         transport=ASGITransport(app=parent),
         base_url="http://testserver",
     ) as client:
-        response = await client.post(
+        response = await browser_request(
+            client,
+            "POST",
             f"/mounted/api/v1/external-actions/{ACTION_ID}/approval-requests",
+            csrf_app=child,
             content=(
                 b'{"expected_generation":0,"expected_generation":1,'
                 b'"expected_payload_hash":"' + ACTION_HASH.encode() + b'"}'
@@ -943,8 +915,7 @@ async def test_api_08_api_06_mounted_route_keeps_strict_json_boundary() -> None:
             headers={"Content-Type": "application/json"},
         )
 
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == "approval_input_invalid"
+    assert_problem(response, status_code=422, code="approval_input_invalid")
     _assert_private(response)
     assert resource_executor.request_calls == []
     assert decision_executor.calls == []
@@ -978,8 +949,7 @@ async def test_api_08_api_06_rejects_encoded_or_ambiguous_json_transport(
         headers=headers,
     )
 
-    assert response.status_code == 415
-    assert response.json()["detail"]["code"] == "approval_json_required"
+    assert_problem(response, status_code=403, code="browser_request_forbidden")
     _assert_private(response)
     assert resource_executor.request_calls == []
     assert decision_executor.calls == []
@@ -1018,13 +988,16 @@ async def test_api_06_mutation_authority_fields_are_rejected_without_reflection(
 
     for path, body in cases:
         response = await _request(application, "POST", path, json=body)
-        assert response.status_code == 422
+        payload = assert_problem(
+            response,
+            status_code=422,
+            code="request_validation_failed",
+        )
         _assert_private(response)
-        assert response.json()["detail"]["code"] == "request_validation_failed"
         assert CANARY not in response.text
         assert '"input"' not in response.text
         assert '"ctx"' not in response.text
-        assert {item["pointer"] for item in response.json()["detail"]["field_errors"]} == {"/body"}
+        assert {item["pointer"] for item in payload["field_errors"]} == {"/body"}
 
     assert resource_executor.request_calls == []
     assert decision_executor.calls == []
@@ -1070,15 +1043,22 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
         headers={"Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"]["code"] == expected_code
+    assert_problem(response, status_code=422, code=expected_code)
     assert CANARY not in response.text
     _assert_private(response)
     assert decision_executor.calls == []
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "principal", "error_attribute", "error", "status_code", "body"),
+    (
+        "method",
+        "path",
+        "principal",
+        "error_attribute",
+        "error",
+        "status_code",
+        "expected_code",
+    ),
     [
         (
             "GET",
@@ -1087,12 +1067,7 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
             "list_error",
             ApprovalResourceServiceError("approval_cursor_invalid", CANARY),
             422,
-            {
-                "detail": {
-                    "code": "approval_input_invalid",
-                    "message": "approval request input is invalid",
-                }
-            },
+            "approval_input_invalid",
         ),
         (
             "GET",
@@ -1101,12 +1076,7 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
             "read_error",
             ApprovalResourceServiceError("approval_request_missing", CANARY),
             404,
-            {
-                "detail": {
-                    "code": "approval_not_found",
-                    "message": "approval resource was not found",
-                }
-            },
+            "approval_not_found",
         ),
         (
             "POST",
@@ -1115,12 +1085,7 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
             "request_error",
             ApprovalResourceServiceError("approval_record_corrupt", CANARY),
             503,
-            {
-                "detail": {
-                    "code": "approval_service_unavailable",
-                    "message": "approval service is unavailable",
-                }
-            },
+            "approval_service_unavailable",
         ),
         (
             "POST",
@@ -1129,12 +1094,7 @@ async def test_api_06_decision_reason_rejects_control_and_surrogate_text_before_
             "request_error",
             ApprovalResourceServiceError("private_unknown_code", CANARY),
             409,
-            {
-                "detail": {
-                    "code": "approval_request_conflict",
-                    "message": "approval request could not be created",
-                }
-            },
+            "approval_request_conflict",
         ),
     ],
     ids=["query", "missing", "corrupt", "unknown"],
@@ -1147,7 +1107,7 @@ async def test_api_06_service_errors_are_stable_private_and_non_reflective(
     error_attribute: str,
     error: Exception,
     status_code: int,
-    body: dict[str, object],
+    expected_code: str,
 ) -> None:
     executor = FakeApprovalResourceExecutor()
     setattr(executor, error_attribute, error)
@@ -1160,11 +1120,10 @@ async def test_api_06_service_errors_are_stable_private_and_non_reflective(
 
     response = await _request(_app(executor, principal=principal), method, path, **kwargs)
 
-    assert response.status_code == status_code
+    assert_problem(response, status_code=status_code, code=expected_code)
     _assert_private(response)
-    assert response.json() == body
     assert CANARY not in response.text
-    assert len(response.content) < 256
+    assert len(response.content) < 512
 
 
 @pytest.mark.asyncio
@@ -1180,13 +1139,7 @@ async def test_api_06_malformed_primary_resource_fails_closed() -> None:
         f"/api/v1/approvals/{APPROVAL_ID}",
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": {
-            "code": "approval_service_unavailable",
-            "message": "approval service is unavailable",
-        }
-    }
+    assert_problem(response, status_code=503, code="approval_service_unavailable")
     _assert_private(response)
 
 
@@ -1209,16 +1162,13 @@ async def test_api_06_decision_errors_remain_private_and_do_not_reflect_reason()
         },
     )
 
-    assert response.status_code == 409
+    payload = assert_problem(
+        response,
+        status_code=409,
+        code="approval_decision_conflict",
+    )
     _assert_private(response)
-    assert response.json() == {
-        "detail": {
-            "code": "approval_decision_conflict",
-            "message": "approval request could not be decided",
-            "current_status": "pending",
-            "current_resource_version": 1,
-        }
-    }
+    assert payload["current_resource_version"] == 1
     assert CANARY not in response.text
     assert len(decision_executor.calls) == 1
     assert len(resource_executor.read_calls) == 1
@@ -1241,15 +1191,8 @@ async def test_api_06_ambiguous_and_invalid_queries_fail_without_lookup_or_refle
         params={"cursor": CANARY + ("x" * 1_100)},
     )
 
-    assert duplicate.status_code == 400
-    assert duplicate.json() == {
-        "detail": {
-            "code": "approval_query_ambiguous",
-            "message": "approval query parameters must be unique",
-        }
-    }
-    assert invalid.status_code == 422
-    assert invalid.json()["detail"]["code"] == "request_validation_failed"
+    assert_problem(duplicate, status_code=400, code="approval_query_ambiguous")
+    assert_problem(invalid, status_code=422, code="request_validation_failed")
     assert CANARY not in invalid.text
     _assert_private(duplicate)
     _assert_private(invalid)
@@ -1280,13 +1223,7 @@ async def test_api_06_non_ascii_cursor_digest_is_a_safe_input_error(tmp_path: Pa
             params={"cursor": cursor},
         )
 
-        assert response.status_code == 422
-        assert response.json() == {
-            "detail": {
-                "code": "approval_input_invalid",
-                "message": "approval request input is invalid",
-            }
-        }
+        assert_problem(response, status_code=422, code="approval_input_invalid")
         _assert_private(response)
     finally:
         await runtime.dispose()
@@ -1332,8 +1269,11 @@ async def test_api_06_decisions_preserve_run_10_shape_and_optionally_embed_autho
             transport=ASGITransport(app=application),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(
+            response = await browser_request(
+                client,
+                "POST",
                 f"/api/v1/approvals/{approval_request.id}/{decision_path}",
+                csrf_app=application,
                 json={
                     "expected_generation": approval_request.generation,
                     "expected_payload_hash": approval_request.action_hash,
@@ -1438,13 +1378,7 @@ async def test_api_06_coherent_executor_result_must_bind_the_client_reason(
             },
         )
 
-        assert response.status_code == 409
-        assert response.json() == {
-            "detail": {
-                "code": "approval_conflict",
-                "message": "approval request could not be decided",
-            }
-        }
+        assert_problem(response, status_code=409, code="approval_conflict")
         _assert_private(response)
     finally:
         await runtime.dispose()
@@ -1545,6 +1479,7 @@ def test_api_06_openapi_declares_all_typed_approval_routes() -> None:
         "415",
         "422",
         "503",
+        "default",
     }
 
     approval_operations = (
@@ -1554,21 +1489,18 @@ def test_api_06_openapi_declares_all_typed_approval_routes() -> None:
         paths["/api/v1/approvals/{approval_id}/approve"]["post"],
         paths["/api/v1/approvals/{approval_id}/reject"]["post"],
     )
-    error_refs = {
-        "#/components/schemas/ApprovalHttpError",
-        "#/components/schemas/ApprovalPlainHttpError",
-        "#/components/schemas/ApprovalRequestValidationError",
-    }
     for operation in approval_operations:
-        for response in operation["responses"].values():
-            headers = response["headers"]
-            assert headers["Cache-Control"]["schema"]["const"] == "no-store"
-            assert headers["Vary"]["schema"]["type"] == "string"
         for status_code, response in operation["responses"].items():
-            if status_code.startswith("2"):
-                continue
-            alternatives = response["content"]["application/json"]["schema"]["anyOf"]
-            assert {candidate["$ref"] for candidate in alternatives} == error_refs
+            if status_code == "default" or int(status_code) >= 400:
+                assert response["content"] == {
+                    "application/problem+json": {
+                        "schema": {"$ref": "#/components/schemas/ProblemDetails"},
+                    }
+                }
+            if status_code != "default":
+                headers = response["headers"]
+                assert headers["Cache-Control"]["schema"]["const"] == "no-store"
+                assert headers["Vary"]["schema"]["type"] == "string"
 
     for operation in approval_operations[2:]:
         for status_code, response in operation["responses"].items():
