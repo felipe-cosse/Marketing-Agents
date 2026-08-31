@@ -17,6 +17,7 @@ const SAFE_MODE_ITEMS = [
   "Deterministic mock model",
   "Mock connectors",
   "External network off",
+  "Local identity — not production authentication",
 ] as const;
 
 function AppShell(): React.JSX.Element {

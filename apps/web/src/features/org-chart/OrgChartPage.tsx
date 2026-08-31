@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -23,13 +24,18 @@ import { CatalogToolbar, type CatalogFilterOptions } from "./CatalogToolbar";
 import {
   RUN_STATES,
   deriveFilterOptions,
+  hasActiveFilters,
   type DeploymentFilter,
   type RecentRunState,
 } from "./filters";
+import type { HierarchyViewMode } from "./hierarchyViewMode";
+import { HierarchyViewToggle } from "./HierarchyViewToggle";
 import type { NormalizedHierarchy } from "./model";
 import { OrgChartCanvas } from "./OrgChartCanvas";
+import { OrgTreeFallback } from "./OrgTreeFallback";
 import { projectHierarchy } from "./projectHierarchy";
 import { useFilteredFocus } from "./useFilteredFocus";
+import { useHierarchyViewMode } from "./useHierarchyViewMode";
 import { useOrgChartFilters } from "./useOrgChartFilters";
 
 const INSTANCE_STATUS_QUERY_KEY = [
@@ -140,6 +146,11 @@ function focusInstanceCard(instanceId: string): boolean {
 
 function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const navigate = useNavigate();
+  const hierarchyView = useHierarchyViewMode();
+  const [requestedViewFocusMode, setRequestedViewFocusMode] =
+    useState<HierarchyViewMode | null>(null);
+  const lastHierarchyFocusIdRef = useRef<string | null>(null);
+  const priorViewModeRef = useRef(hierarchyView.mode);
   const expectedInstanceIds = useMemo(
     () => instanceIds(hierarchy),
     [hierarchy],
@@ -241,6 +252,38 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     onSelectionChange: handleSelectionChange,
     searchRef,
   });
+
+  const handleViewChange = useCallback(
+    (mode: HierarchyViewMode) => {
+      setRequestedViewFocusMode(mode);
+      hierarchyView.setMode(mode);
+    },
+    [hierarchyView],
+  );
+  useLayoutEffect(() => {
+    if (priorViewModeRef.current === hierarchyView.mode) return;
+    priorViewModeRef.current = hierarchyView.mode;
+    const nodeId = lastHierarchyFocusIdRef.current;
+    queueMicrotask(() => {
+      if (requestedViewFocusMode === hierarchyView.mode) return;
+      const node =
+        nodeId === null
+          ? undefined
+          : [...document.querySelectorAll<HTMLElement>("[data-node-id]")].find(
+              (candidate) => candidate.dataset.nodeId === nodeId,
+            );
+      if (node !== undefined) {
+        node.focus();
+        return;
+      }
+      if (
+        document.activeElement === document.body ||
+        document.activeElement === document.documentElement
+      ) {
+        searchRef.current?.focus();
+      }
+    });
+  }, [hierarchyView.mode, requestedViewFocusMode]);
 
   const departmentIds = useMemo(
     () => new Set(options.departments.map((option) => option.value)),
@@ -402,43 +445,109 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
 
   return (
     <div
-      className={`chart-workspace ${selectedAgent === null ? "" : "chart-workspace--with-inspector"}`}
+      className={`chart-workspace chart-workspace--${hierarchyView.mode} ${selectedAgent === null ? "" : "chart-workspace--with-inspector"}`}
+      data-hierarchy-view={hierarchyView.mode}
       onKeyDown={handleWorkspaceKeyDown}
+      onFocusCapture={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const node = target?.closest<HTMLElement>("[data-node-id]");
+        lastHierarchyFocusIdRef.current = node?.dataset.nodeId ?? null;
+      }}
     >
-      <OrgChartCanvas
-        hierarchy={projection.hierarchy}
-        selectedInstanceId={selectedInstanceId}
-        onSelectionChange={handleSelectionChange}
-        emptyTitle={emptyTitle}
-        emptyMessage={emptyMessage}
-        onClearFilters={clearAndFocusSearch}
-        toolbar={
-          <CatalogToolbar
-            hierarchy={hierarchy}
-            options={options}
-            filters={{
-              q: filterState.filters.q,
-              departmentId: filterState.filters.departmentId ?? "",
-              functionId: filterState.filters.functionId ?? "",
-              deploymentState: filterState.filters.deployment ?? "",
-              recentRunState: filterState.filters.runState ?? "",
-              capabilityId: filterState.filters.capabilityId ?? "",
-            }}
-            resultCount={projection.matchedInstanceCount}
-            resultAnnouncement={runStatusUnavailable ? emptyTitle : undefined}
-            statusAvailable={statusQuery.data !== undefined}
-            statusStale={statusQuery.isRefetchError}
-            searchRef={searchRef}
-            onQueryChange={filterState.setQuery}
-            onDepartmentChange={onDepartmentChange}
-            onFunctionChange={onFunctionChange}
-            onDeploymentStateChange={onDeploymentChange}
-            onRecentRunStateChange={onRunStateChange}
-            onCapabilityChange={onCapabilityChange}
-            onClear={filterState.clearAll}
-          />
-        }
-      />
+      {hierarchyView.mode === "graph" ? (
+        <OrgChartCanvas
+          hierarchy={projection.hierarchy}
+          selectedInstanceId={selectedInstanceId}
+          onSelectionChange={handleSelectionChange}
+          emptyTitle={emptyTitle}
+          emptyMessage={emptyMessage}
+          onClearFilters={clearAndFocusSearch}
+          minimumAutoZoom={hierarchyView.isNarrow ? 0.72 : undefined}
+          toolbar={
+            <>
+              <CatalogToolbar
+                hierarchy={hierarchy}
+                options={options}
+                filters={{
+                  q: filterState.filters.q,
+                  departmentId: filterState.filters.departmentId ?? "",
+                  functionId: filterState.filters.functionId ?? "",
+                  deploymentState: filterState.filters.deployment ?? "",
+                  recentRunState: filterState.filters.runState ?? "",
+                  capabilityId: filterState.filters.capabilityId ?? "",
+                }}
+                resultCount={projection.matchedInstanceCount}
+                resultAnnouncement={
+                  runStatusUnavailable ? emptyTitle : undefined
+                }
+                statusAvailable={statusQuery.data !== undefined}
+                statusStale={statusQuery.isRefetchError}
+                searchRef={searchRef}
+                onQueryChange={filterState.setQuery}
+                onDepartmentChange={onDepartmentChange}
+                onFunctionChange={onFunctionChange}
+                onDeploymentStateChange={onDeploymentChange}
+                onRecentRunStateChange={onRunStateChange}
+                onCapabilityChange={onCapabilityChange}
+                onClear={filterState.clearAll}
+              />
+              <HierarchyViewToggle
+                mode={hierarchyView.mode}
+                automatic={!hierarchyView.hasExplicitOverride}
+                restoreFocus={requestedViewFocusMode === hierarchyView.mode}
+                onChange={handleViewChange}
+              />
+            </>
+          }
+        />
+      ) : (
+        <OrgTreeFallback
+          hierarchy={projection.hierarchy}
+          selectedInstanceId={selectedInstanceId}
+          onSelectionChange={handleSelectionChange}
+          autoExpandMatches={hasActiveFilters(filterState.filters)}
+          emptyTitle={emptyTitle}
+          emptyMessage={emptyMessage}
+          onClearFilters={clearAndFocusSearch}
+          onFocusSearch={() => searchRef.current?.focus()}
+          toolbar={
+            <>
+              <CatalogToolbar
+                hierarchy={hierarchy}
+                options={options}
+                filters={{
+                  q: filterState.filters.q,
+                  departmentId: filterState.filters.departmentId ?? "",
+                  functionId: filterState.filters.functionId ?? "",
+                  deploymentState: filterState.filters.deployment ?? "",
+                  recentRunState: filterState.filters.runState ?? "",
+                  capabilityId: filterState.filters.capabilityId ?? "",
+                }}
+                resultCount={projection.matchedInstanceCount}
+                resultAnnouncement={
+                  runStatusUnavailable ? emptyTitle : undefined
+                }
+                statusAvailable={statusQuery.data !== undefined}
+                statusStale={statusQuery.isRefetchError}
+                searchRef={searchRef}
+                onQueryChange={filterState.setQuery}
+                onDepartmentChange={onDepartmentChange}
+                onFunctionChange={onFunctionChange}
+                onDeploymentStateChange={onDeploymentChange}
+                onRecentRunStateChange={onRunStateChange}
+                onCapabilityChange={onCapabilityChange}
+                onClear={filterState.clearAll}
+              />
+              <HierarchyViewToggle
+                mode={hierarchyView.mode}
+                automatic={!hierarchyView.hasExplicitOverride}
+                restoreFocus={requestedViewFocusMode === hierarchyView.mode}
+                onChange={handleViewChange}
+              />
+            </>
+          }
+        />
+      )}
       {selectedAgent === null ? null : (
         <AgentDetailPane
           hierarchy={hierarchy}
@@ -493,7 +602,7 @@ export function OrgChartPage(): React.JSX.Element {
           <h1 id="org-chart-title">Marketing agent organization</h1>
           <p>
             Explore the complete source-authoritative hierarchy. Select an agent
-            to keep it highlighted while you move through the canvas.
+            to keep it highlighted while you move through the graph or tree.
           </p>
         </div>
         {hierarchyQuery.data === undefined ? null : (

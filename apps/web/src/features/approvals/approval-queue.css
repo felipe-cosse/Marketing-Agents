@@ -619,6 +619,105 @@
   }
 }
 
+@media (max-width: 720px) {
+  .approval-page {
+    display: block;
+    min-width: 0;
+    padding: 14px 12px 20px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .approval-page__heading {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .approval-page__heading > div,
+  .approval-page__count {
+    min-width: 0;
+  }
+
+  .approval-page__count {
+    width: 100%;
+    text-align: left;
+  }
+
+  .approval-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .approval-filters label,
+  .approval-filters select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .approval-filters select,
+  .approval-row__review,
+  .approval-page__load-more,
+  .approval-page__retry,
+  .approval-review-panel button,
+  .approval-decision-dialog button {
+    min-height: 44px;
+  }
+
+  .approval-page__body {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .approval-page__list-pane {
+    min-width: 0;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .approval-queue,
+  .approval-review-panel {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .approval-row {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .approval-row__review {
+    width: 100%;
+    max-width: none;
+  }
+
+  .approval-row__body dl > div,
+  .approval-row__body dd {
+    max-width: 100%;
+  }
+
+  .approval-email-safety li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .approval-review-panel__actions,
+  .approval-decision-dialog__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .approval-dialog-backdrop {
+    padding: 12px;
+  }
+
+  .approval-decision-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .approval-page *,
   .approval-dialog-backdrop,

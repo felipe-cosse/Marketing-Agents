@@ -14,6 +14,7 @@ interface OrgChartCanvasProps {
   readonly emptyTitle?: string;
   readonly emptyMessage?: string;
   readonly onClearFilters?: () => void;
+  readonly minimumAutoZoom?: number | undefined;
 }
 
 const EMPTY_BOUNDS = Object.freeze({
@@ -31,6 +32,7 @@ export function OrgChartCanvas({
   emptyTitle = "No agents match",
   emptyMessage = "No agents match your search and filters.",
   onClearFilters,
+  minimumAutoZoom,
 }: OrgChartCanvasProps): React.JSX.Element {
   const layout = useMemo(
     () =>
@@ -53,6 +55,7 @@ export function OrgChartCanvas({
       structuralKey: hierarchy.structuralKey,
       selectedRect,
       onClearSelection: clearSelection,
+      minimumAutoZoom,
     });
 
   return (

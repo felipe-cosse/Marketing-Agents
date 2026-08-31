@@ -36,6 +36,7 @@ interface UseOrgChartViewportOptions {
   readonly structuralKey: string;
   readonly selectedRect: Rect | null;
   readonly onClearSelection: () => void;
+  readonly minimumAutoZoom?: number | undefined;
 }
 
 interface OrgChartViewportApi {
@@ -74,26 +75,50 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   );
 }
 
+function readableFitTransform(
+  size: ViewportSize,
+  bounds: Rect,
+  minimumAutoZoom: number | undefined,
+): ViewportTransform {
+  const fitted = fitTransform(size, bounds);
+  if (
+    minimumAutoZoom === undefined ||
+    !Number.isFinite(minimumAutoZoom) ||
+    minimumAutoZoom <= fitted.zoom
+  ) {
+    return fitted;
+  }
+  const zoomed = zoomAt(
+    fitted,
+    minimumAutoZoom,
+    { x: size.width / 2, y: size.height / 2 },
+    size,
+    bounds,
+  );
+  return { ...zoomed, intent: "auto-fit" };
+}
+
 export function useOrgChartViewport({
   bounds,
   structuralKey,
   selectedRect,
   onClearSelection,
+  minimumAutoZoom,
 }: UseOrgChartViewportOptions): OrgChartViewportApi {
   const containerRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef<ViewportSize | null>(null);
   const keyRef = useRef<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [transform, setTransform] = useState<ViewportTransform>(() =>
-    fitTransform({ width: 1536, height: 856 }, bounds),
+    readableFitTransform({ width: 1536, height: 856 }, bounds, minimumAutoZoom),
   );
 
   const fit = useCallback(() => {
     const size = sizeRef.current;
     if (size !== null) {
-      setTransform(fitTransform(size, bounds));
+      setTransform(readableFitTransform(size, bounds, minimumAutoZoom));
     }
-  }, [bounds]);
+  }, [bounds, minimumAutoZoom]);
 
   const changeZoom = useCallback(
     (factor: number) => {
@@ -145,17 +170,17 @@ export function useOrgChartViewport({
       setTransform((current) => {
         if (keyRef.current !== structuralKey || previousSize === null) {
           keyRef.current = structuralKey;
-          return fitTransform(nextSize, bounds);
+          return readableFitTransform(nextSize, bounds, minimumAutoZoom);
         }
         if (current.intent === "auto-fit") {
-          return fitTransform(nextSize, bounds);
+          return readableFitTransform(nextSize, bounds, minimumAutoZoom);
         }
         return preserveWorldCenter(current, previousSize, nextSize, bounds);
       });
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [bounds, structuralKey]);
+  }, [bounds, minimumAutoZoom, structuralKey]);
 
   useLayoutEffect(() => {
     const size = sizeRef.current;
@@ -164,9 +189,9 @@ export function useOrgChartViewport({
     }
     keyRef.current = structuralKey;
     if (size !== null) {
-      setTransform(fitTransform(size, bounds));
+      setTransform(readableFitTransform(size, bounds, minimumAutoZoom));
     }
-  }, [bounds, structuralKey]);
+  }, [bounds, minimumAutoZoom, structuralKey]);
 
   useEffect(() => {
     const size = sizeRef.current;
