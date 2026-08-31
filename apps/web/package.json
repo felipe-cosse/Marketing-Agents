@@ -36,7 +36,11 @@
     "test:web-04": "pnpm test:web-04:unit && pnpm test:web-04:e2e",
     "test:web-04:e2e": "node scripts/run-web-04-e2e.mjs",
     "test:web-04:unit": "node scripts/run-web-04-unit.mjs",
-    "test:web-04:witness": "node scripts/run-web-04-witness.mjs"
+    "test:web-04:witness": "node scripts/run-web-04-witness.mjs",
+    "test:web-05": "pnpm test:web-05:unit && pnpm test:web-05:e2e",
+    "test:web-05:e2e": "node scripts/run-web-05-e2e.mjs",
+    "test:web-05:unit": "node scripts/run-web-05-unit.mjs",
+    "test:web-05:witness": "node scripts/run-web-05-witness.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.102.8",

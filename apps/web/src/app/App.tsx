@@ -1,5 +1,9 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 
+import {
+  ApprovalPendingCountBadge,
+  ApprovalQueuePage,
+} from "../features/approvals";
 import { AgentsIcon } from "../features/org-chart/icons";
 import { OrgChartPage } from "../features/org-chart/OrgChartPage";
 
@@ -24,10 +28,20 @@ function AppShell(): React.JSX.Element {
           </span>
         </a>
         <nav className="primary-navigation" aria-label="Primary navigation">
-          <a className="is-active" href="/" aria-current="page">
+          <NavLink
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            end
+            to="/"
+          >
             Org chart
-          </a>
-          <span>Approvals</span>
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            to="/approvals"
+          >
+            Approvals
+            <ApprovalPendingCountBadge />
+          </NavLink>
           <span>Runs &amp; audit</span>
           <span>Demos</span>
         </nav>
@@ -56,6 +70,7 @@ function AppShell(): React.JSX.Element {
       </aside>
       <Routes>
         <Route path="/" element={<OrgChartPage />} />
+        <Route path="/approvals" element={<ApprovalQueuePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
