@@ -940,7 +940,8 @@ describe("WEB-07 responsive organization hierarchy", () => {
     await user.click(itemByNodeId("func.social-media.new-content"));
     const treeInstance = itemByNodeId(FIRST_DETAIL_ID);
     await user.click(treeInstance);
-    await screen.findByRole("complementary", { name: "Agent 1" });
+    const inspector = await screen.findByRole("dialog", { name: "Agent 1" });
+    expect(inspector).toHaveAttribute("aria-modal", "true");
     expect(treeInstance).toHaveAttribute("aria-selected", "true");
 
     await user.click(screen.getByRole("button", { name: "Graph view" }));

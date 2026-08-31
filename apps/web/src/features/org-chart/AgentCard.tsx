@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import type { AgentInstance } from "./model";
 import type { InstanceLayout } from "./layout";
 import { ReadIcon, WriteIcon } from "./icons";
@@ -8,6 +10,9 @@ interface AgentCardProps {
   readonly placement: InstanceLayout;
   readonly selected: boolean;
   readonly onSelect: (instanceId: string) => void;
+  readonly tabIndex: 0 | -1;
+  readonly onFocus: (instanceId: string) => void;
+  readonly onNavigate: (instanceId: string, key: string) => void;
 }
 
 export function AgentCard({
@@ -15,6 +20,9 @@ export function AgentCard({
   placement,
   selected,
   onSelect,
+  tabIndex,
+  onFocus,
+  onNavigate,
 }: AgentCardProps): React.JSX.Element {
   const duplicated = instance.deploymentCount > 1;
   const purpose = presentPurpose(instance.purpose);
@@ -39,6 +47,22 @@ export function AgentCard({
       data-source-ordinal={instance.sourceOrdinal}
       data-template-id={instance.templateId}
       onClick={() => onSelect(instance.id)}
+      onFocus={() => onFocus(instance.id)}
+      onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+        if (
+          event.key !== "ArrowDown" &&
+          event.key !== "ArrowLeft" &&
+          event.key !== "ArrowRight" &&
+          event.key !== "ArrowUp" &&
+          event.key !== "Home" &&
+          event.key !== "End"
+        ) {
+          return;
+        }
+        event.preventDefault();
+        onNavigate(instance.id, event.key);
+      }}
+      tabIndex={tabIndex}
       style={{
         left: placement.x,
         top: placement.y,

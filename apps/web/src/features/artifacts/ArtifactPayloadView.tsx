@@ -99,7 +99,11 @@ function EscapedArtifactJson({
 }): React.JSX.Element {
   const tokens = tokenizeArtifactJson(artifactNodeToJson(node));
   return (
-    <pre className="artifact-json" aria-label="Escaped artifact JSON">
+    <pre
+      className="artifact-json"
+      aria-label="Escaped artifact JSON"
+      tabIndex={0}
+    >
       <code>
         {tokens.map((token, index) => (
           <span

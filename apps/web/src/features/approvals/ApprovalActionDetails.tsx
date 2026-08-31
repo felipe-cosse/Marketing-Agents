@@ -109,7 +109,7 @@ export function ApprovalActionDetails({
           This is the server-provided safe projection. Redacted values are not
           reconstructed in the browser.
         </p>
-        <pre aria-label="Redacted payload JSON">
+        <pre aria-label="Redacted payload JSON" tabIndex={0}>
           {formatRedactedPayload(approval.redactedPayload)}
         </pre>
       </section>

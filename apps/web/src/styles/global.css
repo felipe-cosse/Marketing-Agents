@@ -31,10 +31,36 @@ a {
 
 button:focus-visible,
 a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   box-shadow: var(--focus-ring);
+}
+
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  pointer-events: none;
+  background: var(--color-accent);
+  border-radius: var(--radius-control);
+  opacity: 0;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus-visible {
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .sr-only {
@@ -56,6 +82,14 @@ a:focus-visible,
   min-width: 0;
   height: 100%;
   background: var(--color-canvas);
+}
+
+.route-viewport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
 }
 
 .topbar {

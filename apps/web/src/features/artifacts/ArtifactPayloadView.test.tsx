@@ -72,6 +72,7 @@ describe("WEB-06 ArtifactPayloadView", () => {
 
     const json = screen.getByLabelText("Escaped artifact JSON");
     expect(JSON.parse(json.textContent)).toEqual(value);
+    expect(json).toHaveAttribute("tabindex", "0");
     expect(container.querySelectorAll(".artifact-json__key").length).toBe(4);
     expect(container.querySelector(".artifact-json__number")).toHaveTextContent(
       "3",
@@ -180,6 +181,9 @@ describe("WEB-06 ArtifactPayloadView", () => {
     expect(safeLink).toHaveAttribute("target", "_blank");
     expect(safeLink).toHaveAttribute("rel", "noopener noreferrer");
     expect(safeLink).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(
+      screen.getByLabelText("Artifact Markdown code block"),
+    ).toHaveAttribute("tabindex", "0");
     expectNoExecutableOrEmbeddedDom(container);
     expect(request).not.toHaveBeenCalled();
     expect(

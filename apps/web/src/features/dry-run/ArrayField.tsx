@@ -1,3 +1,5 @@
+import { useRef } from "react";
+
 import type { CompiledArraySchema } from "./schemaModel";
 import type { SchemaValidationIssue } from "./schemaValidation";
 import { asDraftArray, valueForNewArrayItem } from "./fieldSupport";
@@ -31,6 +33,8 @@ export function ArrayField({
   disabled,
   onChange,
 }: ArrayFieldProps): React.JSX.Element {
+  const fieldsetRef = useRef<HTMLFieldSetElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
   const items = asDraftArray(value);
   const messages = issues
     .filter((issue) => issue.pointer === pointer)
@@ -47,6 +51,7 @@ export function ArrayField({
 
   return (
     <fieldset
+      ref={fieldsetRef}
       id={fieldId}
       className="schema-form__array"
       aria-describedby={
@@ -110,11 +115,25 @@ export function ArrayField({
                 }}
               />
               <button
+                data-array-remove-index={index}
                 type="button"
                 className="schema-form__button is-remove"
                 disabled={disabled || items.length <= schema.minItems}
                 onClick={() => {
-                  onChange(items.filter((_, itemIndex) => itemIndex !== index));
+                  const nextItems = items.filter(
+                    (_, itemIndex) => itemIndex !== index,
+                  );
+                  onChange(nextItems);
+                  requestAnimationFrame(() => {
+                    const nextIndex = Math.min(index, nextItems.length - 1);
+                    const nextRemove =
+                      nextIndex < 0
+                        ? null
+                        : fieldsetRef.current?.querySelector<HTMLButtonElement>(
+                            `[data-array-remove-index="${String(nextIndex)}"]:not(:disabled)`,
+                          );
+                    (nextRemove ?? addButtonRef.current)?.focus();
+                  });
                 }}
               >
                 Remove {schema.items.title} {String(index + 1)}
@@ -125,6 +144,7 @@ export function ArrayField({
       </div>
 
       <button
+        ref={addButtonRef}
         type="button"
         className="schema-form__button is-add"
         disabled={disabled || items.length >= schema.maxItems}

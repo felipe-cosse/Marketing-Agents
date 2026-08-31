@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type {
   ApprovalDecisionKind,
   ApprovalDetail,
@@ -26,7 +28,17 @@ export interface ApprovalReviewPanelProps {
   readonly emailRunSafety: EmailRunSafetyState | null;
   readonly onClose: () => void;
   readonly onRequestDecision: (decision: ApprovalDecisionKind) => void;
+  readonly modal?: boolean;
 }
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "textarea:not(:disabled)",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
 
 export function ApprovalEmailRunSafety({
   state,
@@ -79,7 +91,9 @@ export function ApprovalReviewPanel({
   emailRunSafety,
   onClose,
   onRequestDecision,
+  modal = false,
 }: ApprovalReviewPanelProps): React.JSX.Element {
+  const panelRef = useRef<HTMLElement>(null);
   const nowMs = useExpiryClock([approval.expiresAt]);
   const disabledReason = approvalDecisionDisabledReason(approval, nowMs);
   const reasonId = `approval-decision-disabled-${approval.id}`;
@@ -88,10 +102,67 @@ export function ApprovalReviewPanel({
     onRequestDecision(decision);
   };
 
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, [approval.id]);
+
+  useEffect(() => {
+    if (!modal) return undefined;
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const panel = panelRef.current;
+      if (panel === null) return;
+      const activeModal =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[aria-modal="true"]')
+          : null;
+      if (activeModal !== null && activeModal !== panel) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [
+        ...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const active = document.activeElement;
+      if (first === undefined || last === undefined) {
+        event.preventDefault();
+        panel.focus();
+      } else if (active === panel) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (
+        event.shiftKey &&
+        (active === first ||
+          !(active instanceof Node) ||
+          !panel.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last ||
+          !(active instanceof Node) ||
+          !panel.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [modal, onClose]);
+
   return (
     <aside
+      ref={panelRef}
       id="approval-review-panel"
       className="approval-review-panel"
+      role={modal ? "dialog" : undefined}
+      aria-modal={modal ? "true" : undefined}
       aria-labelledby={`approval-review-title-${approval.id}`}
       tabIndex={-1}
     >

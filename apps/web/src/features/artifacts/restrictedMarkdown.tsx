@@ -200,6 +200,8 @@ function renderMarkdownBlocks(source: string): readonly ReactNode[] {
         <pre
           key={`code-${String(cursor)}`}
           className="artifact-markdown__code-block"
+          aria-label="Artifact Markdown code block"
+          tabIndex={0}
         >
           <code>{code.join("\n")}</code>
         </pre>,

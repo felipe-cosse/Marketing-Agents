@@ -79,9 +79,9 @@ describe("WEB-05 ApprovalDecisionDialog", () => {
     expect(dialog).toHaveTextContent("run.web05.email");
     expect(dialog).toHaveTextContent("step.web05.newsletter");
     expect(dialog).toHaveTextContent("Unused");
-    expect(screen.getByLabelText("Redacted payload JSON")).toHaveTextContent(
-      '<img src=x onerror=\\"steal()\\">',
-    );
+    const payload = screen.getByLabelText("Redacted payload JSON");
+    expect(payload).toHaveTextContent('<img src=x onerror=\\"steal()\\">');
+    expect(payload).toHaveAttribute("tabindex", "0");
     expect(dialog.querySelector("img")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Reject exact action" }),

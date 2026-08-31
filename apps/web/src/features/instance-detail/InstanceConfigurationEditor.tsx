@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInstanceDetail } from "../../api/agentInstanceDetail";
 import {
@@ -795,6 +795,9 @@ export function InstanceConfigurationEditor({
 }: InstanceConfigurationEditorProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [announcement, setAnnouncement] = useState<string | null>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const editorSectionRef = useRef<HTMLElement>(null);
+  const priorEditingRef = useRef(false);
   const sessionQuery = useQuery({
     queryKey: LOCAL_SESSION_QUERY_KEY,
     queryFn: ({ signal }) => fetchLocalSession(signal),
@@ -853,8 +856,23 @@ export function InstanceConfigurationEditor({
       ? null
       : compatibilityIssue(detail, schemaQuery.data);
 
+  useEffect(() => {
+    const wasEditing = priorEditingRef.current;
+    priorEditingRef.current = editing;
+    if (editing && schemaQuery.data !== undefined && compatibility === null) {
+      editorSectionRef.current
+        ?.querySelector<HTMLElement>(
+          "form input:not(:disabled), form select:not(:disabled), form textarea:not(:disabled), form button:not(:disabled)",
+        )
+        ?.focus();
+    } else if (wasEditing && !editing) {
+      editButtonRef.current?.focus();
+    }
+  }, [compatibility, editing, schemaQuery.data]);
+
   return (
     <section
+      ref={editorSectionRef}
       className="instance-configuration"
       aria-labelledby="instance-configuration-title"
     >
@@ -868,6 +886,7 @@ export function InstanceConfigurationEditor({
         </div>
         {!editing && canEdit ? (
           <button
+            ref={editButtonRef}
             className="instance-configuration__button is-secondary"
             type="button"
             onClick={() => {

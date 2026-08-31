@@ -290,6 +290,14 @@ describe("WEB-03 AgentInspector", () => {
 
     await userEvent.setup().click(screen.getByText("Input schema JSON"));
     expect(screen.getByText(/<script>unsafe\(\)<\/script>/u)).toBeVisible();
+    expect(screen.getByLabelText("Input schema JSON")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
+    expect(screen.getByLabelText("Output schema JSON")).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
     expect(document.querySelector("script")).toBeNull();
     expect(screen.queryByText("Run with mocks")).toBeNull();
     expect(screen.queryByText("View all")).toBeNull();

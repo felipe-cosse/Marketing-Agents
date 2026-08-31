@@ -101,6 +101,25 @@ describe("WEB-01 interactive org chart canvas", () => {
     expect(viewport).toHaveAttribute("data-viewport-y", "51");
   });
 
+  it("uses one roving graph-card tab stop and arrow-key navigation", () => {
+    const { container } = render(<CanvasHarness />);
+    const cards = [
+      ...container.querySelectorAll<HTMLButtonElement>("[data-instance-id]"),
+    ];
+    expect(cards).toHaveLength(43);
+    expect(cards.filter((card) => card.tabIndex === 0)).toHaveLength(1);
+    expect(cards[0]).toHaveAttribute("tabindex", "0");
+
+    const firstCard = cards[0];
+    if (firstCard === undefined)
+      throw new Error("Expected the first graph card");
+    firstCard.focus();
+    fireEvent.keyDown(firstCard, { key: "ArrowDown" });
+    expect(cards[1]).toHaveFocus();
+    expect(cards[1]).toHaveAttribute("tabindex", "0");
+    expect(cards[0]).toHaveAttribute("tabindex", "-1");
+  });
+
   it("never exposes the control-plane root as an agent card", () => {
     const { container } = render(<CanvasHarness />);
     expect(

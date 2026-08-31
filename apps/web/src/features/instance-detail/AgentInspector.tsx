@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import type { AgentInstanceDetail } from "../../api/agentInstanceDetail";
@@ -12,6 +13,27 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 const DEFAULT_INSPECTOR_ID = "agent-inspector";
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "summary",
+  "textarea:not(:disabled)",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function isHiddenInsideClosedDetails(element: HTMLElement): boolean {
+  let ancestor = element.parentElement;
+  while (ancestor !== null) {
+    if (ancestor instanceof HTMLDetailsElement && !ancestor.open) {
+      const visibleSummary = ancestor.querySelector(":scope > summary");
+      if (visibleSummary?.contains(element) !== true) return true;
+    }
+    ancestor = ancestor.parentElement;
+  }
+  return false;
+}
 
 export interface AgentInspectorProps {
   readonly summary: AgentInstance;
@@ -26,6 +48,7 @@ export interface AgentInspectorProps {
   readonly dryRunControls?: ReactNode;
   readonly configurationControls?: ReactNode;
   readonly id?: string;
+  readonly modal?: boolean;
 }
 
 function AgentGlyph(): React.JSX.Element {
@@ -370,11 +393,15 @@ function DetailContent({
         <div className="agent-inspector__schemas">
           <details className="agent-inspector__schema">
             <summary>Input schema JSON</summary>
-            <pre>{safeJson(detail.inputSchema)}</pre>
+            <pre aria-label="Input schema JSON" tabIndex={0}>
+              {safeJson(detail.inputSchema)}
+            </pre>
           </details>
           <details className="agent-inspector__schema">
             <summary>Output schema JSON</summary>
-            <pre>{safeJson(detail.outputSchema)}</pre>
+            <pre aria-label="Output schema JSON" tabIndex={0}>
+              {safeJson(detail.outputSchema)}
+            </pre>
           </details>
         </div>
       </section>
@@ -459,7 +486,10 @@ export function AgentInspector({
   dryRunControls,
   configurationControls,
   id = DEFAULT_INSPECTOR_ID,
+  modal = false,
 }: AgentInspectorProps): React.JSX.Element {
+  const inspectorRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const deploymentCount =
     detail?.sharedTemplateDeploymentCount ?? summary.deploymentCount;
   const sourceOrdinal = detail?.instance.sourceOrdinal ?? summary.sourceOrdinal;
@@ -468,6 +498,54 @@ export function AgentInspector({
       ? `${summary.displayName} · Instance ${String(sourceOrdinal)} of ${String(deploymentCount)}`
       : summary.displayName;
   const enabled = detail?.instance.enabled ?? summary.enabled;
+
+  useEffect(() => {
+    if (!modal) return undefined;
+    closeButtonRef.current?.focus();
+
+    const trapFocus = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      const inspector = inspectorRef.current;
+      if (inspector === null) return;
+      const activeModal =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[aria-modal="true"]')
+          : null;
+      if (activeModal !== null && activeModal !== inspector) return;
+      const focusable = [
+        ...inspector.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ].filter((candidate) => !isHiddenInsideClosedDetails(candidate));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const active = document.activeElement;
+      if (first === undefined || last === undefined) {
+        event.preventDefault();
+        inspector.focus();
+      } else if (active === inspector) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (
+        event.shiftKey &&
+        (active === first ||
+          !(active instanceof Node) ||
+          !inspector.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last ||
+          !(active instanceof Node) ||
+          !inspector.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", trapFocus);
+    return () => document.removeEventListener("keydown", trapFocus);
+  }, [modal, summary.id]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key !== "Escape") return;
@@ -478,10 +556,14 @@ export function AgentInspector({
 
   return (
     <aside
+      ref={inspectorRef}
       id={id}
       className="agent-inspector"
+      role={modal ? "dialog" : undefined}
+      aria-modal={modal ? "true" : undefined}
       aria-busy={detail === undefined && isPending}
       aria-labelledby={`${id}-title`}
+      tabIndex={modal ? -1 : undefined}
       onKeyDown={handleKeyDown}
     >
       <header className="agent-inspector__header">
@@ -502,6 +584,7 @@ export function AgentInspector({
           </span>
         </div>
         <button
+          ref={closeButtonRef}
           type="button"
           className="agent-inspector__close"
           aria-label={`Close details for ${summary.displayName}`}

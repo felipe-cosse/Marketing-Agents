@@ -482,6 +482,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
                 }
                 statusAvailable={statusQuery.data !== undefined}
                 statusStale={statusQuery.isRefetchError}
+                modal={hierarchyView.isNarrow}
                 searchRef={searchRef}
                 onQueryChange={filterState.setQuery}
                 onDepartmentChange={onDepartmentChange}
@@ -529,6 +530,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
                 }
                 statusAvailable={statusQuery.data !== undefined}
                 statusStale={statusQuery.isRefetchError}
+                modal={hierarchyView.isNarrow}
                 searchRef={searchRef}
                 onQueryChange={filterState.setQuery}
                 onDepartmentChange={onDepartmentChange}
@@ -559,6 +561,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
           onOpenRun={openRun}
           onConfigurationDirtyChange={setConfigurationDirty}
           onDryRunDirtyChange={setDryRunDirty}
+          modal={hierarchyView.isNarrow}
         />
       )}
       <UnsavedConfigurationDialog

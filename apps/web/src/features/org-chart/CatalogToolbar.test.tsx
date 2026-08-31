@@ -190,6 +190,51 @@ describe("WEB-02 catalog toolbar presentation", () => {
     expect(editor).toHaveFocus();
   });
 
+  it("WEB-08 does not move focus out of another active modal with slash", () => {
+    render(
+      <>
+        <CatalogToolbar {...makeProps()} />
+        <section role="dialog" aria-modal="true" aria-label="Other modal">
+          <button type="button">Modal action</button>
+        </section>
+      </>,
+    );
+    const search = screen.getByRole("searchbox", { name: "Search agents" });
+    const modalAction = screen.getByRole("button", { name: "Modal action" });
+
+    modalAction.focus();
+    fireEvent.keyDown(modalAction, { key: "/" });
+
+    expect(modalAction).toHaveFocus();
+    expect(search).not.toHaveFocus();
+  });
+
+  it("WEB-08 closes the narrow modal backdrop without activating background UI", () => {
+    const backgroundPointerDown = vi.fn();
+    render(
+      <>
+        <CatalogToolbar {...makeProps({ modal: true })} />
+        <button type="button" onPointerDown={backgroundPointerDown}>
+          Background action
+        </button>
+      </>,
+    );
+    const trigger = screen.getByRole("button", { name: "Filters" });
+    fireEvent.click(trigger);
+    const backdrop = document.querySelector<HTMLElement>(
+      ".catalog-filter-backdrop",
+    );
+    if (backdrop === null) throw new Error("Expected modal filter backdrop");
+
+    fireEvent.pointerDown(backdrop);
+
+    expect(backgroundPointerDown).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("dialog", { name: "Catalog filters" }),
+    ).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
   it("renders removable active filters, compact summary, and Clear all", () => {
     const onDepartmentChange = vi.fn();
     const onDeploymentStateChange = vi.fn();

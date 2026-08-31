@@ -83,7 +83,7 @@
   font-size: 12px;
   color: var(--color-text);
   background: #fff;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-strong);
   border-radius: 7px;
 }
 
@@ -465,6 +465,12 @@
   border-radius: 7px;
 }
 
+.approval-action-details__payload pre:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
 .approval-email-safety {
   padding: 11px;
   margin-top: 13px;
@@ -616,6 +622,29 @@
   .approval-action-details__summary,
   .approval-action-details--compact .approval-action-details__summary {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .approval-page__body {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .approval-page__list-pane {
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .approval-review-panel {
+    position: fixed;
+    z-index: 60;
+    inset: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    background: var(--color-surface);
   }
 }
 
