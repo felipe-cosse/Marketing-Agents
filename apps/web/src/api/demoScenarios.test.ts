@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { clearLocalSession } from "./localSession";
 import {
+  BLOG_CONTENT_REVIEW_INSTANCE_ID,
+  BLOG_CONTENT_REVIEW_SCENARIO_ID,
+  BLOG_CONTENT_REVIEW_TEMPLATE_ID,
   createDemoScenarioRun,
   fetchDemoScenarios,
   SOCIAL_DRAFT_INSTANCE_ID,
@@ -55,6 +58,112 @@ const PRESET = {
   source_urls: ["https://example.com/governed-ai"],
 } as const;
 
+const BLOG_INPUT_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "schema.demo.blog-seo.content-review.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "article_title",
+    "canonical_url",
+    "supplied_excerpt",
+    "last_updated_at",
+    "assessment_at",
+    "target_keywords",
+    "current_product_metadata",
+  ],
+  properties: {
+    article_title: { type: "string", minLength: 1, maxLength: 240 },
+    canonical_url: {
+      type: "string",
+      format: "uri",
+      minLength: 1,
+      maxLength: 2_048,
+    },
+    supplied_excerpt: { type: "string", minLength: 1, maxLength: 8_000 },
+    last_updated_at: {
+      type: "string",
+      format: "date-time",
+      maxLength: 40,
+    },
+    assessment_at: {
+      type: "string",
+      format: "date-time",
+      maxLength: 40,
+    },
+    target_keywords: {
+      type: "array",
+      minItems: 1,
+      maxItems: 8,
+      items: { type: "string", minLength: 1, maxLength: 80 },
+    },
+    current_product_metadata: {
+      type: "object",
+      additionalProperties: false,
+      required: ["features", "integrations"],
+      properties: {
+        features: {
+          type: "array",
+          minItems: 0,
+          maxItems: 6,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "summary"],
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 120 },
+              summary: { type: "string", minLength: 1, maxLength: 500 },
+            },
+          },
+        },
+        integrations: {
+          type: "array",
+          minItems: 0,
+          maxItems: 6,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["name", "summary"],
+            properties: {
+              name: { type: "string", minLength: 1, maxLength: 120 },
+              summary: { type: "string", minLength: 1, maxLength: 500 },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+const BLOG_PRESET = {
+  article_title: "Governed AI workflows for marketing teams",
+  canonical_url: "https://example.com/blog/governed-ai-workflows",
+  supplied_excerpt:
+    "Governed AI helps marketing teams create reviewable drafts with artifact provenance.",
+  last_updated_at: "2025-12-01T00:00:00Z",
+  assessment_at: "2026-08-31T00:00:00Z",
+  target_keywords: ["governed AI", "marketing teams", "approval workflows"],
+  current_product_metadata: {
+    features: [
+      {
+        name: "Artifact provenance",
+        summary: "Generated artifacts retain source and provider provenance.",
+      },
+      {
+        name: "Exact approval gates",
+        summary: "External writes require approval of the exact payload.",
+      },
+    ],
+    integrations: [
+      {
+        name: "CMS review export",
+        summary:
+          "Review artifacts can be prepared for a later human-controlled CMS workflow.",
+      },
+    ],
+  },
+} as const;
+
 function scenarioBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -76,6 +185,39 @@ function scenarioBody(
     inputSchema: INPUT_SCHEMA,
     preset: PRESET,
     safeSubmitVerb: "Create draft",
+    expected: {
+      statePath: ["received", "validated", "planned", "executing", "completed"],
+      modelCalls: 1,
+      connectorCalls: 0,
+      externalActions: 0,
+      approvals: 0,
+      externalWrites: 0,
+    },
+    ...overrides,
+  };
+}
+
+function blogScenarioBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: BLOG_CONTENT_REVIEW_SCENARIO_ID,
+    version: 1,
+    displayName: "Blog & SEO content review",
+    description:
+      "Review supplied article and product metadata for deterministic SEO and content gaps without fetching or updating a CMS.",
+    workflowId: BLOG_CONTENT_REVIEW_SCENARIO_ID,
+    effect: "read_only",
+    mode: "deterministic_mock",
+    selectedAgents: [
+      {
+        templateId: BLOG_CONTENT_REVIEW_TEMPLATE_ID,
+        instanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
+      },
+    ],
+    inputSchema: BLOG_INPUT_SCHEMA,
+    preset: BLOG_PRESET,
+    safeSubmitVerb: "Create review",
     expected: {
       statePath: ["received", "validated", "planned", "executing", "completed"],
       modelCalls: 1,
@@ -170,6 +312,41 @@ describe("DEMO-01 demo scenario transport", () => {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
+  });
+
+  it("DEMO-02 discovers and freezes Blog alongside the Social scenario", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        items: [blogScenarioBody(), scenarioBody()],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scenarios = await fetchDemoScenarios();
+
+    expect(scenarios.map((scenario) => scenario.id)).toEqual([
+      BLOG_CONTENT_REVIEW_SCENARIO_ID,
+      SOCIAL_DRAFT_SCENARIO_ID,
+    ]);
+    expect(scenarios[0]).toMatchObject({
+      id: BLOG_CONTENT_REVIEW_SCENARIO_ID,
+      effect: "read_only",
+      mode: "deterministic_mock",
+      safeSubmitVerb: "Create review",
+      selectedAgents: [
+        {
+          templateId: BLOG_CONTENT_REVIEW_TEMPLATE_ID,
+          instanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
+        },
+      ],
+    });
+    expect(Object.isFrozen(scenarios)).toBe(true);
+    expect(Object.isFrozen(scenarios[0])).toBe(true);
+    expect(Object.isFrozen(scenarios[0]?.inputSchema)).toBe(true);
+    expect(Object.isFrozen(scenarios[0]?.preset.target_keywords)).toBe(true);
+    expect(Object.isFrozen(scenarios[0]?.preset.current_product_metadata)).toBe(
+      true,
+    );
   });
 
   it("DEMO-01 keeps the shared discovery decoder future-safe without weakening bounds", async () => {

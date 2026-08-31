@@ -1,8 +1,9 @@
-"""Trusted production composition for the deterministic social draft model adapter."""
+"""Trusted composition for the sealed deterministic read-only demo adapter."""
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
 from marketing_agents.application.policies.runtime_guard import (
     CapabilityPolicy,
@@ -24,8 +25,18 @@ from marketing_agents.infrastructure.adapters.llm import (
     LLMReadBinding,
     StructuredLLMReadAdapter,
 )
-from marketing_agents.infrastructure.catalog.models import CompiledCatalog
+from marketing_agents.infrastructure.catalog.models import AgentTemplateRecord, CompiledCatalog
 
+from .blog_content_review import (
+    BLOG_CONTENT_REVIEW_INPUT_SCHEMA,
+    BLOG_CONTENT_REVIEW_MODEL_OUTPUT_SCHEMA,
+    BLOG_CONTENT_REVIEW_MODEL_OUTPUT_SCHEMA_ID,
+    BLOG_CONTENT_REVIEW_OUTPUT_SCHEMA,
+    BLOG_CONTENT_REVIEW_RENDERER,
+    BLOG_CONTENT_REVIEW_SCENARIO,
+    finalize_blog_content_review,
+)
+from .contracts import DemoScenarioDefinition
 from .social_content_draft import (
     SOCIAL_CONTENT_DRAFT_INPUT_SCHEMA,
     SOCIAL_CONTENT_DRAFT_MODEL_OUTPUT_SCHEMA,
@@ -36,9 +47,14 @@ from .social_content_draft import (
     finalize_social_content_draft,
 )
 
+_SUPPORTED_SCENARIOS = (
+    SOCIAL_CONTENT_DRAFT_SCENARIO,
+    BLOG_CONTENT_REVIEW_SCENARIO,
+)
 
-class SocialContentDraftReadAdapter:
-    """Social demo adapter sealed to the credential-free deterministic provider."""
+
+class DeterministicDemoReadAdapter:
+    """Exact Social/Blog adapter sealed to the credential-free deterministic provider."""
 
     __slots__ = ("_delegate", "_provider")
 
@@ -52,20 +68,15 @@ class SocialContentDraftReadAdapter:
         provider_version: str = "v1",
     ) -> None:
         if (provider_mode, provider_name, provider_version) != ("mock", "mock", "v1"):
-            raise ValueError("social demo requires the deterministic mock provider identity")
+            raise ValueError("deterministic mock provider identity is required for demos")
         if provider is not None and type(provider) is not DeterministicLLMProvider:
-            raise ValueError("social demo requires the credential-free deterministic provider")
+            raise ValueError("demos require the credential-free deterministic provider")
         selected_provider = (
-            build_social_content_draft_deterministic_provider(catalog)
-            if provider is None
-            else provider
+            build_demo_deterministic_provider(catalog) if provider is None else provider
         )
         self._provider = selected_provider
         self._require_deterministic_mock()
-        self._delegate = _build_social_content_draft_structured_adapter(
-            catalog,
-            selected_provider,
-        )
+        self._delegate = _build_demo_structured_adapter(catalog, selected_provider)
 
     def _require_deterministic_mock(self) -> None:
         if (
@@ -74,10 +85,10 @@ class SocialContentDraftReadAdapter:
             or self._provider.model_id != "deterministic"
             or self._provider.version != "v1"
         ):
-            raise ValueError("social demo deterministic mock provider identity is unavailable")
+            raise ValueError("deterministic demo mock provider identity is unavailable")
 
     def require_deterministic_mock(self) -> None:
-        """Fail closed if the sealed Social demo provider identity has drifted."""
+        """Fail closed if the sealed provider identity has drifted."""
 
         self._require_deterministic_mock()
 
@@ -98,17 +109,22 @@ class SocialContentDraftReadAdapter:
         return await self._delegate.execute(request)
 
 
-def build_social_content_draft_read_adapter(
+# Backward-compatible exact runtime aliases retained for DEMO-01 callers.
+SocialContentDraftReadAdapter = DeterministicDemoReadAdapter
+BlogContentReviewReadAdapter = DeterministicDemoReadAdapter
+
+
+def build_demo_read_adapter(
     catalog: CompiledCatalog,
     provider: LLMProvider | None = None,
     *,
     provider_mode: Literal["mock", "real", "local"] = "mock",
     provider_name: str = "mock",
     provider_version: str = "v1",
-) -> SocialContentDraftReadAdapter:
-    """Build the exact schema-bound adapter; default provider is credential-free and offline."""
+) -> DeterministicDemoReadAdapter:
+    """Build the only schema-bound adapter supported by the deterministic demo drain."""
 
-    return SocialContentDraftReadAdapter(
+    return DeterministicDemoReadAdapter(
         catalog,
         provider,
         provider_mode=provider_mode,
@@ -117,13 +133,48 @@ def build_social_content_draft_read_adapter(
     )
 
 
-def _build_social_content_draft_structured_adapter(
+def build_social_content_draft_read_adapter(
     catalog: CompiledCatalog,
-    provider: DeterministicLLMProvider,
-) -> StructuredLLMReadAdapter:
-    if type(catalog) is not CompiledCatalog:
-        raise ValueError("social demo adapter requires one compiled catalog")
-    scenario = SOCIAL_CONTENT_DRAFT_SCENARIO
+    provider: LLMProvider | None = None,
+    *,
+    provider_mode: Literal["mock", "real", "local"] = "mock",
+    provider_name: str = "mock",
+    provider_version: str = "v1",
+) -> SocialContentDraftReadAdapter:
+    """Preserve the DEMO-01 builder while returning the sealed shared adapter."""
+
+    return build_demo_read_adapter(
+        catalog,
+        provider,
+        provider_mode=provider_mode,
+        provider_name=provider_name,
+        provider_version=provider_version,
+    )
+
+
+def build_blog_content_review_read_adapter(
+    catalog: CompiledCatalog,
+    provider: LLMProvider | None = None,
+    *,
+    provider_mode: Literal["mock", "real", "local"] = "mock",
+    provider_name: str = "mock",
+    provider_version: str = "v1",
+) -> BlogContentReviewReadAdapter:
+    """Build the Blog compatibility entry point over the exact shared adapter."""
+
+    return build_demo_read_adapter(
+        catalog,
+        provider,
+        provider_mode=provider_mode,
+        provider_name=provider_name,
+        provider_version=provider_version,
+    )
+
+
+def _catalog_binding(
+    catalog: CompiledCatalog,
+    scenario: DemoScenarioDefinition,
+) -> tuple[AgentTemplateRecord, str]:
     templates = {item.id: item for item in catalog.templates}
     instances = {item.id: item for item in catalog.instances}
     capabilities = {item.id: item for item in catalog.tool_capabilities}
@@ -132,7 +183,7 @@ def _build_social_content_draft_structured_adapter(
     capability = capabilities.get("cap.model.generate-structured")
     system_prompt = catalog.prompt_text_by_template.get(scenario.template_id)
     if (
-        template is None
+        type(template) is not AgentTemplateRecord
         or instance is None
         or instance.template_id != scenario.template_id
         or capability is None
@@ -142,56 +193,100 @@ def _build_social_content_draft_structured_adapter(
         or type(system_prompt) is not str
         or not system_prompt.strip()
     ):
-        raise ValueError("social demo catalog binding is unavailable")
+        raise ValueError("deterministic demo catalog binding is unavailable")
+    return template, system_prompt
+
+
+def _binding(
+    *,
+    catalog: CompiledCatalog,
+    scenario: DemoScenarioDefinition,
+    input_schema: Mapping[str, Any],
+    model_output_schema_id: str,
+    model_output_schema: Mapping[str, Any],
+    output_schema: Mapping[str, Any],
+    output_transform: Callable[[Mapping[str, Any]], dict[str, Any]],
+) -> LLMReadBinding:
+    _, system_prompt = _catalog_binding(catalog, scenario)
+    return LLMReadBinding(
+        scenario_id=scenario.id,
+        template_id=scenario.template_id,
+        instance_id=scenario.instance_id,
+        capability_id="cap.model.generate-structured",
+        input_schema_id=scenario.input_schema_id,
+        input_schema=input_schema,
+        model_output_schema_id=model_output_schema_id,
+        model_output_schema=model_output_schema,
+        output_schema_id=scenario.output_schema_id,
+        output_schema=output_schema,
+        catalog_content_hash=catalog.content_hash.removeprefix("catalog-sha256-v1:"),
+        system_prompt=system_prompt,
+        provider_mode="mock",
+        provider_name="mock",
+        provider_version="v1",
+        output_transform=output_transform,
+    )
+
+
+def _build_demo_structured_adapter(
+    catalog: CompiledCatalog,
+    provider: DeterministicLLMProvider,
+) -> StructuredLLMReadAdapter:
+    if type(catalog) is not CompiledCatalog:
+        raise ValueError("deterministic demo adapter requires one compiled catalog")
     return StructuredLLMReadAdapter(
         provider,
         (
-            LLMReadBinding(
-                scenario_id=scenario.id,
-                template_id=scenario.template_id,
-                instance_id=scenario.instance_id,
-                capability_id=capability.id,
-                input_schema_id=scenario.input_schema_id,
+            _binding(
+                catalog=catalog,
+                scenario=SOCIAL_CONTENT_DRAFT_SCENARIO,
                 input_schema=SOCIAL_CONTENT_DRAFT_INPUT_SCHEMA,
                 model_output_schema_id=SOCIAL_CONTENT_DRAFT_MODEL_OUTPUT_SCHEMA_ID,
                 model_output_schema=SOCIAL_CONTENT_DRAFT_MODEL_OUTPUT_SCHEMA,
-                output_schema_id=scenario.output_schema_id,
                 output_schema=SOCIAL_CONTENT_DRAFT_OUTPUT_SCHEMA,
-                catalog_content_hash=catalog.content_hash.removeprefix("catalog-sha256-v1:"),
-                system_prompt=system_prompt,
-                provider_mode="mock",
-                provider_name="mock",
-                provider_version="v1",
                 output_transform=finalize_social_content_draft,
+            ),
+            _binding(
+                catalog=catalog,
+                scenario=BLOG_CONTENT_REVIEW_SCENARIO,
+                input_schema=BLOG_CONTENT_REVIEW_INPUT_SCHEMA,
+                model_output_schema_id=BLOG_CONTENT_REVIEW_MODEL_OUTPUT_SCHEMA_ID,
+                model_output_schema=BLOG_CONTENT_REVIEW_MODEL_OUTPUT_SCHEMA,
+                output_schema=BLOG_CONTENT_REVIEW_OUTPUT_SCHEMA,
+                output_transform=finalize_blog_content_review,
             ),
         ),
     )
 
 
-def build_social_content_draft_deterministic_provider(
-    catalog: CompiledCatalog,
-) -> DeterministicLLMProvider:
-    """Build the credential-free provider used by local and acceptance demo execution."""
+def build_demo_deterministic_provider(catalog: CompiledCatalog) -> DeterministicLLMProvider:
+    """Build the offline provider registered for exactly the Social and Blog renderers."""
 
     if type(catalog) is not CompiledCatalog:
-        raise ValueError("social demo provider requires one compiled catalog")
-    scenario = SOCIAL_CONTENT_DRAFT_SCENARIO
-    template = next(
-        (item for item in catalog.templates if item.id == scenario.template_id),
-        None,
-    )
+        raise ValueError("deterministic demo provider requires one compiled catalog")
+    templates = tuple(_catalog_binding(catalog, scenario)[0] for scenario in _SUPPORTED_SCENARIOS)
     capability = next(
         (item for item in catalog.tool_capabilities if item.id == "cap.model.generate-structured"),
         None,
     )
-    if (
-        template is None
-        or capability is None
-        or capability.id not in template.allowed_tool_capability_ids
-        or capability.effect != "read"
-        or capability.connector_family != "model"
-    ):
-        raise ValueError("social demo deterministic provider binding is unavailable")
+    if capability is None:
+        raise ValueError("deterministic demo provider binding is unavailable")
+    policy_shapes = {
+        (
+            template.budget_policy.max_input_bytes,
+            template.budget_policy.max_input_field_bytes,
+            template.budget_policy.max_output_bytes,
+            template.budget_policy.max_model_output_tokens,
+            template.rate_limit_policy.max_calls,
+            template.rate_limit_policy.window_seconds,
+            template.timeout_policy.step_seconds,
+            template.timeout_policy.run_seconds,
+        )
+        for template in templates
+    }
+    if len(policy_shapes) != 1:
+        raise ValueError("deterministic demo provider policies must remain compatible")
+    template = templates[0]
     guard = RuntimePolicyGuard(
         RuntimePolicySnapshot(
             allowed_capabilities=(
@@ -216,13 +311,40 @@ def build_social_content_draft_deterministic_provider(
         )
     )
     return DeterministicLLMProvider(
-        DeterministicRendererRegistry((SOCIAL_CONTENT_DRAFT_RENDERER,)),
+        DeterministicRendererRegistry(
+            (
+                SOCIAL_CONTENT_DRAFT_RENDERER,
+                BLOG_CONTENT_REVIEW_RENDERER,
+            )
+        ),
         guard,
     )
 
 
+def build_social_content_draft_deterministic_provider(
+    catalog: CompiledCatalog,
+) -> DeterministicLLMProvider:
+    """Preserve the DEMO-01 provider builder over the exact shared registry."""
+
+    return build_demo_deterministic_provider(catalog)
+
+
+def build_blog_content_review_deterministic_provider(
+    catalog: CompiledCatalog,
+) -> DeterministicLLMProvider:
+    """Build the Blog compatibility entry point over the exact shared registry."""
+
+    return build_demo_deterministic_provider(catalog)
+
+
 __all__ = [
+    "BlogContentReviewReadAdapter",
+    "DeterministicDemoReadAdapter",
     "SocialContentDraftReadAdapter",
+    "build_blog_content_review_deterministic_provider",
+    "build_blog_content_review_read_adapter",
+    "build_demo_deterministic_provider",
+    "build_demo_read_adapter",
     "build_social_content_draft_deterministic_provider",
     "build_social_content_draft_read_adapter",
 ]

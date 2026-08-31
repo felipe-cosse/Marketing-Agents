@@ -30,6 +30,7 @@ from marketing_agents.demos import (
     DEMO_SCENARIOS,
     SOCIAL_CONTENT_DRAFT_SCENARIO_ID,
     DemoScenarioDefinition,
+    DemoScenarioRegistry,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Run, WorkItem
@@ -46,6 +47,7 @@ PATH = f"/api/v1/demo-scenarios/{SOCIAL_CONTENT_DRAFT_SCENARIO_ID}/runs"
 NOW = datetime(2026, 8, 31, 18, 0, tzinfo=UTC)
 RAW_KEY = "demo-01-retry-key-0001"
 DEFINITION = DEMO_SCENARIOS.get(SOCIAL_CONTENT_DRAFT_SCENARIO_ID)
+SOCIAL_ONLY_SCENARIOS = DemoScenarioRegistry((DEFINITION,))
 
 
 def _plain(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -212,7 +214,11 @@ async def _post(
 
 @pytest.mark.asyncio
 async def test_demo_01_discovery_is_exact_safe_and_private() -> None:
-    response = await api_request(_app(FakeDemoAdmissionExecutor()), "GET", "/api/v1/demo-scenarios")
+    response = await api_request(
+        _app(FakeDemoAdmissionExecutor(), registry=SOCIAL_ONLY_SCENARIOS),
+        "GET",
+        "/api/v1/demo-scenarios",
+    )
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
