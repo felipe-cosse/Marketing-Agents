@@ -304,6 +304,22 @@ describe("WEB-03 AgentInspector", () => {
     expect(screen.getAllByRole("link")).toEqual([recentRunLink]);
   });
 
+  it("WEB-09 identifies capability badges as implementation metadata rather than vendor affiliations", () => {
+    renderInspector();
+
+    const capabilitiesSection = screen
+      .getByRole("heading", { name: "Capabilities & policies" })
+      .closest("section");
+    if (capabilitiesSection === null)
+      throw new Error("capabilities section missing");
+
+    expect(
+      within(capabilitiesSection).getByText(
+        "Capability badges are implementation metadata, not copied vendor affiliations.",
+      ),
+    ).toBeVisible();
+  });
+
   it("distinguishes unavailable runtime data from a confirmed never-run state", () => {
     const { rerender } = renderInspector({ detail: detail("unavailable") });
     expect(
