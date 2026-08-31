@@ -1,0 +1,139 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-09",
+  "matrix_statement_sha256": "7d10cd65559df9d47a21ba368ced2ba9f2dff6d873aec2dbf3b56ca71a50d557",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/package.json",
+      "apps/web/e2e/web-09-neutral-branding.spec.ts",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/scripts/run-web-09-e2e.mjs",
+      "apps/web/scripts/run-web-09-unit.mjs",
+      "apps/web/scripts/run-web-09-witness.mjs",
+      "apps/web/src/features/instance-detail/AgentInspector.test.tsx",
+      "apps/web/src/features/instance-detail/AgentInspector.tsx",
+      "apps/web/src/features/instance-detail/instance-detail.css",
+      "apps/web/src/styles/org-chart.css",
+      "apps/web/src/styles/tokens.css",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-09.json",
+      "docs/verification/requirements/WEB-09.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/instance-detail/AgentInspector.tsx",
+          "apps/web/src/features/instance-detail/instance-detail.css",
+          "apps/web/src/styles/org-chart.css",
+          "apps/web/src/styles/tokens.css"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/instance-detail/AgentInspector.test.tsx",
+          "apps/web/e2e/web-09-neutral-branding.spec.ts",
+          "apps/web/scripts/run-web-09-unit.mjs",
+          "apps/web/scripts/run-web-09-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "native-hierarchy-composition",
+      "type": "journey",
+      "statement": "At the declared native desktop and mobile review surfaces, the production application preserves the accepted root, department, function, and instance grouping, exact source order, dense readable hierarchy, desktop inspector, and mobile semantic-tree/detail-sheet composition without horizontal document overflow.",
+      "test_refs": [
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 desktop preserves the neutral source hierarchy with local-only assets",
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 mobile preserves the neutral semantic tree and detail sheet with local-only assets"
+      ]
+    },
+    {
+      "id": "neutral-branding-and-local-assets",
+      "type": "negative_control",
+      "statement": "The exercised control surface uses code-native text, bundled generic currentColor SVGs, and local styles; it renders no copied logo, watermark, vendor badge, font or image asset, automatically loads no remote visual resource, and explicitly identifies capability badges as implementation metadata rather than vendor affiliations.",
+      "test_refs": [
+        "apps/web/src/features/instance-detail/AgentInspector.test.tsx::WEB-09 identifies capability badges as implementation metadata rather than vendor affiliations",
+        "apps/web/scripts/run-web-09-witness.mjs::WEB-09 dependency-free visual and asset witness",
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 desktop preserves the neutral source hierarchy with local-only assets",
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 mobile preserves the neutral semantic tree and detail sheet with local-only assets"
+      ]
+    },
+    {
+      "id": "accepted-token-and-panel-contract",
+      "type": "contract",
+      "statement": "Production visual sources retain the accepted system-UI-first typography, canvas, surface, text, border, accent, status, radius, and panel-shadow values, and the desktop inspector and narrow hierarchy sheet consume the dedicated panel elevation token.",
+      "test_refs": [
+        "apps/web/scripts/run-web-09-witness.mjs::WEB-09 dependency-free visual and asset witness",
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 desktop preserves the neutral source hierarchy with local-only assets",
+        "apps/web/e2e/web-09-neutral-branding.spec.ts::WEB-09 mobile preserves the neutral semantic tree and detail sheet with local-only assets"
+      ]
+    },
+    {
+      "id": "reviewed-fidelity-ledger",
+      "type": "documentation",
+      "statement": "The checked-in fidelity ledger pins both accepted concept images by exact dimensions and SHA-256 digest, covers the six required review categories, and records intentional deltas so illustrative vendor content, device chrome, and pixel framing cannot override authoritative product data or neutral presentation.",
+      "test_refs": [
+        "apps/web/scripts/run-web-09-witness.mjs::WEB-09 dependency-free visual and asset witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-09-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-09-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["neutral-branding-and-local-assets"]
+    },
+    {
+      "id": "web-09-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-09-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "neutral-branding-and-local-assets",
+        "accepted-token-and-panel-contract",
+        "reviewed-fidelity-ledger"
+      ]
+    },
+    {
+      "id": "web-09-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-09-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "native-hierarchy-composition",
+        "neutral-branding-and-local-assets",
+        "accepted-token-and-panel-contract"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/features/instance-detail/AgentInspector.tsx",
+      "apps/web/src/features/instance-detail/instance-detail.css",
+      "apps/web/src/styles/org-chart.css",
+      "apps/web/src/styles/tokens.css"
+    ],
+    "gate_id": "web-09-dependency-free-witness"
+  },
+  "limitations": [
+    "Native-size comparison is a documented human visual review supported by emitted browser captures and executable structural/style assertions; aesthetic alignment is not represented as a cross-platform pixel-diff score.",
+    "Browser evidence uses Playwright-managed Chromium, a 1536 by 1024 desktop viewport, and a 426 by 923 CSS-pixel mobile viewport at device scale two. It does not claim other browser engines, physical-device chrome or input, operating-system font pixel identity, or deployed reverse-proxy parity.",
+    "The neutral-branding boundary distinguishes authoritative vendor words in source-backed role names from copied logos, badges, watermarks, colors, and trade dress. It is a product-source and rendered-asset review, not an image-recognition proof or legal trademark opinion.",
+    "Sanitized artifact text may expose an explicit user-activated HTTP(S) review link. Markdown images are rendered as omitted text, and the exercised application automatically loads no remote font, logo, image, stylesheet, script, provider, or connector resource.",
+    "WEB-07 remains the authority for responsive semantic-tree operation and WEB-08 for keyboard, focus, contrast, reduced motion, touch, reflow, and automated accessibility acceptance. WEB-09 verifies their visual continuity without replacing those gates."
+  ]
+}

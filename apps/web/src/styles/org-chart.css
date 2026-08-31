@@ -980,7 +980,7 @@
     z-index: 30;
     inset: 0 0 0 auto;
     width: min(360px, calc(100% - 24px));
-    box-shadow: var(--shadow-raised);
+    box-shadow: var(--shadow-panel);
   }
 
   .catalog-search {

@@ -305,6 +305,10 @@ function DetailContent({
         aria-labelledby="agent-capabilities-title"
       >
         <h3 id="agent-capabilities-title">Capabilities &amp; policies</h3>
+        <p className="agent-inspector__empty">
+          Capability badges are implementation metadata, not copied vendor
+          affiliations.
+        </p>
         {detail.capabilities.length === 0 ? (
           <Empty>No capabilities are assigned.</Empty>
         ) : (
