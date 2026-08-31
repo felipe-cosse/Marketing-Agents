@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hmac
+import json
 import math
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, NoReturn
 
@@ -21,6 +23,7 @@ from marketing_agents.application.ports.repositories import (
     ExecutionControlRepositoryConflict,
     ExecutionControlStartResult,
 )
+from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.execution_control import (
@@ -76,6 +79,15 @@ class ExecutionControlPersistenceConflict(ExecutionControlRepositoryConflict):
 
 def _time(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat(timespec="microseconds")
+
+
+def _plain_json_object(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a JSON-serializable copy of a recursively frozen domain payload."""
+
+    normalized = json.loads(canonical_json_bytes(value))
+    if not isinstance(normalized, dict):  # pragma: no cover - domain invariant
+        raise ValueError("execution attempt input must be a JSON object")
+    return normalized
 
 
 def _redaction_tuple(value: object, name: str) -> tuple[str, ...]:
@@ -1164,7 +1176,7 @@ class SQLAlchemyExecutionControlRepository:
             reserved_at=attempt.reserved_at,
             call_deadline_at=attempt.call_deadline_at,
             input_schema_id=attempt.input_schema_id,
-            redacted_input=dict(attempt.redacted_input),
+            redacted_input=_plain_json_object(attempt.redacted_input),
             input_classification=attempt.input_classification.value,
             rate_limit_scope=operation.rate_limit_scope.value,
             rate_limit_key=operation.rate_limit_key,
@@ -1698,7 +1710,7 @@ class SQLAlchemyExecutionControlRepository:
             reserved_at=completed.reserved_at,
             call_deadline_at=completed.call_deadline_at,
             input_schema_id=completed.input_schema_id,
-            redacted_input=dict(completed.redacted_input),
+            redacted_input=_plain_json_object(completed.redacted_input),
             input_classification=completed.input_classification.value,
             rate_limit_scope=operation.rate_limit_scope.value,
             rate_limit_key=operation.rate_limit_key,

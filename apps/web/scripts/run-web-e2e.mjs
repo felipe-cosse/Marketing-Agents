@@ -17,6 +17,7 @@ for (const script of [
   "run-web-08-e2e.mjs",
   "run-web-09-e2e.mjs",
   "run-demo-01-e2e.mjs",
+  "run-demo-02-e2e.mjs",
 ]) {
   const result = spawnSync(process.execPath, [resolve(scriptsRoot, script)], {
     stdio: "inherit",

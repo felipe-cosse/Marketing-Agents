@@ -11,6 +11,12 @@ export const SOCIAL_DRAFT_TEMPLATE_ID =
   "tpl.social-media.new-content.linkedin-post-drafter" as const;
 export const SOCIAL_DRAFT_INSTANCE_ID =
   "inst.social-media.new-content.linkedin-post-drafter.01" as const;
+export const BLOG_CONTENT_REVIEW_SCENARIO_ID =
+  "demo.blog-seo.content-review.v1" as const;
+export const BLOG_CONTENT_REVIEW_TEMPLATE_ID =
+  "tpl.blog-seo.new-content.blog-post-updater" as const;
+export const BLOG_CONTENT_REVIEW_INSTANCE_ID =
+  "inst.blog-seo.new-content.blog-post-updater.01" as const;
 
 const DISCOVERY_PATH = "/api/v1/demo-scenarios";
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{8,240}$/u;
@@ -177,7 +183,7 @@ function invalidReceipt(status: number): DemoScenarioRequestError {
 }
 
 function fromLocalError(error: LocalApiRequestError): DemoScenarioRequestError {
-  let message = "The local API could not create this demo draft.";
+  let message = "The local API could not create this demo run.";
   if (error.status === 0) message = error.message;
   else if (error.code === "idempotency_conflict") {
     message = "This retry key is already bound to different work.";
@@ -191,13 +197,13 @@ function fromLocalError(error: LocalApiRequestError): DemoScenarioRequestError {
   } else if (error.code === "csrf_token_invalid") {
     message = "The local session expired. Refresh it and try again.";
   } else if (error.status === 403) {
-    message = "This local session cannot create demo drafts.";
+    message = "This local session cannot create demo runs.";
   } else if (error.status === 404) {
     message = "The selected demo scenario was not found.";
   } else if (error.status === 409) {
     message = "The selected demo scenario cannot run right now.";
   } else if (error.status === 503) {
-    message = "Demo draft creation is temporarily unavailable.";
+    message = "Demo run creation is temporarily unavailable.";
   }
   return new DemoScenarioRequestError(error.status, error.code, message);
 }

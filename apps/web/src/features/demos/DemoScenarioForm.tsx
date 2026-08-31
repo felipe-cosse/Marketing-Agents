@@ -12,6 +12,9 @@ import type {
 import type { SchemaValidationIssue } from "../dry-run/schemaValidation";
 
 interface DemoScenarioFormProps {
+  readonly formId: string;
+  readonly ariaLabel: string;
+  readonly submitLabel: string;
   readonly schema: CompiledObjectSchema;
   readonly draft: SchemaDraftObject;
   readonly issues: readonly SchemaValidationIssue[];
@@ -36,6 +39,9 @@ function distinctIssues(
 }
 
 export function DemoScenarioForm({
+  formId,
+  ariaLabel,
+  submitLabel,
   schema,
   draft,
   issues,
@@ -46,7 +52,6 @@ export function DemoScenarioForm({
   onStopWaiting,
   onReset,
 }: DemoScenarioFormProps): React.JSX.Element {
-  const formId = "demo-social-draft-form";
   const summaryRef = useRef<HTMLDivElement>(null);
   const visibleIssues = distinctIssues(issues);
 
@@ -69,7 +74,7 @@ export function DemoScenarioForm({
     <form
       id={formId}
       className="schema-form demo-scenario-form"
-      aria-label="Social draft demo preset"
+      aria-label={ariaLabel}
       aria-busy={pending}
       tabIndex={-1}
       noValidate
@@ -164,7 +169,7 @@ export function DemoScenarioForm({
           className="schema-form__button is-primary"
           disabled={pending}
         >
-          Create draft
+          {submitLabel}
         </button>
       </div>
     </form>

@@ -39,6 +39,7 @@ from marketing_agents.application.services.manual_work_intake import (
 from marketing_agents.application.services.plan_persistence import AuditedPlanPersistenceService
 from marketing_agents.application.services.run_lifecycle import RunLifecycleService
 from marketing_agents.domain.audit import AuditContext
+from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import RunState, StepState, TriggerKind, WorkMode
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
@@ -59,10 +60,15 @@ from marketing_agents.infrastructure.catalog.models import (
 )
 from marketing_agents.security.redaction import SecretValue
 
-from .composition import SocialContentDraftReadAdapter
+from .blog_content_review import (
+    BLOG_CONTENT_REVIEW_SCENARIO,
+    BLOG_CONTENT_REVIEW_SCENARIO_ID,
+    expected_blog_content_review_artifact,
+)
+from .composition import DeterministicDemoReadAdapter
 from .contracts import DemoScenarioDefinition
 from .registry import DEMO_SCENARIOS, DemoScenarioRegistry
-from .social_content_draft import SOCIAL_CONTENT_DRAFT_SCENARIO_ID
+from .social_content_draft import SOCIAL_CONTENT_DRAFT_SCENARIO, SOCIAL_CONTENT_DRAFT_SCENARIO_ID
 
 
 class DemoRunServiceError(RuntimeError):
@@ -147,6 +153,14 @@ class _RuntimeInstance:
 
 
 @dataclass(frozen=True, slots=True)
+class _ScenarioRoutingTemplate:
+    id: str
+    display_order: int
+    allowed_tool_capability_ids: tuple[str, ...]
+    supported_trigger_types: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _ScenarioPlanningTemplate:
     id: str
     allowed_tool_capability_ids: tuple[str, ...]
@@ -168,7 +182,7 @@ class DemoRunService:
         dependencies: OrchestrationDependencies,
         manual_dry_run: ManualDryRunService,
         catalog: CompiledCatalog,
-        read_adapter: SocialContentDraftReadAdapter,
+        read_adapter: DeterministicDemoReadAdapter,
         *,
         registry: DemoScenarioRegistry = DEMO_SCENARIOS,
     ) -> None:
@@ -180,10 +194,8 @@ class DemoRunService:
             raise ValueError("demo run service requires one compiled catalog")
         if type(registry) is not DemoScenarioRegistry:
             raise ValueError("demo run service requires an exact demo registry")
-        if type(read_adapter) is not SocialContentDraftReadAdapter:
-            raise ValueError(
-                "social demo run service requires its credential-free deterministic adapter"
-            )
+        if type(read_adapter) is not DeterministicDemoReadAdapter:
+            raise ValueError("demo run service requires its credential-free deterministic adapter")
         read_adapter.require_deterministic_mock()
         self._dependencies = dependencies
         self._manual = manual_dry_run
@@ -206,7 +218,7 @@ class DemoRunService:
             raise TypeError("demo run requires an exact command")
         self._adapter.require_deterministic_mock()
         scenario = self._registry.get(command.scenario_id)
-        self._require_social_contract(scenario)
+        self._require_supported_contract(scenario)
         resolved = self._registry.resolve_input(scenario.id, command.input_payload)
         receipt = await self._manual.submit(
             ManualDryRunCommand(
@@ -221,7 +233,7 @@ class DemoRunService:
             principal,
         )
         audit_context = AuditContext.worker(
-            "worker.demo-social-content-draft",
+            "worker.deterministic-demo",
             correlation_id=command.correlation_id,
         )
         await self._drain(receipt, scenario, audit_context=audit_context)
@@ -334,9 +346,15 @@ class DemoRunService:
             variant=instance.variant,
             configuration_revision=work.configuration_revision,
         )
+        routing_template = _ScenarioRoutingTemplate(
+            id=template.id,
+            display_order=template.display_order,
+            allowed_tool_capability_ids=(capability.id,),
+            supported_trigger_types=template.supported_trigger_types,
+        )
         router = DeterministicInstanceRouter(
             catalog_content_hash=self._catalog.content_hash,
-            templates=(template,),
+            templates=(routing_template,),
             instances=(runtime_instance,),
             capability_ids=(capability.id,),
         )
@@ -400,8 +418,8 @@ class DemoRunService:
             bindings=(),
             run_policy=RunRuntimePolicy(
                 max_steps=template.budget_policy.max_steps,
-                max_model_calls=template.budget_policy.max_model_calls,
-                max_tool_calls=template.budget_policy.max_tool_calls,
+                max_model_calls=scenario.expected_model_calls,
+                max_tool_calls=scenario.expected_connector_calls,
                 run_timeout_seconds=template.timeout_policy.run_seconds,
             ),
         )
@@ -423,7 +441,7 @@ class DemoRunService:
                     )
                     for step in scenario.steps
                 ),
-                requested_by="worker.demo-social-content-draft",
+                requested_by="worker.deterministic-demo",
             )
         )
         return plan, graph, routing
@@ -470,8 +488,8 @@ class DemoRunService:
             or len(artifacts) != 1
             or actions
             or authorization_set is not None
-            or control.model_calls != 1
-            or control.tool_calls != 0
+            or control.model_calls != scenario.expected_model_calls
+            or control.tool_calls != scenario.expected_connector_calls
         ):
             raise DemoRunServiceError(
                 "demo_evidence_invalid",
@@ -479,12 +497,16 @@ class DemoRunService:
                 run_id=receipt.run.id,
             )
         artifact = artifacts[0]
+        artifact_payload_valid = self._artifact_payload_is_valid(
+            scenario,
+            artifact.payload,
+            receipt.work_item.admitted_payload,
+        )
         if (
             not artifact.verify_payload()
             or artifact.payload.get("scenario_id") != scenario.id
             or artifact.payload.get("scenario_version") != scenario.version
-            or artifact.payload.get("character_count")
-            != len(str(artifact.payload.get("draft_text", "")))
+            or not artifact_payload_valid
             or artifact.provenance.workflow_id != scenario.id
             or artifact.provenance.workflow_version != str(scenario.version)
             or artifact.provenance.output_schema_id != scenario.output_schema_id
@@ -510,13 +532,18 @@ class DemoRunService:
         )
 
     @staticmethod
-    def _require_social_contract(scenario: DemoScenarioDefinition) -> None:
+    def _require_supported_contract(scenario: DemoScenarioDefinition) -> None:
+        supported = {
+            SOCIAL_CONTENT_DRAFT_SCENARIO_ID: SOCIAL_CONTENT_DRAFT_SCENARIO,
+            BLOG_CONTENT_REVIEW_SCENARIO_ID: BLOG_CONTENT_REVIEW_SCENARIO,
+        }
+        expected = supported.get(scenario.id)
         if (
-            scenario.id != SOCIAL_CONTENT_DRAFT_SCENARIO_ID
+            expected is None
+            or scenario.definition_hash != expected.definition_hash
             or scenario.effect != "read_only"
             or len(scenario.selected_agents) != 1
             or len(scenario.steps) != 1
-            or scenario.steps[0].key != "create-draft"
             or scenario.steps[0].source_order != 10
             or scenario.steps[0].dependency_keys
             or not scenario.steps[0].terminal_result
@@ -536,8 +563,27 @@ class DemoRunService:
         ):
             raise DemoRunServiceError(
                 "demo_scenario_unsupported",
-                "demo drain supports only the bounded social content scenario",
+                "demo drain supports only its bounded deterministic read scenarios",
             )
+
+    @staticmethod
+    def _artifact_payload_is_valid(
+        scenario: DemoScenarioDefinition,
+        artifact_payload: Mapping[str, Any],
+        input_payload: Mapping[str, Any],
+    ) -> bool:
+        if scenario.id == SOCIAL_CONTENT_DRAFT_SCENARIO_ID:
+            draft_text = artifact_payload.get("draft_text")
+            return type(draft_text) is str and artifact_payload.get("character_count") == len(
+                draft_text
+            )
+        if scenario.id == BLOG_CONTENT_REVIEW_SCENARIO_ID:
+            try:
+                expected = expected_blog_content_review_artifact(input_payload)
+                return canonical_json_bytes(artifact_payload) == canonical_json_bytes(expected)
+            except (TypeError, ValueError):
+                return False
+        return False
 
 
 __all__ = ["DemoRunCommand", "DemoRunResult", "DemoRunService", "DemoRunServiceError"]

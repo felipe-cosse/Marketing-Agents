@@ -114,7 +114,7 @@ Allowed status values:
 | ID | Requirement | Plan | Planned implementation | Verification | Status |
 |---|---|---|---|---|---|
 | DEMO-01 | Social idea to draft artifact. | 11 | Social workflow | Social acceptance | verified |
-| DEMO-02 | Blog metadata to SEO/content review. | 11 | Blog workflow | Blog acceptance | planned |
+| DEMO-02 | Blog metadata to SEO/content review. | 11 | Blog workflow | Blog acceptance | verified |
 | DEMO-03 | Email signup to subscriber/onboarding actions. | 11 | Two actions + welcome artifact | Email acceptance | planned |
 | DEMO-04 | Community event signup to reminder draft. | 11 | Reminder draft/recommended time | Community acceptance | planned |
 | DEMO-05 | Partnership application to structured recommendation. | 11 | Advisory review workflow | Partnerships acceptance | planned |

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any
 
 from marketing_agents.application.policies.runtime_guard import (
     CapabilityPolicy,
@@ -79,6 +81,34 @@ def _unique_index[ValueT](
     return MappingProxyType(indexed)
 
 
+def _canonical_difference_pointer(left: Any, right: Any, path: str = "") -> str:
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        for key in sorted(set(left) | set(right)):
+            pointer = path + "/" + str(key).replace("~", "~0").replace("/", "~1")
+            if key not in left or key not in right:
+                return pointer
+            difference = _canonical_difference_pointer(left[key], right[key], pointer)
+            if difference:
+                return difference
+        return ""
+    if (
+        isinstance(left, Sequence)
+        and not isinstance(left, (str, bytes, bytearray))
+        and isinstance(right, Sequence)
+        and not isinstance(right, (str, bytes, bytearray))
+    ):
+        for index, (left_item, right_item) in enumerate(zip(left, right, strict=False)):
+            difference = _canonical_difference_pointer(
+                left_item,
+                right_item,
+                path + f"/{index}",
+            )
+            if difference:
+                return difference
+        return path or "/" if len(left) != len(right) else ""
+    return (path or "/") if left != right else ""
+
+
 @dataclass(frozen=True, slots=True)
 class _EffectiveManualInstance:
     """Narrow validator-facing projection of the locked mutable configuration."""
@@ -107,7 +137,9 @@ class _DemoIncomingWorkValidator:
                 raise DemoScenarioInputError(
                     "demo_scenario_invalid",
                     "demo input must use its canonical representation",
-                    pointer="/source_urls",
+                    pointer=(
+                        _canonical_difference_pointer(envelope.admitted_payload, normalized) or "/"
+                    ),
                 )
         except DemoScenarioInputError as exc:
             relative = exc.pointer or "/"
@@ -298,7 +330,7 @@ class CompiledCatalogManualAdmissionResolver:
         input_schema_id = (
             scenario.input_schema_id if scenario is not None else template.input_schema_id
         )
-        capabilities = self._selected_capabilities(template)
+        capabilities = self._selected_capabilities(template, scenario=scenario)
         budget = template.budget_policy
         timeout = template.timeout_policy
         rate_limit = template.rate_limit_policy
@@ -318,8 +350,16 @@ class CompiledCatalogManualAdmissionResolver:
                 max_json_depth=64,
                 max_content_parts=256,
                 max_content_characters=min(budget.max_input_bytes, 1_000_000),
-                max_model_calls=budget.max_model_calls,
-                max_tool_calls=budget.max_tool_calls,
+                max_model_calls=(
+                    scenario.expected_model_calls
+                    if scenario is not None
+                    else budget.max_model_calls
+                ),
+                max_tool_calls=(
+                    scenario.expected_connector_calls
+                    if scenario is not None
+                    else budget.max_tool_calls
+                ),
                 rate_window_max_calls=rate_limit.max_calls,
                 rate_window_seconds=rate_limit.window_seconds,
                 step_timeout_seconds=timeout.step_seconds,
@@ -374,14 +414,25 @@ class CompiledCatalogManualAdmissionResolver:
     def _selected_capabilities(
         self,
         template: AgentTemplateRecord,
+        *,
+        scenario: DemoScenarioDefinition | None,
     ) -> tuple[ToolCapabilityRecord, ...]:
         selected: list[ToolCapabilityRecord] = []
-        for identifier in template.allowed_tool_capability_ids:
+        identifiers = (
+            tuple(dict.fromkeys(step.capability_id for step in scenario.steps))
+            if scenario is not None
+            else template.allowed_tool_capability_ids
+        )
+        if any(
+            identifier not in template.allowed_tool_capability_ids for identifier in identifiers
+        ):
+            raise _unavailable()
+        for identifier in identifiers:
             capability = self._capabilities.get(identifier)
             if type(capability) is not ToolCapabilityRecord:
                 raise _unavailable()
             selected.append(capability)
-        if not selected or len(selected) != len(set(template.allowed_tool_capability_ids)):
+        if not selected or len(selected) != len(set(identifiers)):
             raise _unavailable()
         return tuple(selected)
 
