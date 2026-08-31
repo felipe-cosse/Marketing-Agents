@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   approvalDetailQueryKey,
@@ -30,6 +30,7 @@ import {
   CATALOG_HIERARCHY_QUERY_KEY,
   fetchCatalogHierarchy,
 } from "../../api/catalogHierarchy";
+import { useMediaQuery } from "../../accessibility/useMediaQuery";
 import { ApprovalDecisionDialog } from "./ApprovalDecisionDialog";
 import { ApprovalQueue } from "./ApprovalQueue";
 import {
@@ -50,6 +51,7 @@ import "./approval-queue.css";
 
 const PAGE_SIZE = 25;
 const EMAIL_RUN_APPROVAL_LIMIT = 100;
+const APPROVAL_REVIEW_SHEET_MEDIA_QUERY = "(max-width: 900px)";
 
 interface DecisionRequest {
   readonly approval: ApprovalDetail;
@@ -129,6 +131,9 @@ export function ApprovalQueuePage(): React.JSX.Element {
     useState<DecisionRequest | null>(null);
   const [decisionPending, setDecisionPending] = useState(false);
   const [feedback, setFeedback] = useState<DecisionFeedback | null>(null);
+  const reviewTriggerIdRef = useRef<string | null>(null);
+  const statusFilterRef = useRef<HTMLSelectElement>(null);
+  const reviewIsModal = useMediaQuery(APPROVAL_REVIEW_SHEET_MEDIA_QUERY);
 
   const listBaseQuery = useMemo(
     () => ({
@@ -289,6 +294,24 @@ export function ApprovalQueuePage(): React.JSX.Element {
     setFeedback(null);
   };
 
+  const closeReview = (): void => {
+    const approvalId = reviewTriggerIdRef.current;
+    setSelectedApprovalId(null);
+    setDecisionRequest(null);
+    setFeedback(null);
+    requestAnimationFrame(() => {
+      const trigger =
+        approvalId === null
+          ? null
+          : document.getElementById(`approval-review-trigger-${approvalId}`);
+      if (trigger instanceof HTMLElement) {
+        trigger.focus();
+      } else {
+        statusFilterRef.current?.focus();
+      }
+    });
+  };
+
   const recordDecision = async (): Promise<void> => {
     if (decisionRequest === null || decisionPending) return;
     const { approval, decision } = decisionRequest;
@@ -398,6 +421,7 @@ export function ApprovalQueuePage(): React.JSX.Element {
         <label>
           Approval status
           <select
+            ref={statusFilterRef}
             value={statusFilter}
             onChange={(event) => {
               setStatusFilter(event.currentTarget.value as ApprovalStatus | "");
@@ -501,6 +525,7 @@ export function ApprovalQueuePage(): React.JSX.Element {
               departments={departments}
               selectedApprovalId={selectedApprovalId}
               onReview={(approvalId) => {
+                reviewTriggerIdRef.current = approvalId;
                 setSelectedApprovalId(approvalId);
                 setDecisionRequest(null);
                 setFeedback(null);
@@ -573,11 +598,8 @@ export function ApprovalQueuePage(): React.JSX.Element {
                 ? (emailRunSafety ?? Object.freeze({ status: "unavailable" }))
                 : null
             }
-            onClose={() => {
-              setSelectedApprovalId(null);
-              setDecisionRequest(null);
-              setFeedback(null);
-            }}
+            modal={reviewIsModal}
+            onClose={closeReview}
             onRequestDecision={(decision) => {
               setDecisionRequest({ approval: detailQuery.data, decision });
               setFeedback(null);

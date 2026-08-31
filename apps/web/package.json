@@ -48,7 +48,11 @@
     "test:web-07": "pnpm test:web-07:unit && pnpm test:web-07:e2e",
     "test:web-07:e2e": "node scripts/run-web-07-e2e.mjs",
     "test:web-07:unit": "node scripts/run-web-07-unit.mjs",
-    "test:web-07:witness": "node scripts/run-web-07-witness.mjs"
+    "test:web-07:witness": "node scripts/run-web-07-witness.mjs",
+    "test:web-08": "pnpm test:web-08:unit && pnpm test:web-08:e2e",
+    "test:web-08:e2e": "node scripts/run-web-08-e2e.mjs",
+    "test:web-08:unit": "node scripts/run-web-08-unit.mjs",
+    "test:web-08:witness": "node scripts/run-web-08-witness.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.102.8",
@@ -57,6 +61,7 @@
     "react-router-dom": "7.18.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.62.1",
     "@testing-library/dom": "10.4.1",

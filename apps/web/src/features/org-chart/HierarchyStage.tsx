@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { AgentCard } from "./AgentCard";
 import { AgentsIcon } from "./icons";
@@ -18,6 +18,50 @@ function HierarchyStageComponent({
   selectedInstanceId,
   onSelect,
 }: HierarchyStageProps): React.JSX.Element {
+  const orderedInstanceIds = useMemo(
+    () =>
+      hierarchy.departments.flatMap((department) =>
+        department.functions.flatMap((agentFunction) =>
+          agentFunction.instances.map((instance) => instance.id),
+        ),
+      ),
+    [hierarchy],
+  );
+  const [rovingInstanceId, setRovingInstanceId] = useState<string | null>(
+    selectedInstanceId ?? orderedInstanceIds[0] ?? null,
+  );
+
+  const resolvedRovingInstanceId =
+    rovingInstanceId !== null && orderedInstanceIds.includes(rovingInstanceId)
+      ? rovingInstanceId
+      : selectedInstanceId !== null &&
+          orderedInstanceIds.includes(selectedInstanceId)
+        ? selectedInstanceId
+        : (orderedInstanceIds[0] ?? null);
+
+  const moveRovingFocus = useCallback(
+    (instanceId: string, key: string): void => {
+      const currentIndex = orderedInstanceIds.indexOf(instanceId);
+      if (currentIndex < 0) return;
+      const nextIndex =
+        key === "Home"
+          ? 0
+          : key === "End"
+            ? orderedInstanceIds.length - 1
+            : key === "ArrowDown" || key === "ArrowRight"
+              ? Math.min(currentIndex + 1, orderedInstanceIds.length - 1)
+              : Math.max(currentIndex - 1, 0);
+      const nextId = orderedInstanceIds[nextIndex];
+      if (nextId === undefined) return;
+      setRovingInstanceId(nextId);
+      const nextCard = [
+        ...document.querySelectorAll<HTMLButtonElement>("[data-instance-id]"),
+      ].find((candidate) => candidate.dataset.instanceId === nextId);
+      nextCard?.focus();
+    },
+    [orderedInstanceIds],
+  );
+
   return (
     <div
       className="hierarchy-stage"
@@ -157,6 +201,11 @@ function HierarchyStageComponent({
                         }}
                         selected={selectedInstanceId === instance.id}
                         onSelect={onSelect}
+                        tabIndex={
+                          resolvedRovingInstanceId === instance.id ? 0 : -1
+                        }
+                        onFocus={setRovingInstanceId}
+                        onNavigate={moveRovingFocus}
                       />
                     );
                   })}

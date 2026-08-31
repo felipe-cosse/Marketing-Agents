@@ -375,6 +375,60 @@ describe("WEB-05 ApprovalQueuePage", () => {
     await waitFor(() => expect(panel).toHaveFocus());
   });
 
+  it("WEB-08 restores focus to the status filter when a decided row leaves the queue", async () => {
+    fetchPageMock.mockResolvedValueOnce(PENDING_PAGE).mockResolvedValue(
+      Object.freeze({
+        items: Object.freeze([SECOND_SUMMARY]),
+        nextCursor: null,
+      }),
+    );
+    decideMock.mockResolvedValue({
+      approvalId: APPROVAL_ONE_ID,
+      decisionId: "decision.web05.01",
+      actionId: "action.web05.email.newsletter",
+      runId: "run.web05.email",
+      status: "approved",
+      approval: null,
+    });
+    let detailCalls = 0;
+    fetchDetailMock.mockImplementation(() => {
+      detailCalls += 1;
+      return Promise.resolve(
+        detailCalls === 1
+          ? makeApprovalDetail()
+          : makeApprovalDetail({ status: "approved", isActionable: false }),
+      );
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Review approval ${APPROVAL_ONE_ID}`,
+      }),
+    );
+    const panel = await screen.findByRole("complementary");
+    await user.click(within(panel).getByRole("button", { name: "Approve" }));
+    await user.click(
+      screen.getByRole("button", { name: "Approve exact action" }),
+    );
+    await screen.findByText(/approval recorded as approved/iu);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: `Review approval ${APPROVAL_ONE_ID}`,
+        }),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      within(panel).getByRole("button", { name: "Close approval review" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Approval status")).toHaveFocus(),
+    );
+  });
+
   it("withholds success when the authoritative refetch drifts from the exact reviewed action", async () => {
     decideMock.mockResolvedValue({
       approvalId: APPROVAL_ONE_ID,

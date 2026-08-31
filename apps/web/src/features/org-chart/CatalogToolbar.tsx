@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -53,7 +54,17 @@ export interface CatalogToolbarProps {
   readonly onRecentRunStateChange: (value: string) => void;
   readonly onCapabilityChange: (value: string) => void;
   readonly onClear: () => void;
+  readonly modal?: boolean;
 }
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not(:disabled)",
+  "input:not(:disabled)",
+  "select:not(:disabled)",
+  "textarea:not(:disabled)",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
 
 interface ActiveFilter {
   readonly key:
@@ -152,6 +163,7 @@ export function CatalogToolbar({
   onRecentRunStateChange,
   onCapabilityChange,
   onClear,
+  modal = false,
 }: CatalogToolbarProps): React.JSX.Element {
   const [filterOpen, setFilterOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0 });
@@ -259,16 +271,29 @@ export function CatalogToolbar({
     setFilterOpen(false);
     requestAnimationFrame(() => searchRef.current?.focus());
   };
+  const closeAndFocusTrigger = useCallback((): void => {
+    setFilterOpen(false);
+    triggerRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      const eventElement =
+        event.target instanceof Element
+          ? event.target
+          : document.activeElement instanceof Element
+            ? document.activeElement
+            : null;
+      const activeModal =
+        eventElement?.closest<HTMLElement>('[aria-modal="true"]') ?? null;
       if (
         event.key === "/" &&
         !event.altKey &&
         !event.ctrlKey &&
         !event.metaKey &&
         !event.defaultPrevented &&
-        !isEditableTarget(event.target)
+        (activeModal === null || activeModal === panelRef.current) &&
+        !isEditableTarget(eventElement)
       ) {
         event.preventDefault();
         setFilterOpen(false);
@@ -277,13 +302,12 @@ export function CatalogToolbar({
       }
       if (event.key === "Escape" && filterOpen) {
         event.preventDefault();
-        setFilterOpen(false);
-        triggerRef.current?.focus();
+        closeAndFocusTrigger();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [filterOpen, searchRef]);
+  }, [closeAndFocusTrigger, filterOpen, searchRef]);
 
   useLayoutEffect(() => {
     if (!filterOpen) return undefined;
@@ -301,7 +325,42 @@ export function CatalogToolbar({
     };
     updatePanelPosition();
     panelRef.current?.querySelector<HTMLSelectElement>("select")?.focus();
+    const trapFocus = (event: KeyboardEvent): void => {
+      if (!modal || event.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (panel === null) return;
+      const focusable = [
+        ...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      const active = document.activeElement;
+      if (first === undefined || last === undefined) {
+        event.preventDefault();
+        panel.focus();
+      } else if (active === panel) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (
+        event.shiftKey &&
+        (active === first ||
+          !(active instanceof Node) ||
+          !panel.contains(active))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (active === last ||
+          !(active instanceof Node) ||
+          !panel.contains(active))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
     const handlePointerDown = (event: PointerEvent): void => {
+      if (modal) return;
       const target = event.target;
       if (
         target instanceof Node &&
@@ -312,14 +371,16 @@ export function CatalogToolbar({
       }
     };
     document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", trapFocus);
     window.addEventListener("resize", updatePanelPosition);
     window.addEventListener("scroll", updatePanelPosition, true);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", trapFocus);
       window.removeEventListener("resize", updatePanelPosition);
       window.removeEventListener("scroll", updatePanelPosition, true);
     };
-  }, [filterOpen]);
+  }, [filterOpen, modal]);
 
   return (
     <div
@@ -350,130 +411,154 @@ export function CatalogToolbar({
 
         {filterOpen
           ? createPortal(
-              <div
-                ref={panelRef}
-                id={panelId}
-                className="catalog-filter-panel"
-                role="dialog"
-                aria-label="Catalog filters"
-                style={panelPosition}
-              >
-                <div className="catalog-filter-panel__heading">
-                  <strong>Filter agents</strong>
-                  <span>{activeFilters.length} active</span>
-                </div>
+              <>
+                {modal ? (
+                  <div
+                    aria-hidden="true"
+                    className="catalog-filter-backdrop"
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeAndFocusTrigger();
+                    }}
+                  />
+                ) : null}
+                <div
+                  ref={panelRef}
+                  id={panelId}
+                  className="catalog-filter-panel"
+                  role="dialog"
+                  aria-modal={modal ? "true" : undefined}
+                  aria-label="Catalog filters"
+                  tabIndex={modal ? -1 : undefined}
+                  style={panelPosition}
+                >
+                  <div className="catalog-filter-panel__heading">
+                    <div>
+                      <strong>Filter agents</strong>
+                      <span>{activeFilters.length} active</span>
+                    </div>
+                    <button type="button" onClick={closeAndFocusTrigger}>
+                      Close
+                    </button>
+                  </div>
 
-                <div className="catalog-filter-field">
-                  <label htmlFor={departmentId}>Department</label>
-                  <select
-                    id={departmentId}
-                    value={filters.departmentId}
-                    onChange={(event) => onDepartmentChange(event.target.value)}
-                  >
-                    <option value="">All departments</option>
-                    {options.departments.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
+                  <div className="catalog-filter-field">
+                    <label htmlFor={departmentId}>Department</label>
+                    <select
+                      id={departmentId}
+                      value={filters.departmentId}
+                      onChange={(event) =>
+                        onDepartmentChange(event.target.value)
+                      }
+                    >
+                      <option value="">All departments</option>
+                      {options.departments.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="catalog-filter-field">
+                    <label htmlFor={functionId}>Function</label>
+                    <select
+                      id={functionId}
+                      value={filters.functionId}
+                      disabled={filters.departmentId === ""}
+                      onChange={(event) => onFunctionChange(event.target.value)}
+                    >
+                      <option value="">
+                        {filters.departmentId === ""
+                          ? "Select a department first"
+                          : "All functions"}
                       </option>
-                    ))}
-                  </select>
-                </div>
+                      {functionOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div className="catalog-filter-field">
-                  <label htmlFor={functionId}>Function</label>
-                  <select
-                    id={functionId}
-                    value={filters.functionId}
-                    disabled={filters.departmentId === ""}
-                    onChange={(event) => onFunctionChange(event.target.value)}
-                  >
-                    <option value="">
-                      {filters.departmentId === ""
-                        ? "Select a department first"
-                        : "All functions"}
-                    </option>
-                    {functionOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="catalog-filter-field">
+                    <label htmlFor={deploymentId}>Deployment state</label>
+                    <select
+                      id={deploymentId}
+                      value={filters.deploymentState}
+                      onChange={(event) =>
+                        onDeploymentStateChange(event.target.value)
+                      }
+                    >
+                      <option value="">Any deployment state</option>
+                      {options.deploymentStates.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div className="catalog-filter-field">
-                  <label htmlFor={deploymentId}>Deployment state</label>
-                  <select
-                    id={deploymentId}
-                    value={filters.deploymentState}
-                    onChange={(event) =>
-                      onDeploymentStateChange(event.target.value)
-                    }
-                  >
-                    <option value="">Any deployment state</option>
-                    {options.deploymentStates.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="catalog-filter-field">
+                    <label htmlFor={recentRunId}>Recent run state</label>
+                    <select
+                      id={recentRunId}
+                      value={filters.recentRunState}
+                      disabled={!statusAvailable}
+                      aria-describedby={recentRunNoteId}
+                      onChange={(event) =>
+                        onRecentRunStateChange(event.target.value)
+                      }
+                    >
+                      <option value="">Any recent run state</option>
+                      {options.recentRunStates.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span
+                      id={recentRunNoteId}
+                      className="catalog-filter-field__note"
+                    >
+                      {!statusAvailable
+                        ? "Recent run status is unavailable."
+                        : statusStale
+                          ? "Recent run status may be stale."
+                          : "Runtime status is current."}
+                    </span>
+                  </div>
 
-                <div className="catalog-filter-field">
-                  <label htmlFor={recentRunId}>Recent run state</label>
-                  <select
-                    id={recentRunId}
-                    value={filters.recentRunState}
-                    disabled={!statusAvailable}
-                    aria-describedby={recentRunNoteId}
-                    onChange={(event) =>
-                      onRecentRunStateChange(event.target.value)
-                    }
-                  >
-                    <option value="">Any recent run state</option>
-                    {options.recentRunStates.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span
-                    id={recentRunNoteId}
-                    className="catalog-filter-field__note"
-                  >
-                    {!statusAvailable
-                      ? "Recent run status is unavailable."
-                      : statusStale
-                        ? "Recent run status may be stale."
-                        : "Runtime status is current."}
-                  </span>
-                </div>
+                  <div className="catalog-filter-field">
+                    <label htmlFor={capabilityId}>Capability</label>
+                    <select
+                      id={capabilityId}
+                      value={filters.capabilityId}
+                      onChange={(event) =>
+                        onCapabilityChange(event.target.value)
+                      }
+                    >
+                      <option value="">Any capability</option>
+                      {options.capabilities.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div className="catalog-filter-field">
-                  <label htmlFor={capabilityId}>Capability</label>
-                  <select
-                    id={capabilityId}
-                    value={filters.capabilityId}
-                    onChange={(event) => onCapabilityChange(event.target.value)}
-                  >
-                    <option value="">Any capability</option>
-                    {options.capabilities.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="catalog-filter-panel__footer">
+                    <button
+                      type="button"
+                      onClick={clearAndFocusSearch}
+                      disabled={!hasQueryState}
+                    >
+                      Clear all
+                    </button>
+                  </div>
                 </div>
-
-                <div className="catalog-filter-panel__footer">
-                  <button
-                    type="button"
-                    onClick={clearAndFocusSearch}
-                    disabled={!hasQueryState}
-                  >
-                    Clear all
-                  </button>
-                </div>
-              </div>,
+              </>,
               document.body,
             )
           : null}

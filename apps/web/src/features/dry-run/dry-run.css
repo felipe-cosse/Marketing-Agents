@@ -420,7 +420,8 @@ div.dry-run__error {
 .schema-form__error-summary button:focus-visible,
 .schema-form__object:focus-visible,
 .schema-form__array:focus-visible {
-  outline: 0;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
   box-shadow: var(--focus-ring);
 }
 
@@ -443,5 +444,25 @@ div.dry-run__error {
 
   .schema-form__actions .schema-form__button {
     flex: 1 1 120px;
+  }
+
+  .schema-form__field > input,
+  .schema-form__field > select,
+  .schema-form__field > textarea,
+  .schema-form__button {
+    min-height: 44px;
+  }
+
+  .schema-form__checkbox,
+  .schema-form__mode label {
+    grid-template-columns: 24px minmax(0, 1fr);
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .schema-form__checkbox input,
+  .schema-form__mode input {
+    width: 24px;
+    height: 24px;
   }
 }

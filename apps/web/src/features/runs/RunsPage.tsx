@@ -9,6 +9,7 @@ import "./run-timeline.css";
 
 const PAGE_SIZE = 25;
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$/u;
+const RUN_LOOKUP_ERROR_ID = "run-lookup-error";
 
 export function RunsPage(): React.JSX.Element {
   const navigate = useNavigate();
@@ -65,6 +66,10 @@ export function RunsPage(): React.JSX.Element {
           <label>
             Run ID
             <input
+              aria-describedby={
+                lookupError === null ? undefined : RUN_LOOKUP_ERROR_ID
+              }
+              aria-invalid={lookupError === null ? undefined : "true"}
               autoComplete="off"
               maxLength={240}
               placeholder="run.…"
@@ -79,7 +84,11 @@ export function RunsPage(): React.JSX.Element {
           <button type="submit">Open run timeline</button>
         </form>
         {lookupError === null ? null : (
-          <p className="runs-page__lookup-error" role="alert">
+          <p
+            id={RUN_LOOKUP_ERROR_ID}
+            className="runs-page__lookup-error"
+            role="alert"
+          >
             {lookupError}
           </p>
         )}

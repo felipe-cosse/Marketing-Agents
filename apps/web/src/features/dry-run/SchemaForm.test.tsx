@@ -245,4 +245,26 @@ describe("WEB-04 SchemaForm", () => {
       }),
     ).not.toBeInTheDocument();
   });
+
+  it("WEB-08 restores focus to Add when array removal reaches the minimum", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    const add = screen.getByRole("button", {
+      name: "Add Escalation note",
+    });
+    await user.click(add);
+    await user.click(add);
+    const removeSecond = screen.getByRole("button", {
+      name: "Remove Escalation note 2",
+    });
+    await user.click(removeSecond);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Remove Escalation note 1",
+      }),
+    ).toBeDisabled();
+    await waitFor(() => expect(add).toHaveFocus());
+  });
 });

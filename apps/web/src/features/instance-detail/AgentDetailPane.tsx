@@ -22,6 +22,7 @@ interface AgentDetailPaneProps {
   readonly onOpenRun: (runId: string) => void;
   readonly onConfigurationDirtyChange: (dirty: boolean) => void;
   readonly onDryRunDirtyChange: (dirty: boolean) => void;
+  readonly modal?: boolean;
 }
 
 const INSTANCE_STATUS_QUERY_KEY = [
@@ -66,6 +67,7 @@ export function AgentDetailPane({
   onOpenRun,
   onConfigurationDirtyChange,
   onDryRunDirtyChange,
+  modal = false,
 }: AgentDetailPaneProps): React.JSX.Element {
   const queryClient = useQueryClient();
   const identity = useMemo(
@@ -140,6 +142,7 @@ export function AgentDetailPane({
       onRetry={() => void refreshDetail()}
       onClose={onClose}
       onOpenRun={onOpenRun}
+      modal={modal}
       dryRunControls={
         detailQuery.data === undefined ? undefined : (
           <DryRunPanel

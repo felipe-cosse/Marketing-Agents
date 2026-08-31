@@ -81,6 +81,7 @@ export function ApprovalQueue({
                 </dl>
               </div>
               <button
+                id={`approval-review-trigger-${approval.id}`}
                 type="button"
                 className="approval-row__review"
                 aria-controls="approval-review-panel"

@@ -1,0 +1,143 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-08",
+  "matrix_statement_sha256": "8f33bedba321b4dbff4e5163c16cf0b92dc738ceca32127aed946ee3ce9bb421",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "pnpm-lock.yaml",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-08.json",
+      "docs/verification/requirements/WEB-08.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/app/App.tsx",
+          "apps/web/src/styles/global.css",
+          "apps/web/src/styles/org-chart.css",
+          "apps/web/src/styles/tokens.css",
+          "apps/web/src/features/org-chart/OrgChartPage.tsx",
+          "apps/web/src/features/org-chart/CatalogToolbar.tsx",
+          "apps/web/src/features/instance-detail/AgentInspector.tsx",
+          "apps/web/src/features/approvals/ApprovalDecisionDialog.tsx",
+          "apps/web/src/features/instance-detail/UnsavedConfigurationDialog.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/accessibilitySourceContracts.test.ts",
+          "apps/web/e2e/web-08-accessibility.spec.ts",
+          "apps/web/scripts/run-web-08-unit.mjs",
+          "apps/web/scripts/run-web-08-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "semantic-routes-and-announcements",
+      "type": "journey",
+      "statement": "The rendered route states exercised by the browser gate retain named landmarks, programmatically associated control labels, and polite status announcements, and those states produce no serious or critical Axe violations under the explicitly configured WCAG tags.",
+      "test_refs": [
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 chart, tree, detail, and dry-run states pass accessibility acceptance",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 approval review and decision dialog preserve keyboard focus",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 run timeline and artifact viewer pass reflow and keyboard acceptance"
+      ]
+    },
+    {
+      "id": "keyboard-focus-and-modal-lifecycle",
+      "type": "contract",
+      "statement": "The exercised keyboard path exposes a visible focus indicator, reaches application controls without pointer input, keeps modal focus inside its active surface, supports Escape where dismissal is available, and restores focus to a viable trigger or fallback after dismissal.",
+      "test_refs": [
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 chart, tree, detail, and dry-run states pass accessibility acceptance",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 approval review and decision dialog preserve keyboard focus",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 run timeline and artifact viewer pass reflow and keyboard acceptance"
+      ]
+    },
+    {
+      "id": "contrast-motion-and-reflow-boundaries",
+      "type": "positive",
+      "statement": "The exercised production surfaces produce no serious or critical Axe color-contrast violations, preserve a visible focus treatment independent of status color, disable or collapse decorative motion when reduced motion is requested, and remain operable at the browser gate's declared reflow viewport.",
+      "test_refs": [
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 chart, tree, detail, and dry-run states pass accessibility acceptance",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 approval review and decision dialog preserve keyboard focus",
+        "apps/web/e2e/web-08-accessibility.spec.ts::WEB-08 run timeline and artifact viewer pass reflow and keyboard acceptance"
+      ]
+    },
+    {
+      "id": "production-source-accessibility-boundaries",
+      "type": "contract",
+      "statement": "Production source retains the declared skip target, visible focus selectors, narrow modal wiring, a non-text boundary token with at least 3:1 contrast against white, 44-pixel touch-layout declarations, reduced-motion media rules, route landmarks, and polite live-region connections.",
+      "test_refs": [
+        "apps/web/src/accessibilitySourceContracts.test.ts::WEB-08 retains the skip target, route boundary, and visible focus selectors",
+        "apps/web/src/accessibilitySourceContracts.test.ts::WEB-08 source-binds narrow filter and inspector modal focus behavior",
+        "apps/web/src/accessibilitySourceContracts.test.ts::WEB-08 retains non-text contrast, touch-target, and reduced-motion boundaries",
+        "apps/web/scripts/run-web-08-witness.mjs::WEB-08 dependency-free witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-08-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-08-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["production-source-accessibility-boundaries"]
+    },
+    {
+      "id": "web-08-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-08-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": ["production-source-accessibility-boundaries"]
+    },
+    {
+      "id": "web-08-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-08-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "semantic-routes-and-announcements",
+        "keyboard-focus-and-modal-lifecycle",
+        "contrast-motion-and-reflow-boundaries"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/app/App.tsx",
+      "apps/web/src/styles/global.css",
+      "apps/web/src/styles/org-chart.css",
+      "apps/web/src/styles/tokens.css",
+      "apps/web/src/features/org-chart/OrgChartPage.tsx",
+      "apps/web/src/features/org-chart/CatalogToolbar.tsx",
+      "apps/web/src/features/instance-detail/AgentInspector.tsx",
+      "apps/web/src/features/approvals/ApprovalDecisionDialog.tsx",
+      "apps/web/src/features/instance-detail/UnsavedConfigurationDialog.tsx",
+      "apps/web/src/features/approvals/ApprovalQueuePage.tsx",
+      "apps/web/src/features/approvals/approval-queue.css",
+      "apps/web/src/features/runs/RunTimelinePage.tsx",
+      "apps/web/src/features/runs/ArtifactViewerPage.tsx"
+    ],
+    "gate_id": "web-08-dependency-free-witness"
+  },
+  "limitations": [
+    "The dependency-free witness validates production source connections only. It does not infer computed contrast, browser focus order, focus trapping, accessible names, or motion behavior from source text; those behaviors belong to the browser and focused unit gates.",
+    "The browser gate uses Playwright-managed Chromium and Axe on the route states and modal surfaces it explicitly exercises. It does not claim physical-device, operating-system screen-reader, other-browser-engine, or deployed reverse-proxy parity.",
+    "Automated Axe checks cannot prove complete conformance or substitute for assistive-technology and manual usability review. Only serious and critical violations are blocking; lower-impact findings are outside this gate's acceptance threshold. The evidence is limited to the configured rules, rendered fixtures, viewports, and interaction paths.",
+    "Reduced-motion evidence covers CSS media-query behavior and the exercised chart interactions. It does not assert an operating-system preference outside Chromium emulation or animation code that is not reached by the gate.",
+    "WEB-09 retains final visual-fidelity and neutral-branding sign-off. WEB-08 verifies executable accessibility boundaries without claiming that later visual acceptance."
+  ]
+}

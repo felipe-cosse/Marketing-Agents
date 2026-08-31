@@ -106,7 +106,7 @@ Allowed status values:
 | WEB-05 | Approval queue. | 12 | Approval feature | UI/Email tests | verified |
 | WEB-06 | Run timeline and artifact viewer. | 12 | Runs/artifacts features | Unit/witness/browser timeline/XSS tests | verified |
 | WEB-07 | Responsive list/tree fallback. | 12 | OrgTreeFallback | Mobile Playwright test | verified |
-| WEB-08 | Keyboard/focus/labels/contrast/reduced motion. | 12, 14 | Accessibility implementation | Axe + keyboard/browser tests | planned |
+| WEB-08 | Keyboard/focus/labels/contrast/reduced motion. | 12, 14 | Accessibility implementation | Axe + keyboard/browser tests | verified |
 | WEB-09 | Preserve hierarchy without third-party branding. | 00, 12 | Tokens/neutral icons | Visual/manual/no-remote-assets check | planned |
 
 ## Demos and guardrails
