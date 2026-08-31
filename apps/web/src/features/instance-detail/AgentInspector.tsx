@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import type { AgentInstanceDetail } from "../../api/agentInstanceDetail";
 import type { AgentInstance } from "../org-chart/model";
@@ -22,6 +22,7 @@ export interface AgentInspectorProps {
   readonly error: Error | null;
   readonly onRetry: () => void;
   readonly onClose: () => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly dryRunControls?: ReactNode;
   readonly configurationControls?: ReactNode;
   readonly id?: string;
@@ -113,12 +114,14 @@ function DetailContent({
   functionName,
   dryRunControls,
   configurationControls,
+  onOpenRun,
 }: {
   readonly detail: AgentInstanceDetail;
   readonly departmentName: string;
   readonly functionName: string;
   readonly dryRunControls: ReactNode | undefined;
   readonly configurationControls: ReactNode | undefined;
+  readonly onOpenRun: (runId: string) => void;
 }): React.JSX.Element {
   const { instance, template } = detail;
   const connectors = Object.values(instance.connectorBindings).toSorted(
@@ -407,7 +410,26 @@ function DetailContent({
                       {formatTimestamp(run.updatedAt)}
                     </time>
                     <span>
-                      {run.id} · {run.workflowId}
+                      <a
+                        href={`/runs/${encodeURIComponent(run.id)}`}
+                        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+                          if (
+                            event.defaultPrevented ||
+                            event.button !== 0 ||
+                            event.metaKey ||
+                            event.ctrlKey ||
+                            event.shiftKey ||
+                            event.altKey
+                          ) {
+                            return;
+                          }
+                          event.preventDefault();
+                          onOpenRun(run.id);
+                        }}
+                      >
+                        {run.id}
+                      </a>{" "}
+                      · {run.workflowId}
                     </span>
                     <span>
                       Created {formatTimestamp(run.createdAt)} · Updated{" "}
@@ -433,6 +455,7 @@ export function AgentInspector({
   error,
   onRetry,
   onClose,
+  onOpenRun,
   dryRunControls,
   configurationControls,
   id = DEFAULT_INSPECTOR_ID,
@@ -536,6 +559,7 @@ export function AgentInspector({
             functionName={functionName}
             dryRunControls={dryRunControls}
             configurationControls={configurationControls}
+            onOpenRun={onOpenRun}
           />
         ) : null}
 

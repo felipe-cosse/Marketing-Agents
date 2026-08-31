@@ -6,6 +6,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
+import { useBeforeUnload, useBlocker, useNavigate } from "react-router-dom";
 
 import {
   CATALOG_HIERARCHY_QUERY_KEY,
@@ -98,8 +99,35 @@ interface LoadedOrgChartProps {
 }
 
 interface PendingSelection {
+  readonly kind: "selection";
   readonly instanceId: string | null;
   readonly restoreFocusId: string | null;
+}
+
+interface PendingBlockedNavigation {
+  readonly kind: "blocked";
+  readonly label: string;
+}
+
+type PendingDestination = PendingSelection | PendingBlockedNavigation;
+
+function runPath(runId: string): string {
+  return `/runs/${encodeURIComponent(runId)}`;
+}
+
+function blockedNavigationLabel(pathname: string): string {
+  if (pathname === "/runs") return "open Runs & audit";
+  if (pathname.startsWith("/runs/")) {
+    const encodedRunId = pathname.slice("/runs/".length);
+    try {
+      return `open run ${decodeURIComponent(encodedRunId)}`;
+    } catch {
+      return "open another run";
+    }
+  }
+  if (pathname === "/approvals") return "open Approvals";
+  if (pathname.startsWith("/artifacts/")) return "open an artifact";
+  return "leave this editor";
 }
 
 function focusInstanceCard(instanceId: string): boolean {
@@ -111,6 +139,7 @@ function focusInstanceCard(instanceId: string): boolean {
 }
 
 function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
+  const navigate = useNavigate();
   const expectedInstanceIds = useMemo(
     () => instanceIds(hierarchy),
     [hierarchy],
@@ -141,8 +170,28 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   );
   const [configurationDirty, setConfigurationDirty] = useState(false);
   const [dryRunDirty, setDryRunDirty] = useState(false);
-  const [pendingSelection, setPendingSelection] =
-    useState<PendingSelection | null>(null);
+  const [pendingDestination, setPendingDestination] =
+    useState<PendingDestination | null>(null);
+  const hasUnsavedChanges = configurationDirty || dryRunDirty;
+  const navigationBlocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasUnsavedChanges && currentLocation.pathname !== nextLocation.pathname,
+  );
+  const preventDirtyUnload = useCallback(
+    (event: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) event.preventDefault();
+    },
+    [hasUnsavedChanges],
+  );
+  useBeforeUnload(preventDirtyUnload, { capture: true });
+  const blockedDestination: PendingBlockedNavigation | null =
+    navigationBlocker.state === "blocked"
+      ? {
+          kind: "blocked",
+          label: blockedNavigationLabel(navigationBlocker.location.pathname),
+        }
+      : null;
+  const activeDestination = pendingDestination ?? blockedDestination;
   const searchRef = useRef<HTMLInputElement>(null);
   const options = useMemo(() => catalogFilterOptions(hierarchy), [hierarchy]);
   const runtimeStatusByInstanceId = useMemo(
@@ -174,7 +223,8 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
     (instanceId: string | null) => {
       if (instanceId === selectedInstanceId) return;
       if (configurationDirty || dryRunDirty) {
-        setPendingSelection({
+        setPendingDestination({
+          kind: "selection",
           instanceId,
           restoreFocusId: instanceId === null ? selectedInstanceId : null,
         });
@@ -272,7 +322,8 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const closeInspector = useCallback(() => {
     if (selectedInstanceId === null) return;
     if (configurationDirty || dryRunDirty) {
-      setPendingSelection({
+      setPendingDestination({
+        kind: "selection",
         instanceId: null,
         restoreFocusId: selectedInstanceId,
       });
@@ -284,8 +335,20 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       if (!focusInstanceCard(restoreFocusId)) searchRef.current?.focus();
     });
   }, [configurationDirty, dryRunDirty, selectedInstanceId]);
+  const openRun = useCallback(
+    (runId: string) => {
+      void navigate(runPath(runId));
+    },
+    [navigate],
+  );
   const keepEditing = useCallback(() => {
-    setPendingSelection(null);
+    if (
+      activeDestination?.kind === "blocked" &&
+      navigationBlocker.state === "blocked"
+    ) {
+      navigationBlocker.reset();
+    }
+    setPendingDestination(null);
     requestAnimationFrame(() => {
       const inspector = document.querySelector("#agent-inspector");
       const editorSelector =
@@ -302,20 +365,24 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       );
       (editorTarget ?? fallback)?.focus();
     });
-  }, [configurationDirty, dryRunDirty]);
+  }, [activeDestination, configurationDirty, dryRunDirty, navigationBlocker]);
   const discardAndContinue = useCallback(() => {
-    if (pendingSelection === null) return;
-    const { instanceId, restoreFocusId } = pendingSelection;
-    setPendingSelection(null);
+    if (activeDestination === null) return;
+    setPendingDestination(null);
     setConfigurationDirty(false);
     setDryRunDirty(false);
+    if (activeDestination.kind === "blocked") {
+      if (navigationBlocker.state === "blocked") navigationBlocker.proceed();
+      return;
+    }
+    const { instanceId, restoreFocusId } = activeDestination;
     setSelectedInstanceId(instanceId);
     requestAnimationFrame(() => {
       const focusId = instanceId ?? restoreFocusId;
       if (focusId !== null && focusInstanceCard(focusId)) return;
       searchRef.current?.focus();
     });
-  }, [pendingSelection]);
+  }, [activeDestination, navigationBlocker]);
   const handleWorkspaceKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
   ): void => {
@@ -324,7 +391,7 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       event.key !== "Escape" ||
       event.defaultPrevented ||
       selectedInstanceId === null ||
-      pendingSelection !== null ||
+      activeDestination !== null ||
       eventTarget?.closest('[role="dialog"], [role="alertdialog"]') !== null
     ) {
       return;
@@ -380,12 +447,13 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
             selectedAgent.instance.id,
           )}
           onClose={closeInspector}
+          onOpenRun={openRun}
           onConfigurationDirtyChange={setConfigurationDirty}
           onDryRunDirtyChange={setDryRunDirty}
         />
       )}
       <UnsavedConfigurationDialog
-        open={pendingSelection !== null}
+        open={activeDestination !== null}
         changeKind={
           configurationDirty && dryRunDirty
             ? "multiple"
@@ -394,9 +462,11 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
               : "configuration"
         }
         destinationLabel={
-          pendingSelection?.instanceId === null
-            ? "close this inspector"
-            : "open another agent"
+          activeDestination?.kind === "blocked"
+            ? activeDestination.label
+            : activeDestination?.instanceId === null
+              ? "close this inspector"
+              : "open another agent"
         }
         onDiscard={discardAndContinue}
         onKeepEditing={keepEditing}

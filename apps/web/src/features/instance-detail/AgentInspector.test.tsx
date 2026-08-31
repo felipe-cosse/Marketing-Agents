@@ -200,6 +200,7 @@ function renderInspector(
       error={null}
       onRetry={vi.fn()}
       onClose={vi.fn()}
+      onOpenRun={vi.fn()}
       {...overrides}
     />,
   );
@@ -232,6 +233,7 @@ describe("WEB-03 AgentInspector", () => {
         error={new Error("The local detail API is unavailable.")}
         onRetry={retry}
         onClose={vi.fn()}
+        onOpenRun={vi.fn()}
       />,
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -270,11 +272,11 @@ describe("WEB-03 AgentInspector", () => {
     expect(screen.getByText("0 9 * * 1", { selector: "dd" })).toBeVisible();
     expect(screen.getByText("Newsletter: Subscribe")).toBeVisible();
     expect(screen.getByText("Human external write")).toBeVisible();
-    expect(
-      screen.getByText(
-        "run.web-03.01 · workflow.email.newsletter-subscription",
-      ),
-    ).toBeVisible();
+    const recentRunLink = screen.getByRole("link", { name: "run.web-03.01" });
+    expect(recentRunLink).toHaveAttribute("href", "/runs/run.web-03.01");
+    expect(recentRunLink.parentElement).toHaveTextContent(
+      "run.web-03.01 · workflow.email.newsletter-subscription",
+    );
 
     const editor = screen.getByRole("form", {
       name: "Deployment configuration editor",
@@ -291,7 +293,7 @@ describe("WEB-03 AgentInspector", () => {
     expect(document.querySelector("script")).toBeNull();
     expect(screen.queryByText("Run with mocks")).toBeNull();
     expect(screen.queryByText("View all")).toBeNull();
-    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getAllByRole("link")).toEqual([recentRunLink]);
   });
 
   it("distinguishes unavailable runtime data from a confirmed never-run state", () => {
@@ -316,6 +318,7 @@ describe("WEB-03 AgentInspector", () => {
         error={null}
         onRetry={vi.fn()}
         onClose={vi.fn()}
+        onOpenRun={vi.fn()}
       />,
     );
     expect(
@@ -348,6 +351,18 @@ describe("WEB-03 AgentInspector", () => {
         name: "Course Cohort Onboarder · Instance 2 of 2",
       }),
     ).toBeVisible();
+  });
+
+  it("keeps recent runs deep-linkable and delegates same-tab navigation", async () => {
+    const openRun = vi.fn();
+    renderInspector({ onOpenRun: openRun });
+
+    const link = screen.getByRole("link", { name: "run.web-03.01" });
+    expect(link).toHaveAttribute("href", "/runs/run.web-03.01");
+    await userEvent.setup().click(link);
+
+    expect(openRun).toHaveBeenCalledOnce();
+    expect(openRun).toHaveBeenCalledWith("run.web-03.01");
   });
 
   it("closes from its button and Escape without exposing inert actions", async () => {
