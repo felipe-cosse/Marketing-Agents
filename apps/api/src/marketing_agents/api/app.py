@@ -17,6 +17,7 @@ from marketing_agents.api.dependencies import (
     ApprovalResourceExecutor,
     ArtifactResourceExecutor,
     AuditResourceExecutor,
+    DemoScenarioRegistryExecutor,
     InstanceConfigurationExecutor,
     ManualDryRunExecutor,
     RunResourceExecutor,
@@ -38,6 +39,10 @@ from marketing_agents.api.routes.artifacts import router as artifacts_router
 from marketing_agents.api.routes.artifacts import run_router as run_artifacts_router
 from marketing_agents.api.routes.audit_events import router as audit_events_router
 from marketing_agents.api.routes.catalog import router as catalog_router
+from marketing_agents.api.routes.demo_scenarios import (
+    DemoScenarioRequestBoundsMiddleware,
+)
+from marketing_agents.api.routes.demo_scenarios import router as demo_scenarios_router
 from marketing_agents.api.routes.health import router as health_router
 from marketing_agents.api.routes.instance_configuration import (
     InstanceConfigurationRequestBoundsMiddleware,
@@ -60,6 +65,7 @@ from marketing_agents.api.schemas.problems import ProblemDetails
 from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
+from marketing_agents.demos import build_demo_scenario_registry
 from marketing_agents.infrastructure.adapters.identity import LocalIdentityProvider
 from marketing_agents.infrastructure.readiness import LocalReadinessProbe
 
@@ -77,6 +83,7 @@ def create_app(
     run_resource_service: RunResourceExecutor | None = None,
     artifact_resource_service: ArtifactResourceExecutor | None = None,
     audit_resource_service: AuditResourceExecutor | None = None,
+    demo_scenario_registry: DemoScenarioRegistryExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -103,6 +110,11 @@ def create_app(
     application.state.approval_resource_service = approval_resource_service
     application.state.instance_configuration_service = instance_configuration_service
     application.state.manual_dry_run_service = manual_dry_run_service
+    application.state.demo_scenario_registry = (
+        demo_scenario_registry
+        if demo_scenario_registry is not None
+        else build_demo_scenario_registry()
+    )
     application.state.webhook_admission_service = webhook_admission_service
     application.state.run_resource_service = run_resource_service
     application.state.artifact_resource_service = artifact_resource_service
@@ -125,6 +137,7 @@ def create_app(
     application.add_exception_handler(StarletteHTTPException, safe_http_exception)
     application.add_exception_handler(Exception, safe_unhandled_exception)
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
+    application.add_middleware(DemoScenarioRequestBoundsMiddleware)
     application.add_middleware(InstanceConfigurationRequestBoundsMiddleware)
     application.add_middleware(WebhookRequestBoundsMiddleware)
     application.add_middleware(ApprovalPrivateResponseMiddleware)
@@ -138,6 +151,7 @@ def create_app(
     application.include_router(session_router)
     application.include_router(instance_configuration_router)
     application.include_router(manual_work_router)
+    application.include_router(demo_scenarios_router)
     application.include_router(webhooks_router)
     application.include_router(instance_status_router)
     application.include_router(catalog_router)

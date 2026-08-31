@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import inspect
-from typing import Annotated, Protocol, cast
+from collections.abc import Mapping
+from typing import Annotated, Any, Protocol, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import SecretStr
@@ -84,6 +85,7 @@ from marketing_agents.application.services.webhook_intake import (
     WebhookAdmissionCommand,
     WebhookAdmissionResult,
 )
+from marketing_agents.demos import DemoScenarioDefinition
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
 
@@ -178,6 +180,18 @@ class ManualDryRunExecutor(Protocol):
         *,
         principal: AuthenticatedPrincipal,
     ) -> ManualDryRunResult: ...
+
+
+class DemoScenarioRegistryExecutor(Protocol):
+    def list(self) -> tuple[DemoScenarioDefinition, ...]: ...
+
+    def get(self, scenario_id: str) -> DemoScenarioDefinition: ...
+
+    def resolve_input(
+        self,
+        scenario_id: str,
+        overrides: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]: ...
 
 
 class WebhookAdmissionExecutor(Protocol):
@@ -335,6 +349,28 @@ def get_manual_dry_run_executor(request: Request) -> ManualDryRunExecutor:
             detail="manual dry-run service unavailable",
         )
     return cast(ManualDryRunExecutor, executor)
+
+
+def get_demo_scenario_registry(request: Request) -> DemoScenarioRegistryExecutor:
+    """Resolve only a complete synchronous immutable demo registry seam."""
+
+    try:
+        registry = getattr(request.app.state, "demo_scenario_registry", None)
+        methods = tuple(getattr(registry, name, None) for name in ("list", "get", "resolve_input"))
+    except Exception:
+        registry = None
+        methods = ()
+    if (
+        registry is None
+        or len(methods) != 3
+        or any(not callable(method) or inspect.iscoroutinefunction(method) for method in methods)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "demo_scenario_registry_unavailable"},
+            headers={"Cache-Control": "no-store", "Vary": "Authorization"},
+        )
+    return cast(DemoScenarioRegistryExecutor, registry)
 
 
 def get_webhook_admission_executor(request: Request) -> WebhookAdmissionExecutor:

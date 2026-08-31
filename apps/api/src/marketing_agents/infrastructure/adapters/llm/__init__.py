@@ -17,6 +17,10 @@ from marketing_agents.infrastructure.adapters.llm.factory import (
     ValidatingRealLLMProvider,
     build_llm_provider,
 )
+from marketing_agents.infrastructure.adapters.llm.read_adapter import (
+    LLMReadBinding,
+    StructuredLLMReadAdapter,
+)
 
 __all__ = [
     "DeterministicLLMProvider",
@@ -25,11 +29,13 @@ __all__ = [
     "DeterministicRendererRegistry",
     "LLMProviderConfigurationError",
     "LLMProviderSettings",
+    "LLMReadBinding",
     "RealLLMProviderFactory",
     "RealLLMProviderRegistry",
     "RealProviderRegistration",
     "RendererKey",
     "RendererRegistration",
+    "StructuredLLMReadAdapter",
     "ValidatingRealLLMProvider",
     "build_llm_provider",
 ]

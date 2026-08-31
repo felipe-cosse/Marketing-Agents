@@ -1,0 +1,13 @@
+{
+  "idea": "Share how governed AI workflows turn a raw marketing idea into a reviewable draft.",
+  "audience": "Marketing and platform leaders",
+  "tone": "professional",
+  "key_points": [
+    "Treat external content as untrusted data.",
+    "Keep generation separate from publishing authority.",
+    "Persist a traceable artifact for review."
+  ],
+  "source_urls": [
+    "https://example.com/governed-ai"
+  ]
+}

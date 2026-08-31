@@ -12,6 +12,7 @@ import {
   ApprovalPendingCountBadge,
   ApprovalQueuePage,
 } from "../features/approvals";
+import { DemosPage } from "../features/demos";
 import { AgentsIcon } from "../features/org-chart/icons";
 import { OrgChartPage } from "../features/org-chart/OrgChartPage";
 import {
@@ -31,6 +32,7 @@ const SAFE_MODE_ITEMS = [
 function routeLabel(pathname: string): string {
   if (pathname === "/approvals") return "Approvals";
   if (pathname === "/runs") return "Runs and audit";
+  if (pathname === "/demos") return "Demos";
   if (pathname.startsWith("/runs/")) return "Run timeline";
   if (pathname.startsWith("/artifacts/")) return "Artifact viewer";
   return "Organization chart";
@@ -66,6 +68,7 @@ function RouteViewport(): React.JSX.Element {
         <Route path="/" element={<OrgChartPage />} />
         <Route path="/approvals" element={<ApprovalQueuePage />} />
         <Route path="/runs" element={<RunsPage />} />
+        <Route path="/demos" element={<DemosPage />} />
         <Route path="/runs/:runId" element={<RunTimelinePage />} />
         <Route path="/artifacts/:artifactId" element={<ArtifactViewerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -111,7 +114,12 @@ function AppShell(): React.JSX.Element {
           >
             Runs &amp; audit
           </NavLink>
-          <span>Demos unavailable</span>
+          <NavLink
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            to="/demos"
+          >
+            Demos
+          </NavLink>
         </nav>
         <div className="identity-chip">
           <span className="identity-chip__avatar" aria-hidden="true">
