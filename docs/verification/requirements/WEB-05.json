@@ -1,0 +1,152 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-05",
+  "matrix_statement_sha256": "41ad0fd8ae8b399af46a07f39221c4148cb53dd59e70159db8505886be57dacb",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-05.json",
+      "docs/verification/requirements/WEB-05.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/approvals.ts",
+          "apps/web/src/api/approvalRunSafety.ts",
+          "apps/web/src/app/App.tsx",
+          "apps/web/src/features/approvals/ApprovalQueuePage.tsx",
+          "apps/web/src/features/approvals/ApprovalReviewPanel.tsx",
+          "apps/web/src/features/approvals/ApprovalDecisionDialog.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/api/approvals.test.ts",
+          "apps/web/src/api/approvalRunSafety.test.ts",
+          "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx",
+          "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx",
+          "apps/web/e2e/web-05-approvals.spec.ts",
+          "apps/web/scripts/run-web-05-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-authoritative-approval-contract",
+      "type": "contract",
+      "statement": "The queue requests bounded server-side status pages, labels department and action filters as loaded-page projections, and accepts only exact cross-bound list, detail, link, complete lifecycle, pagination, nanosecond-precise timestamp, digest, and recursively bounded redacted-payload contracts. Query keys contain only stable identifiers and filters, never payload, hash, or decision reason data.",
+      "test_refs": [
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 normalizes only the bounded snake_case list projection",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 builds stable non-sensitive list and detail query keys",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 enforces filters, keyset order, cursor truth, and page bounds",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 normalizes the exact detail and recursively bounds redacted payload",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 enforces the complete approval status lifecycle matrix",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > defaults to pending and applies truthful raw loaded-page filters",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > labels truncation and loads another server page without overstating local filters",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > distinguishes loading, empty, unavailable, and lower-bound pending-count states",
+        "apps/web/src/api/approvalRunSafety.test.ts::WEB-05 authoritative approval run safety > WEB-05 exposes a stable run query key without payload, hash, or reason",
+        "apps/web/scripts/run-web-05-witness.mjs::WEB-05 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "exact-action-authoritative-decisions",
+      "type": "negative_control",
+      "statement": "Approve and reject repeat the exact immutable action and send only expected generation and payload hash through the memory-only CSRF boundary. One stale-token retry replays the identical body. Expired, decided, consumed, superseded, or otherwise nonactionable requests are disabled. Success requires the response and refetched identity, generation, hash, decision, and state to agree; conflict is reported after an attempted authoritative refetch.",
+      "test_refs": [
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 accepts only a fully cross-bound authoritative embedded decision",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 approve sends only the two immutable preconditions and does not mutate optimistically",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 reject sends only the two immutable preconditions and does not mutate optimistically",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 refreshes stale CSRF once and replays an identical decision body",
+        "apps/web/src/api/approvals.test.ts::WEB-05 approval API boundary > WEB-05 fails closed on conflict, Location, media type, and response drift",
+        "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx::WEB-05 ApprovalDecisionDialog > repeats immutable safe action detail and renders payload text without HTML",
+        "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx::WEB-05 ApprovalDecisionDialog > focuses Cancel first, traps focus, closes on Escape, and restores its opener",
+        "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx::WEB-05 ApprovalDecisionDialog > disables every lifecycle state that the server reports as nonactionable and explains why",
+        "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx::WEB-05 ApprovalDecisionDialog > disables a pending decision when the local clock reaches its authoritative expiry",
+        "apps/web/src/features/approvals/ApprovalDecisionDialog.test.tsx::WEB-05 ApprovalDecisionDialog > blocks confirmation when an already-open dialog reaches expiry",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > refetches exact detail after a conflict and never presents optimistic success",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > waits for the mutation and authoritative refetch before reporting a recorded decision",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > withholds success when the authoritative refetch drifts from the exact reviewed action",
+        "apps/web/e2e/web-05-approvals.spec.ts::WEB-05 approval queue repeats exact immutable actions and refreshes a coherent authoritative conflict"
+      ]
+    },
+    {
+      "id": "email-two-action-zero-call-proof",
+      "type": "positive",
+      "statement": "Email presents newsletter.subscribe and crm.upsert-contact approvals separately. It displays the zero-mock-connector-call barrier only while a complete, unexpired two-action approval set is cross-bound to an authoritative API-07 mock-execution run whose delivery attempt counts are all zero and receipt, result, and completion facts are absent; partial, stale, malformed, unavailable, or nonzero evidence produces no such claim.",
+      "test_refs": [
+        "apps/web/src/api/approvalRunSafety.test.ts::WEB-05 authoritative approval run safety > WEB-05 projects zero mock connector calls only from API-07 attempt counts",
+        "apps/web/src/api/approvalRunSafety.test.ts::WEB-05 authoritative approval run safety > WEB-05 never claims zero mock calls for attempts, receipts, results, completion, or dry-run facts",
+        "apps/web/src/api/approvalRunSafety.test.ts::WEB-05 authoritative approval run safety > WEB-05 rejects unknown pending bindings, duplicates, and empty transitions",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > withholds the Email zero-call claim when authoritative run evidence is false",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::WEB-05 ApprovalQueuePage > keeps the exact two-action barrier after one approval and rejects semantic drift",
+        "apps/web/e2e/web-05-approvals.spec.ts::WEB-05 approval queue repeats exact immutable actions and refreshes a coherent authoritative conflict",
+        "apps/web/scripts/run-web-05-witness.mjs::WEB-05 dependency-free implementation witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-05-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-05-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-authoritative-approval-contract",
+        "exact-action-authoritative-decisions",
+        "email-two-action-zero-call-proof"
+      ]
+    },
+    {
+      "id": "web-05-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-05-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-authoritative-approval-contract",
+        "exact-action-authoritative-decisions",
+        "email-two-action-zero-call-proof"
+      ]
+    },
+    {
+      "id": "web-05-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-05-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "bounded-authoritative-approval-contract",
+        "exact-action-authoritative-decisions",
+        "email-two-action-zero-call-proof"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/approvals.ts",
+      "apps/web/src/api/approvalRunSafety.ts",
+      "apps/web/src/app/App.tsx",
+      "apps/web/src/features/approvals/*.ts",
+      "apps/web/src/features/approvals/*.tsx"
+    ],
+    "gate_id": "web-05-dependency-free-witness"
+  },
+  "limitations": [
+    "WEB-05 owns the approval queue, exact-action decisions, and Email approval-barrier safety. WEB-06 owns the SPA run timeline and artifact viewer, WEB-07 the narrow semantic tree, and WEB-08 exhaustive accessibility acceptance.",
+    "The review surface links to authoritative run, timeline, step, instance, and external-action/receipt API resources. A dedicated in-app timeline and artifact/receipt viewer does not exist until WEB-06.",
+    "The browser gate uses the production Vite application and real base FastAPI hierarchy boundary. It overlays deterministic same-origin session, approval, decision-conflict, and run-summary responses because DEL-05 still owns default backend service composition.",
+    "The Email zero-call sentence is a current safe-summary proof, not a future execution guarantee. It is withheld unless a complete all-status two-action page, pending bindings, run/action states, attempt counts, and absent receipts/results/completion all agree.",
+    "Client controls are operator UX only. The server remains authoritative for identity, authorization, generation, hash binding, one-time use, expiry, conflicts, dispatch, and connector effects."
+  ]
+}
