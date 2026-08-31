@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -30,6 +31,7 @@ import {
 } from "../../api/instanceConfiguration";
 import type * as InstanceConfigurationApi from "../../api/instanceConfiguration";
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
+import { HIERARCHY_VIEW_MEDIA_QUERY } from "./hierarchyViewMode";
 import { OrgChartPage } from "./OrgChartPage";
 
 vi.mock("../../api/instanceConfiguration", async () => {
@@ -63,6 +65,50 @@ const ADMIN_SESSION: LocalSession = {
 
 const fetchSessionMock = vi.mocked(fetchLocalSession);
 const fetchSchemaMock = vi.mocked(fetchInstanceConfigurationSchema);
+
+interface MatchMediaController {
+  readonly matchMedia: (query: string) => MediaQueryList;
+  readonly setMatches: (matches: boolean) => void;
+}
+
+function installHierarchyMatchMedia(
+  initialMatches: boolean,
+): MatchMediaController {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const mediaQuery = {
+    get matches() {
+      return matches;
+    },
+    media: HIERARCHY_VIEW_MEDIA_QUERY,
+    onchange: null,
+    addEventListener: (
+      type: string,
+      listener: (event: MediaQueryListEvent) => void,
+    ) => {
+      if (type === "change") listeners.add(listener);
+    },
+    removeEventListener: (
+      type: string,
+      listener: (event: MediaQueryListEvent) => void,
+    ) => {
+      if (type === "change") listeners.delete(listener);
+    },
+  } as unknown as MediaQueryList;
+  const controller = {
+    matchMedia: vi.fn(() => mediaQuery),
+    setMatches(nextMatches: boolean) {
+      matches = nextMatches;
+      const event = {
+        matches,
+        media: HIERARCHY_VIEW_MEDIA_QUERY,
+      } as MediaQueryListEvent;
+      for (const listener of listeners) listener(event);
+    },
+  };
+  vi.stubGlobal("matchMedia", controller.matchMedia);
+  return controller;
+}
 
 function configurationSchema(
   instanceId: string,
@@ -311,6 +357,14 @@ function cardById(instanceId: string): HTMLButtonElement {
   return card;
 }
 
+function itemByNodeId(nodeId: string): HTMLButtonElement {
+  const item = document.querySelector<HTMLButtonElement>(
+    `[role="treeitem"][data-node-id="${nodeId}"]`,
+  );
+  if (item === null) throw new Error(`Expected tree item ${nodeId}`);
+  return item;
+}
+
 async function makeConfigurationDirty(
   user: ReturnType<typeof userEvent.setup>,
   value = "Unsaved local override",
@@ -488,7 +542,9 @@ describe("WEB-02 OrgChartPage integration", () => {
         screen.getByRole("searchbox", { name: "Search agents" }),
       ).toHaveFocus(),
     );
-    expect(document.querySelector('[aria-pressed="true"]')).toBeNull();
+    expect(
+      document.querySelector('.agent-card[aria-pressed="true"]'),
+    ).toBeNull();
   });
 
   it("restores pushed filter state through history back and forward", async () => {
@@ -750,7 +806,9 @@ describe("WEB-03 OrgChartPage detail integration", () => {
     await waitFor(() => expect(inspector).not.toBeInTheDocument());
     expect(search).toHaveValue("no matching agent");
     await waitFor(() => expect(search).toHaveFocus());
-    expect(document.querySelector('[aria-pressed="true"]')).toBeNull();
+    expect(
+      document.querySelector('.agent-card[aria-pressed="true"]'),
+    ).toBeNull();
   });
 
   it("loads one complete selected detail, restores focus on close, and conditionally reuses it", async () => {
@@ -824,5 +882,138 @@ describe("WEB-03 OrgChartPage detail integration", () => {
       ),
     ).toBeVisible();
     expect(within(inspector).queryByText("Never run")).toBeNull();
+  });
+});
+
+describe("WEB-07 responsive organization hierarchy", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    resetConfigurationMocks();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("WEB-07 defaults narrow to tree and wide to graph with one mounted representation", async () => {
+    const viewport = installHierarchyMatchMedia(true);
+    installFetch();
+    renderPage();
+    await loaded();
+
+    expect(
+      await screen.findByRole("tree", {
+        name: "Marketing Agents organization tree",
+      }),
+    ).toBeVisible();
+    expect(screen.queryByTestId("org-chart-viewport")).toBeNull();
+    expect(screen.getByRole("button", { name: "Tree view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    act(() => viewport.setMatches(false));
+    await waitFor(() =>
+      expect(screen.getByTestId("org-chart-viewport")).toBeVisible(),
+    );
+    expect(
+      screen.queryByRole("tree", {
+        name: "Marketing Agents organization tree",
+      }),
+    ).toBeNull();
+
+    act(() => viewport.setMatches(true));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tree", {
+          name: "Marketing Agents organization tree",
+        }),
+      ).toBeVisible(),
+    );
+    expect(screen.queryByTestId("org-chart-viewport")).toBeNull();
+  });
+
+  it("WEB-07 preserves selection and viable focus across explicit graph and tree changes", async () => {
+    const viewport = installHierarchyMatchMedia(true);
+    const user = userEvent.setup();
+    installFetch();
+    renderPage();
+    await loaded();
+
+    await user.click(itemByNodeId("func.social-media.new-content"));
+    const treeInstance = itemByNodeId(FIRST_DETAIL_ID);
+    await user.click(treeInstance);
+    await screen.findByRole("complementary", { name: "Agent 1" });
+    expect(treeInstance).toHaveAttribute("aria-selected", "true");
+
+    await user.click(screen.getByRole("button", { name: "Graph view" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("org-chart-viewport")).toBeVisible(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Graph view" })).toHaveFocus(),
+    );
+    expect(cardById(FIRST_DETAIL_ID)).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByRole("tree", {
+        name: "Marketing Agents organization tree",
+      }),
+    ).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Tree view" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tree", {
+          name: "Marketing Agents organization tree",
+        }),
+      ).toBeVisible(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Tree view" })).toHaveFocus(),
+    );
+    expect(itemByNodeId(FIRST_DETAIL_ID)).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByTestId("org-chart-viewport")).toBeNull();
+
+    act(() => viewport.setMatches(false));
+    expect(
+      screen.getByRole("tree", {
+        name: "Marketing Agents organization tree",
+      }),
+    ).toBeVisible();
+  });
+
+  it("WEB-07 restores a safe focus target across automatic representation changes", async () => {
+    const viewport = installHierarchyMatchMedia(false);
+    installFetch();
+    renderPage();
+    await loaded();
+
+    const graphInstance = cardById(FIRST_DETAIL_ID);
+    graphInstance.focus();
+    expect(graphInstance).toHaveFocus();
+
+    act(() => viewport.setMatches(true));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tree", {
+          name: "Marketing Agents organization tree",
+        }),
+      ).toBeVisible(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search agents" }),
+      ).toHaveFocus(),
+    );
+
+    act(() => viewport.setMatches(false));
+    await waitFor(() =>
+      expect(screen.getByTestId("org-chart-viewport")).toBeVisible(),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "Search agents" }),
+      ).toHaveFocus(),
+    );
   });
 });

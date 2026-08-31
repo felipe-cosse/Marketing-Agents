@@ -1,0 +1,146 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-07",
+  "matrix_statement_sha256": "8e679c95862ec2da842f3c1079c0acd107ef5a9a75aeff7f33086563bd5eea8a",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-07.json",
+      "docs/verification/requirements/WEB-07.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/treeModel.ts",
+          "apps/web/src/features/org-chart/hierarchyViewMode.ts",
+          "apps/web/src/features/org-chart/useHierarchyViewMode.ts",
+          "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+          "apps/web/src/features/org-chart/HierarchyViewToggle.tsx",
+          "apps/web/src/features/org-chart/OrgChartPage.tsx",
+          "apps/web/src/styles/global.css"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/org-chart/treeModel.test.ts",
+          "apps/web/src/features/org-chart/hierarchyViewMode.test.ts",
+          "apps/web/src/features/org-chart/useHierarchyViewMode.test.ts",
+          "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+          "apps/web/src/features/org-chart/OrgChartPage.test.tsx",
+          "apps/web/e2e/web-07-responsive-tree.spec.ts",
+          "apps/web/scripts/run-web-07-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "responsive-single-representation",
+      "type": "contract",
+      "statement": "The hierarchy defaults to the graph above the declared 720 CSS-pixel breakpoint and to the semantic tree at or below it, honors a deliberate in-memory graph/tree override, restores focus when switching, and conditionally mounts exactly one interactive hierarchy representation over the same filtered source projection.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/hierarchyViewMode.test.ts::WEB-07 resolves automatic and explicit hierarchy view modes without browser state",
+        "apps/web/src/features/org-chart/useHierarchyViewMode.test.ts::WEB-07 follows matchMedia changes while automatic mode remains active",
+        "apps/web/src/features/org-chart/useHierarchyViewMode.test.ts::WEB-07 retains an explicit override in component memory across viewport changes",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-07 defaults narrow to tree and wide to graph with one mounted representation",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-07 preserves selection and viable focus across explicit graph and tree changes",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts::WEB-07 responsive tree and graph journey",
+        "apps/web/scripts/run-web-07-witness.mjs::WEB-07 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "complete-operable-semantic-tree",
+      "type": "positive",
+      "statement": "The fallback builds the exact source-ordered 1/5/12/43 root, department, function, and instance tree with stable level, position, set-size, expansion, and deployment metadata. One roving tab stop implements previous/next, parent/collapse, child/expand, Home/End, selection, slash-to-search, and normalized wrapping typeahead.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/treeModel.test.ts::WEB-07 creates the exact 1/5/12/43 source-ordered tree with stable ARIA metadata",
+        "apps/web/src/features/org-chart/treeModel.test.ts::WEB-07 defaults to root and department expansion and fully expands to 61 visible nodes",
+        "apps/web/src/features/org-chart/treeModel.test.ts::WEB-07 rebuilds filtered projections with only their retained ancestor chain",
+        "apps/web/src/features/org-chart/treeModel.test.ts::WEB-07 resolves previous next parent child Home and End navigation targets",
+        "apps/web/src/features/org-chart/treeModel.test.ts::WEB-07 wraps normalized printable typeahead through visible source order",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 exposes exact source-ordered ARIA metadata with one roving tab stop",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 expands branches, preserves duplicate ordinals, and selects each instance independently",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 implements arrows Home End activation typeahead and slash search focus",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 auto-expands retained ancestors so filtered instances stay exposed",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts::WEB-07 responsive tree and graph journey",
+        "apps/web/scripts/run-web-07-witness.mjs::WEB-07 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "mobile-control-surface-without-overflow",
+      "type": "journey",
+      "statement": "At the mobile acceptance viewport, search and labeled filters remain usable, tree rows and controls provide at least 44 by 44 CSS-pixel targets, selected-agent details use a full-width sheet, the approval queue stacks into one contained column, application navigation and the local-identity warning remain present, and neither exercised page nor its active control surface introduces horizontal overflow.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 exposes exact source-ordered ARIA metadata with one roving tab stop",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::WEB-07 implements arrows Home End activation typeahead and slash search focus",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-07 defaults narrow to tree and wide to graph with one mounted representation",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx::WEB-07 preserves selection and viable focus across explicit graph and tree changes",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts::WEB-07 responsive tree and graph journey"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-07-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-07-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "responsive-single-representation",
+        "complete-operable-semantic-tree",
+        "mobile-control-surface-without-overflow"
+      ]
+    },
+    {
+      "id": "web-07-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-07-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "responsive-single-representation",
+        "complete-operable-semantic-tree"
+      ]
+    },
+    {
+      "id": "web-07-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-07-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "responsive-single-representation",
+        "complete-operable-semantic-tree",
+        "mobile-control-surface-without-overflow"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/features/org-chart/treeModel.ts",
+      "apps/web/src/features/org-chart/hierarchyViewMode.ts",
+      "apps/web/src/features/org-chart/useHierarchyViewMode.ts",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/HierarchyViewToggle.tsx",
+      "apps/web/src/features/org-chart/OrgChartPage.tsx"
+    ],
+    "gate_id": "web-07-dependency-free-witness"
+  },
+  "limitations": [
+    "The browser gate uses Playwright-managed Chromium viewport emulation. It does not claim physical-device input, browser-engine parity, operating-system screen-reader parity, or deployed reverse-proxy behavior.",
+    "WEB-07 implements and tests the narrow semantic-tree keyboard model, focus transfer, touch sizing, sheets, and overflow boundary. WEB-08 retains exhaustive axe, contrast, reduced-motion, 200-percent reflow, and cross-route accessibility acceptance.",
+    "The explicit graph/tree preference is intentionally component-memory-only. It is not written to browser storage, the URL, analytics, or a server profile and resets after the organization-chart page is remounted.",
+    "Browser evidence uses the production Vite application and the real read-only local hierarchy, status, and detail boundaries. It performs no mutations and never exercises a provider, connector, or non-loopback service.",
+    "WEB-09 retains final visual-fidelity and neutral-branding sign-off. WEB-07 verifies responsive composition and operability without claiming that later aesthetic acceptance."
+  ]
+}

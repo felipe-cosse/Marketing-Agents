@@ -5,7 +5,7 @@
 html,
 body,
 #root {
-  min-width: 960px;
+  min-width: 0;
   min-height: 640px;
   height: 100%;
   margin: 0;
@@ -51,7 +51,9 @@ a:focus-visible,
 
 .app-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 64px 38px minmax(0, 1fr);
+  min-width: 0;
   height: 100%;
   background: var(--color-canvas);
 }
@@ -205,17 +207,25 @@ a:focus-visible,
 
 .workspace {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
   min-height: 0;
   padding: 0 24px 22px;
 }
 
 .workspace-heading {
   display: flex;
+  gap: 16px;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   min-height: 94px;
   padding: 14px 2px 12px;
+}
+
+.workspace-heading > div:first-child {
+  min-width: 0;
 }
 
 .workspace-heading h1,
@@ -245,6 +255,7 @@ a:focus-visible,
 }
 
 .catalog-version {
+  flex: 0 0 auto;
   min-width: 100px;
   padding: 8px 11px;
   text-align: right;
@@ -256,6 +267,184 @@ a:focus-visible,
 .catalog-version span,
 .catalog-version strong {
   display: block;
+}
+
+@media (min-width: 721px) and (max-width: 980px) {
+  .topbar {
+    grid-template-columns: minmax(0, 220px) minmax(0, 1fr) minmax(0, 148px);
+    padding: 0 14px;
+  }
+
+  .topbar > * {
+    min-width: 0;
+  }
+
+  .primary-navigation {
+    gap: 14px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .primary-navigation::-webkit-scrollbar {
+    display: none;
+  }
+
+  .identity-chip {
+    max-width: 148px;
+    overflow: hidden;
+  }
+
+  .identity-chip > span:last-child {
+    min-width: 0;
+  }
+
+  .identity-chip strong,
+  .identity-chip small {
+    overflow-wrap: anywhere;
+  }
+
+  .safe-mode {
+    gap: 12px;
+    padding: 0 14px;
+  }
+
+  .safe-mode ul {
+    gap: 10px;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .safe-mode ul::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  html,
+  body,
+  #root {
+    min-height: 0;
+  }
+
+  .app-shell {
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100dvh;
+  }
+
+  .topbar {
+    grid-template-areas:
+      "brand identity"
+      "navigation navigation";
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 56px 48px;
+    padding: 0 12px;
+  }
+
+  .brand-mark {
+    grid-area: brand;
+  }
+
+  .brand-mark__icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .identity-chip {
+    grid-area: identity;
+    gap: 7px;
+    max-width: 158px;
+  }
+
+  .identity-chip__avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .identity-chip strong,
+  .identity-chip small {
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+  }
+
+  .primary-navigation {
+    grid-area: navigation;
+    gap: 22px;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .primary-navigation::-webkit-scrollbar {
+    display: none;
+  }
+
+  .primary-navigation a,
+  .primary-navigation span {
+    min-height: 44px;
+  }
+
+  .safe-mode {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 7px 12px 8px;
+  }
+
+  .safe-mode > strong {
+    min-height: 20px;
+  }
+
+  .safe-mode ul {
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    min-width: 0;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .workspace {
+    min-width: 0;
+    padding: 0 12px 12px;
+    overflow: hidden;
+  }
+
+  .workspace-heading {
+    gap: 10px;
+    min-width: 0;
+    min-height: 88px;
+    padding: 10px 0 9px;
+  }
+
+  .workspace-heading > div:first-child {
+    min-width: 0;
+  }
+
+  .workspace-heading h1 {
+    font-size: 19px;
+  }
+
+  .workspace-heading p:not(.eyebrow) {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 11px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .catalog-version {
+    flex: 0 0 auto;
+    min-width: 74px;
+    padding: 7px 8px;
+    font-size: 10px;
+  }
 }
 
 .catalog-version span {
