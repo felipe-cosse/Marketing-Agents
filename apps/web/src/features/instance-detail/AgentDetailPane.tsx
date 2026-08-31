@@ -19,6 +19,7 @@ interface AgentDetailPaneProps {
   readonly selected: SelectedAgentContext;
   readonly runtimeStatus: InstanceRuntimeStatus | undefined;
   readonly onClose: () => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly onConfigurationDirtyChange: (dirty: boolean) => void;
   readonly onDryRunDirtyChange: (dirty: boolean) => void;
 }
@@ -62,6 +63,7 @@ export function AgentDetailPane({
   selected,
   runtimeStatus,
   onClose,
+  onOpenRun,
   onConfigurationDirtyChange,
   onDryRunDirtyChange,
 }: AgentDetailPaneProps): React.JSX.Element {
@@ -137,6 +139,7 @@ export function AgentDetailPane({
       error={detailQuery.error}
       onRetry={() => void refreshDetail()}
       onClose={onClose}
+      onOpenRun={onOpenRun}
       dryRunControls={
         detailQuery.data === undefined ? undefined : (
           <DryRunPanel

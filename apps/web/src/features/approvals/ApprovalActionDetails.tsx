@@ -61,20 +61,32 @@ export function ApprovalActionDetails({
           <a href={approval.instanceUrl}>{approval.instanceId}</a>
         </Detail>
         <Detail label="Run">
-          <a href={approval.runUrl}>{approval.runId}</a>
+          <a href={`/runs/${encodeURIComponent(approval.runId)}`}>
+            {approval.runId}
+          </a>
         </Detail>
         <Detail label="Run timeline">
-          <a href={`${approval.runUrl}/timeline`}>
-            Open authoritative timeline
+          <a
+            href={`/runs/${encodeURIComponent(approval.runId)}#timeline-title`}
+          >
+            Open sequence-ordered timeline
           </a>
         </Detail>
         <Detail label="Step">
-          <a href={approval.stepUrl}>{approval.stepId}</a>
+          <a
+            href={`/runs/${encodeURIComponent(approval.runId)}#step-${encodeURIComponent(approval.stepId)}`}
+          >
+            {approval.stepId}
+          </a>
         </Detail>
         {!compact ? (
           <>
             <Detail label="External action / receipt">
-              <a href={approval.actionUrl}>{approval.actionId}</a>
+              <a
+                href={`/runs/${encodeURIComponent(approval.runId)}#action-${encodeURIComponent(approval.actionId)}`}
+              >
+                {approval.actionId}
+              </a>
             </Detail>
             <Detail label="Capability">
               <code>{approval.capabilityId}</code>

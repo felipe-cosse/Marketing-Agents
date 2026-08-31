@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
 
 import {
   ApprovalPendingCountBadge,
@@ -6,6 +6,11 @@ import {
 } from "../features/approvals";
 import { AgentsIcon } from "../features/org-chart/icons";
 import { OrgChartPage } from "../features/org-chart/OrgChartPage";
+import {
+  ArtifactViewerPage,
+  RunsPage,
+  RunTimelinePage,
+} from "../features/runs";
 
 const SAFE_MODE_ITEMS = [
   "Local environment",
@@ -18,7 +23,7 @@ function AppShell(): React.JSX.Element {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand-mark" href="/" aria-label="Marketing Agents home">
+        <Link className="brand-mark" to="/" aria-label="Marketing Agents home">
           <span className="brand-mark__icon">
             <AgentsIcon />
           </span>
@@ -26,7 +31,7 @@ function AppShell(): React.JSX.Element {
             <strong>Marketing Agents</strong>
             <small>Local control surface</small>
           </span>
-        </a>
+        </Link>
         <nav className="primary-navigation" aria-label="Primary navigation">
           <NavLink
             className={({ isActive }) => (isActive ? "is-active" : undefined)}
@@ -42,7 +47,12 @@ function AppShell(): React.JSX.Element {
             Approvals
             <ApprovalPendingCountBadge />
           </NavLink>
-          <span>Runs &amp; audit</span>
+          <NavLink
+            className={({ isActive }) => (isActive ? "is-active" : undefined)}
+            to="/runs"
+          >
+            Runs &amp; audit
+          </NavLink>
           <span>Demos</span>
         </nav>
         <div className="identity-chip">
@@ -71,6 +81,9 @@ function AppShell(): React.JSX.Element {
       <Routes>
         <Route path="/" element={<OrgChartPage />} />
         <Route path="/approvals" element={<ApprovalQueuePage />} />
+        <Route path="/runs" element={<RunsPage />} />
+        <Route path="/runs/:runId" element={<RunTimelinePage />} />
+        <Route path="/artifacts/:artifactId" element={<ArtifactViewerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

@@ -518,7 +518,7 @@ describe("WEB-04 DryRunPanel", () => {
     expect(screen.getByText("run.web04.01")).toBeVisible();
     expect(
       screen.getByRole("link", { name: "Open accepted run resource" }),
-    ).toHaveAttribute("href", RECEIPT.runUrl);
+    ).toHaveAttribute("href", `/runs/${encodeURIComponent(RECEIPT.runId)}`);
     expect(
       screen.queryByText(/published|sent|completed/iu),
     ).not.toBeInTheDocument();

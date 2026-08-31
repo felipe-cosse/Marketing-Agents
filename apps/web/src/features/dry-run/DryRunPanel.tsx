@@ -118,7 +118,9 @@ function Receipt({
         <dt>Run ID</dt>
         <dd>{receipt.runId}</dd>
       </dl>
-      <a href={receipt.runUrl}>Open accepted run resource</a>
+      <a href={`/runs/${encodeURIComponent(receipt.runId)}`}>
+        Open accepted run resource
+      </a>
       {refreshWarning ? (
         <p className="dry-run__refresh-warning">
           The request was accepted, but refreshed inspector status is not

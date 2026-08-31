@@ -1,0 +1,159 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "WEB-06",
+  "matrix_statement_sha256": "7b6f8e220a1f8fd862301c5999e91465f48b32300a8dad525f16b532accad8e8",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/**",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/WEB-06.json",
+      "docs/verification/requirements/WEB-06.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/runArtifacts.ts",
+          "apps/web/src/app/App.tsx",
+          "apps/web/src/features/artifacts/*.ts",
+          "apps/web/src/features/artifacts/*.tsx",
+          "apps/web/src/features/runs/*.ts",
+          "apps/web/src/features/runs/*.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/api/runArtifacts.test.ts",
+          "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx",
+          "apps/web/src/features/runs/ArtifactViewerPage.test.tsx",
+          "apps/web/src/features/runs/RunTimelinePage.test.tsx",
+          "apps/web/src/features/runs/timelineModel.test.ts",
+          "apps/web/e2e/web-06-runs-artifacts.spec.ts",
+          "apps/web/scripts/run-web-06-witness.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "bounded-authoritative-run-history",
+      "type": "contract",
+      "statement": "Run detail, timeline, and artifact pages accept only exact API-07 projections bound to the requested identifiers, stable links, bounded cursors and payloads, and strictly increasing unique sequence/keyset order. Timeline pages remain incomplete while a cursor exists; all three active-run polling queries explicitly disable interval refetching in background tabs, back off on error, and stop after an authoritative terminal run state.",
+      "test_refs": [
+        "apps/web/src/features/runs/runListModel.test.ts::WEB-06 run-list page integrity > fails closed on a duplicate run across cursor pages",
+        "apps/web/src/features/runs/runListModel.test.ts::WEB-06 run-list page integrity > fails closed on a cross-page timestamp or ID ordering regression",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 rejects incoherent run terminal authority",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 requires complete connector and WRITE approval snapshots",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 binds sealed steps to the exact selected and routing snapshots",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 rejects step binding-revision and terminal-reason drift",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 rejects invalid limits, cursor families, query fields, and lower/upper drift",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > keeps persisted sequence order across pages",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > fails closed on duplicate, regressing, or cross-run pages",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > keeps artifact keyset order across pages",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > fails closed on duplicate, regressing, or cross-run artifact pages",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > stops terminal polling and backs off after a read error",
+        "apps/web/src/features/runs/RunTimelinePage.test.tsx::WEB-06 RunTimelinePage > loads timeline pages only through the bounded cursor request and appends their persisted order",
+        "apps/web/src/features/runs/RunTimelinePage.test.tsx::WEB-06 RunTimelinePage > focuses a timeline-event fragment after its page resolves",
+        "apps/web/e2e/web-06-runs-artifacts.spec.ts::WEB-06 run timeline reaches terminal state and opens one inert provenance-bound artifact",
+        "apps/web/scripts/run-web-06-witness.mjs::WEB-06 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "inert-redacted-artifact-provenance",
+      "type": "negative_control",
+      "statement": "The artifact viewer renders only the authorized redacted JSON projection, keyed digest, schema, classification, producer, parents, sources, and provider provenance. Structured and escaped JSON use inert React text; Markdown requires an exact trusted catalog mapping, omits images and raw HTML, removes dangerous URLs, bounds rendering work, and cannot issue a remote request merely by rendering.",
+      "test_refs": [
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > renders redacted strings and structured JSON as inert text",
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > syntax-highlights escaped JSON with React text nodes only",
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > uses explicit depth and node caps and handles cycles and accessors without executing them",
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > never infers Markdown from an artifact string",
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > renders only the restricted Markdown subset in explicit Markdown mode",
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > fails closed for dangerous, ambiguous, and credential-bearing URLs",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 rejects backend-impossible artifact provenance",
+        "apps/web/src/features/runs/timelineModel.test.ts::WEB-06 timeline presentation model > enables advisory Markdown only for the exact catalog output schema",
+        "apps/web/src/features/runs/ArtifactViewerPage.test.tsx::WEB-06 ArtifactViewerPage > shows authoritative provenance, schema, digest, provider, and advisory facts and switches to escaped JSON",
+        "apps/web/src/features/runs/ArtifactViewerPage.test.tsx::WEB-06 ArtifactViewerPage > keeps hostile JSON and explicit Markdown inert and permits only hardened HTTP(S) links",
+        "apps/web/e2e/web-06-runs-artifacts.spec.ts::WEB-06 run timeline reaches terminal state and opens one inert provenance-bound artifact",
+        "apps/web/scripts/run-web-06-witness.mjs::WEB-06 dependency-free implementation witness"
+      ]
+    },
+    {
+      "id": "honest-action-receipt-and-advisory-labels",
+      "type": "negative_control",
+      "statement": "The run surface displays exact advisory and mock-delivery labels plus only the action facts API-07 exposes: idempotency support, attempt count, receipt identity, result status, and completion. It does not invent an idempotency key, raw artifact download, receipt-detail endpoint, connector result metadata, or real-delivery claim.",
+      "test_refs": [
+        "apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx::WEB-06 ArtifactPayloadView > renders the exact advisory and mock-delivery labels prominently",
+        "apps/web/src/api/runArtifacts.test.ts::WEB-06 strict run and artifact read boundary > WEB-06 binds external actions to required-idempotency sealed WRITE steps",
+        "apps/web/src/features/runs/RunTimelinePage.test.tsx::WEB-06 RunTimelinePage > presents persisted sequence order, all event families, sealed policy facts, and truthful mock receipt labels",
+        "apps/web/src/features/runs/RunTimelinePage.test.tsx::WEB-06 RunTimelinePage > labels an expired pending approval and withholds its review action",
+        "apps/web/src/features/runs/ArtifactViewerPage.test.tsx::WEB-06 ArtifactViewerPage > shows authoritative provenance, schema, digest, provider, and advisory facts and switches to escaped JSON",
+        "apps/web/e2e/web-06-runs-artifacts.spec.ts::WEB-06 run timeline reaches terminal state and opens one inert provenance-bound artifact",
+        "apps/web/scripts/run-web-06-witness.mjs::WEB-06 dependency-free implementation witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "web-06-unit-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-06-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-authoritative-run-history",
+        "inert-redacted-artifact-provenance",
+        "honest-action-receipt-and-advisory-labels"
+      ]
+    },
+    {
+      "id": "web-06-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-06-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-authoritative-run-history",
+        "inert-redacted-artifact-provenance",
+        "honest-action-receipt-and-advisory-labels"
+      ]
+    },
+    {
+      "id": "web-06-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-web-06-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "bounded-authoritative-run-history",
+        "inert-redacted-artifact-provenance",
+        "honest-action-receipt-and-advisory-labels"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/runArtifacts.ts",
+      "apps/web/src/features/artifacts/artifactPayload.ts",
+      "apps/web/src/features/artifacts/restrictedMarkdownSafety.ts",
+      "apps/web/src/features/runs/RunArtifactsPanel.tsx",
+      "apps/web/src/features/runs/RunTimelinePage.tsx",
+      "apps/web/src/features/runs/artifactPresentation.ts",
+      "apps/web/src/features/runs/timelineModel.ts"
+    ],
+    "gate_id": "web-06-dependency-free-witness"
+  },
+  "limitations": [
+    "API-07 exposes authorized redacted JSON and a keyed digest, not raw artifact bytes, a download URL, a content-type discriminator, or a receipt-detail endpoint. WEB-06 therefore offers no raw download and renders unknown presentation types as structured or escaped data.",
+    "API-07 exposes a step's idempotency-support classification and an external action's receipt identity/status, but never its protected idempotency key or connector result metadata. The UI labels those absences instead of inventing values or links.",
+    "Advisory and Markdown presentation use a closed catalog template/schema mapping because the artifact response has no advisory or presentation discriminator. Arbitrary payload fields cannot opt themselves into Markdown or advisory treatment.",
+    "The browser gate uses the production Vite application and deterministic same-origin API-07 run, timeline, artifact-list, and artifact-detail fixtures. It does not exercise a live worker, provider, connector, raw receipt store, or non-loopback service.",
+    "WEB-07 owns narrow list/tree fallback and WEB-08 owns exhaustive accessibility, contrast, reduced-motion, and axe acceptance. WEB-06 covers semantic headings, textual states, keyboard artifact navigation, focus visibility inherited from the shell, and bounded polling behavior."
+  ]
+}

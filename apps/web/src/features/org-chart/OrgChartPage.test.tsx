@@ -8,7 +8,13 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import {
+  createMemoryRouter,
+  Link,
+  RouterProvider,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -146,7 +152,9 @@ function LocationProbe(): React.JSX.Element {
   const navigate = useNavigate();
   return (
     <div>
+      <output aria-label="Current pathname">{location.pathname}</output>
       <output aria-label="Current search">{location.search}</output>
+      <Link to="/runs">Global runs navigation</Link>
       <button type="button" onClick={() => void navigate(-1)}>
         Back
       </button>
@@ -170,13 +178,28 @@ function Providers({
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
-function renderPage(initialEntry = "/"): ReturnType<typeof render> {
+function renderPage(
+  initialEntry = "/",
+  historyEntries?: readonly string[],
+): ReturnType<typeof render> {
+  const entries = historyEntries ?? [initialEntry];
+  const router = createMemoryRouter(
+    [
+      {
+        path: "*",
+        element: (
+          <>
+            <LocationProbe />
+            <OrgChartPage />
+          </>
+        ),
+      },
+    ],
+    { initialEntries: [...entries], initialIndex: entries.length - 1 },
+  );
   return render(
     <Providers>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <LocationProbe />
-        <OrgChartPage />
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </Providers>,
   );
 }
@@ -588,6 +611,101 @@ describe("WEB-03 OrgChartPage detail integration", () => {
     await waitFor(() => expect(second).toHaveFocus());
     expect(first).toHaveAttribute("aria-pressed", "false");
     expect(second).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("guards recent-run navigation until dirty configuration is kept or discarded", async () => {
+    const user = userEvent.setup();
+    enableConfigurationEditing();
+    installFetch();
+    renderPage();
+    await loaded();
+    await user.click(cardById(FIRST_DETAIL_ID));
+    const { inspector, form, variant } = await makeConfigurationDirty(user);
+    const runLink = within(inspector).getByRole("link", {
+      name: "run.web-03.latest",
+    });
+
+    await user.click(runLink);
+    let dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+      /^\/$/u,
+    );
+    expect(dialog).toHaveTextContent(
+      "will be lost before you open run run.web-03.latest",
+    );
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    );
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(variant).toHaveValue("Unsaved local override");
+    expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+      /^\/$/u,
+    );
+    await waitFor(() =>
+      expect(
+        within(form).getByRole("checkbox", { name: "Deployment enabled" }),
+      ).toHaveFocus(),
+    );
+
+    await user.click(runLink);
+    dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard changes" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+        "/runs/run.web-03.latest",
+      ),
+    );
+  });
+
+  it("blocks global, history, and unload navigation while editor state is dirty", async () => {
+    const user = userEvent.setup();
+    enableConfigurationEditing();
+    installFetch();
+    renderPage("/", ["/runs", "/"]);
+    await loaded();
+    await user.click(cardById(FIRST_DETAIL_ID));
+    const { variant } = await makeConfigurationDirty(user);
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    let dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    expect(dialog).toHaveTextContent(
+      "will be lost before you open Runs & audit",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Keep editing" }),
+    );
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(variant).toHaveValue("Unsaved local override");
+    expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+      /^\/$/u,
+    );
+
+    await user.click(
+      screen.getByRole("link", { name: "Global runs navigation" }),
+    );
+    dialog = await screen.findByRole("alertdialog", {
+      name: "Discard configuration changes?",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Discard changes" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+        "/runs",
+      ),
+    );
   });
 
   it("keeps a filtered-out dirty editor usable and can discard on the next filter transition", async () => {
