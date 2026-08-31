@@ -13,15 +13,27 @@ from marketing_agents.application.policies.runtime_guard import (
 from marketing_agents.application.ports.manual_work import (
     ManualAdmissionBinding,
     ManualAdmissionResolutionError,
+    ManualIncomingWorkValidator,
 )
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services.incoming_work_validation import (
     CampaignBriefPolicy,
     ConfiguredIncomingTrigger,
+    IncomingWorkValidationError,
     IncomingWorkValidator,
+    ValidatedIncomingWork,
     WorkflowAdmissionDefinition,
 )
 from marketing_agents.application.services.manual_work_intake import ManualDryRunCommand
+from marketing_agents.demos import (
+    DEMO_SCENARIOS,
+    DemoScenarioInputError,
+    DemoScenarioRegistry,
+    DemoScenarioRegistryError,
+)
+from marketing_agents.demos.contracts import DemoScenarioDefinition
+from marketing_agents.domain.admission import AdmissionEnvelope
+from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.enums import TriggerKind, WorkMode
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
 from marketing_agents.domain.validation import require_digest, require_id
@@ -77,6 +89,37 @@ class _EffectiveManualInstance:
     configuration_revision: int
 
 
+@dataclass(frozen=True, slots=True)
+class _DemoIncomingWorkValidator:
+    """Apply scenario semantic validation before issuing the generic admission seal."""
+
+    delegate: IncomingWorkValidator
+    registry: DemoScenarioRegistry
+    scenario_id: str
+
+    def validate(self, envelope: AdmissionEnvelope) -> ValidatedIncomingWork:
+        try:
+            normalized = self.registry.validate_input(
+                self.scenario_id,
+                envelope.admitted_payload,
+            )
+            if canonical_json_bytes(normalized) != canonical_json_bytes(envelope.admitted_payload):
+                raise DemoScenarioInputError(
+                    "demo_scenario_invalid",
+                    "demo input must use its canonical representation",
+                    pointer="/source_urls",
+                )
+        except DemoScenarioInputError as exc:
+            relative = exc.pointer or "/"
+            pointer = "/input" if relative == "/" else "/input" + relative
+            raise IncomingWorkValidationError(
+                "input_schema_invalid",
+                "incoming payload does not conform to its schema",
+                pointer=pointer,
+            ) from None
+        return self.delegate.validate(envelope)
+
+
 class CompiledCatalogManualAdmissionResolver:
     """Resolve one manual route exclusively from trusted catalog and locked state."""
 
@@ -85,11 +128,14 @@ class CompiledCatalogManualAdmissionResolver:
         catalog: CompiledCatalog,
         *,
         mock_connectors_active: bool,
+        demo_scenarios: DemoScenarioRegistry = DEMO_SCENARIOS,
     ) -> None:
         if type(catalog) is not CompiledCatalog:
             raise ValueError("manual admission resolver requires one compiled catalog")
         if type(mock_connectors_active) is not bool:
             raise ValueError("mock connector mode must be an exact boolean")
+        if type(demo_scenarios) is not DemoScenarioRegistry:
+            raise ValueError("manual admission resolver requires an exact demo registry")
         if not catalog.content_hash.startswith("catalog-sha256-v1:"):
             raise ValueError("compiled catalog hash version is invalid")
         require_digest(
@@ -98,6 +144,7 @@ class CompiledCatalogManualAdmissionResolver:
         )
         self._catalog = catalog
         self._mock_connectors_active = mock_connectors_active
+        self._demo_scenarios = demo_scenarios
         self._instances = _unique_index(catalog.instances, label="instance")
         self._templates = _unique_index(catalog.templates, label="template")
         self._capabilities = _unique_index(catalog.tool_capabilities, label="capability")
@@ -192,21 +239,33 @@ class CompiledCatalogManualAdmissionResolver:
                 "campaign_brief_unknown",
                 "campaign brief is not registered",
             )
-        if command.demo_scenario_id is not None:
+        trigger_id = self._manual_trigger_id(catalog_instance.id)
+        scenario = self._scenario(command.demo_scenario_id)
+        if scenario is not None and (
+            scenario.instance_id != catalog_instance.id or scenario.template_id != template.id
+        ):
             raise _resolution_error(
                 "demo_scenario_unknown",
-                "demo scenario is not registered",
+                "demo scenario is not registered for this agent instance",
             )
-
-        trigger_id = self._manual_trigger_id(catalog_instance.id)
-        workflow_id = self._manual_workflow_id(template.id)
-        validator = self._validator(
+        workflow_id = (
+            scenario.workflow_id if scenario is not None else self._manual_workflow_id(template.id)
+        )
+        base_validator = self._validator(
             template=template,
             configuration=configuration,
             trigger_id=trigger_id,
             workflow_id=workflow_id,
             allowed_modes=allowed_modes,
+            scenario=scenario,
         )
+        validator: ManualIncomingWorkValidator = base_validator
+        if scenario is not None:
+            validator = _DemoIncomingWorkValidator(
+                base_validator,
+                self._demo_scenarios,
+                scenario.id,
+            )
         return ManualAdmissionBinding(
             instance_id=configuration.instance_id,
             source=_MANUAL_SOURCE,
@@ -215,7 +274,7 @@ class CompiledCatalogManualAdmissionResolver:
             configuration_revision=configuration.configuration_revision,
             brief_id=None,
             brief_revision=None,
-            demo_scenario_id=None,
+            demo_scenario_id=(scenario.id if scenario is not None else None),
             validator=validator,
         )
 
@@ -227,10 +286,18 @@ class CompiledCatalogManualAdmissionResolver:
         trigger_id: str,
         workflow_id: str,
         allowed_modes: tuple[WorkMode, ...],
+        scenario: DemoScenarioDefinition | None,
     ) -> IncomingWorkValidator:
-        schema = self._catalog.input_schema_by_template.get(template.id)
+        schema = (
+            scenario.input_schema
+            if scenario is not None
+            else self._catalog.input_schema_by_template.get(template.id)
+        )
         if schema is None:
             raise _unavailable()
+        input_schema_id = (
+            scenario.input_schema_id if scenario is not None else template.input_schema_id
+        )
         capabilities = self._selected_capabilities(template)
         budget = template.budget_policy
         timeout = template.timeout_policy
@@ -285,13 +352,24 @@ class CompiledCatalogManualAdmissionResolver:
                     eligible_template_ids=(template.id,),
                     eligible_trigger_kinds=(TriggerKind.MANUAL,),
                     allowed_modes=allowed_modes,
-                    input_schema_ids_by_template={template.id: template.input_schema_id},
+                    input_schema_ids_by_template={template.id: input_schema_id},
                     campaign_brief_policy=CampaignBriefPolicy.FORBIDDEN,
                 ),
             ),
             campaign_brief_revisions=(),
             guard=guard,
         )
+
+    def _scenario(self, scenario_id: str | None) -> DemoScenarioDefinition | None:
+        if scenario_id is None:
+            return None
+        try:
+            return self._demo_scenarios.get(scenario_id)
+        except DemoScenarioRegistryError:
+            raise _resolution_error(
+                "demo_scenario_unknown",
+                "demo scenario is not registered",
+            ) from None
 
     def _selected_capabilities(
         self,

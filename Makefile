@@ -5,21 +5,21 @@ export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
 
-.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
+.PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-demo-01-backend test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-demo-01-e2e web-test-demo-01-unit web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
 
 format:
-	$(UV) run ruff format apps/api/src tests/unit tests/integration tests/catalog
-	$(UV) run ruff check --fix apps/api/src tests/unit tests/integration tests/catalog
+	$(UV) run ruff format apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
+	$(UV) run ruff check --fix apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 
 format-check:
 	git diff --check
-	$(UV) run ruff format --check apps/api/src tests/unit tests/integration tests/catalog
+	$(UV) run ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 
 lint:
-	$(UV) run ruff check apps/api/src tests/unit tests/integration tests/catalog
+	$(UV) run ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 
 typecheck:
 	$(UV) run mypy apps/api/src/marketing_agents
@@ -43,6 +43,11 @@ test-catalog-compiler:
 
 test-catalog-release:
 	$(UV) run pytest -q tests/catalog/test_cat_01_authoritative_catalog.py
+
+test-demo-01-backend:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/acceptance/test_social_demo.py \
+		tests/integration/api/test_demo_01_scenarios.py
 
 catalog-validate:
 	$(UV) run marketing-agents-catalog validate --root catalog/v1
@@ -84,6 +89,12 @@ web-build:
 
 web-test-e2e:
 	node apps/web/scripts/run-web-e2e.mjs
+
+web-test-demo-01-unit:
+	node apps/web/scripts/run-demo-01-unit.mjs
+
+web-test-demo-01-e2e:
+	node apps/web/scripts/run-demo-01-e2e.mjs
 
 web-test-web-01-unit:
 	node apps/web/scripts/run-web-01-unit.mjs
@@ -154,4 +165,4 @@ verify-governance: format-check verify-source test-source test-tooling verify-hi
 
 verify-backend: format-check lint typecheck test-backend
 
-verify-web: web-format-check web-lint web-typecheck web-test web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
+verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
