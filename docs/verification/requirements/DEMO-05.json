@@ -1,0 +1,164 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEMO-05",
+  "matrix_statement_sha256": "05da2e3e2e0177d642e033ce0ef59b783c6c2852e675d36a5691f2836b47acce",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/demos/__init__.py",
+      "apps/api/src/marketing_agents/demos/composition.py",
+      "apps/api/src/marketing_agents/demos/partnership_application_review.py",
+      "apps/api/src/marketing_agents/demos/registry.py",
+      "apps/api/src/marketing_agents/demos/service.py",
+      "apps/web/e2e/demo-05-partnership-review.spec.ts",
+      "apps/web/package.json",
+      "apps/web/scripts/run-demo-05-e2e.mjs",
+      "apps/web/scripts/run-demo-05-unit.mjs",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/src/api/demoScenarios.test.ts",
+      "apps/web/src/api/demoScenarios.ts",
+      "apps/web/src/features/demos/DemosPage.demo05.test.tsx",
+      "apps/web/src/features/demos/DemosPage.tsx",
+      "apps/web/src/features/demos/demo-scenarios.css",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/DEMO-05.json",
+      "docs/verification/requirements/DEMO-05.md",
+      "tests/acceptance/test_partnerships_demo.py",
+      "tests/fixtures/demos/partnership-application-review.json",
+      "tests/integration/api/test_demo_02_scenarios.py",
+      "tests/integration/api/test_demo_05_scenarios.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/demos/partnership_application_review.py"]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/demos/composition.py",
+          "apps/api/src/marketing_agents/demos/registry.py",
+          "apps/api/src/marketing_agents/demos/service.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/demoScenarios.ts",
+          "apps/web/src/features/demos/DemosPage.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/acceptance/test_partnerships_demo.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/integration/api/test_demo_05_scenarios.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/demos/DemosPage.demo05.test.tsx",
+          "apps/web/e2e/demo-05-partnership-review.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "deterministic-partnership-recommendation-artifact",
+      "type": "journey",
+      "statement": "The exact Partnerships application scenario and committed synthetic fixture drive bounded validation, one deterministic structured model call, and one schema-valid advisory recommendation ArtifactEnvelope with complete immutable provenance; replay does not call the model again.",
+      "test_refs": [
+        "tests/acceptance/test_partnerships_demo.py::test_demo_05_review_is_deterministic_advisory_inert_and_replay_safe"
+      ]
+    },
+    {
+      "id": "advisory-only-zero-egress-boundary",
+      "type": "negative_control",
+      "statement": "Application and applicant values remain bounded untrusted advisory input; sockets are denied and no applicant lookup, acceptance or rejection, enrollment, CRM or tracker mutation, approval, external action, connector, notification, or external write is invoked or persisted.",
+      "test_refs": [
+        "tests/acceptance/test_partnerships_demo.py::test_demo_05_review_is_deterministic_advisory_inert_and_replay_safe",
+        "apps/web/src/features/demos/DemosPage.demo05.test.tsx::DEMO-05 renders and submits only an advisory review of supplied evidence",
+        "apps/web/e2e/demo-05-partnership-review.spec.ts::DEMO-05 creates advisory-only review without external research or decision controls"
+      ]
+    },
+    {
+      "id": "private-asynchronous-partnership-api",
+      "type": "contract",
+      "statement": "Authenticated discovery exposes the immutable Partnerships preset, while human-operator POST applies CSRF, strict JSON, bounded schema and idempotency, exact scenario and instance binding, and dry-run mode before returning a private 202 durable receipt without draining execution inline.",
+      "test_refs": [
+        "tests/integration/api/test_demo_05_scenarios.py::test_demo_05_discovery_freezes_advisory_read_only_zero_action_contract",
+        "tests/integration/api/test_demo_05_scenarios.py::test_demo_05_run_uses_resolved_preset_and_returns_async_dry_run_receipt_only",
+        "tests/integration/api/test_demo_05_scenarios.py::test_demo_05_rejects_invalid_overrides_before_admission",
+        "tests/integration/api/test_demo_05_scenarios.py::test_demo_05_post_requires_a_human_operator_before_submit",
+        "tests/integration/api/test_demo_05_scenarios.py::test_demo_05_enforces_csrf_strict_json_and_bounded_idempotency_before_submit"
+      ]
+    },
+    {
+      "id": "truthful-partnership-control-surface",
+      "type": "positive",
+      "statement": "The production Demos route renders Partnerships only after exact safety-contract validation, displays the API-owned preset and advisory boundary, labels deterministic mock, read-only, and zero-write behavior, reports asynchronous acceptance without claiming completion, links durable run resources, preserves Social as the default, and removes submission on contract drift.",
+      "test_refs": [
+        "apps/web/src/api/demoScenarios.test.ts::DEMO-05 discovers and freezes the advisory-only Partnerships projection",
+        "apps/web/src/features/demos/DemosPage.demo05.test.tsx::DEMO-05 renders and submits only an advisory review of supplied evidence",
+        "apps/web/src/features/demos/DemosPage.demo05.test.tsx::DEMO-05 fails closed when advisory zero-action contract drifts",
+        "apps/web/e2e/demo-05-partnership-review.spec.ts::DEMO-05 fails closed when advisory zero-action contract drifts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "demo-05-backend-acceptance",
+      "runner": "argv",
+      "argv": ["make", "test-demo-05-backend"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "deterministic-partnership-recommendation-artifact",
+        "advisory-only-zero-egress-boundary",
+        "private-asynchronous-partnership-api"
+      ]
+    },
+    {
+      "id": "demo-05-web-unit",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-05-unit"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "advisory-only-zero-egress-boundary",
+        "truthful-partnership-control-surface"
+      ]
+    },
+    {
+      "id": "demo-05-real-browser",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-05-e2e"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "advisory-only-zero-egress-boundary",
+        "truthful-partnership-control-surface"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/demos/**"],
+    "gate_id": "demo-05-backend-acceptance"
+  },
+  "limitations": [
+    "The completed journey uses a deterministic mock model and temporary local SQLite through a bounded worker/test drain. It does not claim real-model quality, deployed-worker composition, production-database behavior, or live partnership-provider integration.",
+    "The HTTP POST proves durable asynchronous intake only; it does not execute the model or complete the artifact inline.",
+    "The browser gate uses deterministic same-origin discovery and receipt fixtures. It proves the production control surface, not backend authorization, CSRF, idempotency, or browser-observed worker completion.",
+    "Application and applicant values are synthetic or caller-supplied test data and are not independently verified against a live applicant or partnership system.",
+    "The recommendation is advisory only. The demo does not accept or reject an applicant, enroll a partner, mutate a CRM or tracker, create an external action, invoke a connector, notify anyone, or perform an external write.",
+    "Determinism covers normalized business payloads. Durable identities, audit records, correlations, and timestamps remain intentionally unique or clock-derived, and DEMO-06 remains separately owned."
+  ]
+}

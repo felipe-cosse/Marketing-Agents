@@ -72,6 +72,11 @@ from .community_reminder_draft import (
 )
 from .composition import DeterministicDemoReadAdapter
 from .contracts import DemoScenarioDefinition
+from .partnership_application_review import (
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID,
+    expected_partnership_application_review_artifact,
+)
 from .registry import DEMO_SCENARIOS, DemoScenarioRegistry
 from .social_content_draft import SOCIAL_CONTENT_DRAFT_SCENARIO, SOCIAL_CONTENT_DRAFT_SCENARIO_ID
 
@@ -542,6 +547,7 @@ class DemoRunService:
             SOCIAL_CONTENT_DRAFT_SCENARIO_ID: SOCIAL_CONTENT_DRAFT_SCENARIO,
             BLOG_CONTENT_REVIEW_SCENARIO_ID: BLOG_CONTENT_REVIEW_SCENARIO,
             COMMUNITY_REMINDER_DRAFT_SCENARIO_ID: COMMUNITY_REMINDER_DRAFT_SCENARIO,
+            PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID: (PARTNERSHIP_APPLICATION_REVIEW_SCENARIO),
         }
         expected = supported.get(scenario.id)
         if (
@@ -592,6 +598,12 @@ class DemoRunService:
         if scenario.id == COMMUNITY_REMINDER_DRAFT_SCENARIO_ID:
             try:
                 expected = expected_community_reminder_draft_artifact(input_payload)
+                return canonical_json_bytes(artifact_payload) == canonical_json_bytes(expected)
+            except (TypeError, ValueError):
+                return False
+        if scenario.id == PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID:
+            try:
+                expected = expected_partnership_application_review_artifact(input_payload)
                 return canonical_json_bytes(artifact_payload) == canonical_json_bytes(expected)
             except (TypeError, ValueError):
                 return False

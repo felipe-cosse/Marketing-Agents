@@ -7,6 +7,7 @@ HEAD ?= HEAD
 
 .PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-demo-01-backend test-demo-02-backend test-demo-03-backend test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-demo-01-e2e web-test-demo-01-unit web-test-demo-02-e2e web-test-demo-02-unit web-test-demo-03-e2e web-test-demo-03-unit web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
 .PHONY: test-demo-04-backend web-test-demo-04-e2e web-test-demo-04-unit
+.PHONY: test-demo-05-backend web-test-demo-05-e2e web-test-demo-05-unit
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -65,6 +66,11 @@ test-demo-04-backend:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
 		tests/acceptance/test_community_reminder_demo.py \
 		tests/integration/api/test_demo_04_scenarios.py
+
+test-demo-05-backend:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/acceptance/test_partnerships_demo.py \
+		tests/integration/api/test_demo_05_scenarios.py
 
 catalog-validate:
 	$(UV) run marketing-agents-catalog validate --root catalog/v1
@@ -130,6 +136,12 @@ web-test-demo-04-unit:
 
 web-test-demo-04-e2e:
 	node apps/web/scripts/run-demo-04-e2e.mjs
+
+web-test-demo-05-unit:
+	node apps/web/scripts/run-demo-05-unit.mjs
+
+web-test-demo-05-e2e:
+	node apps/web/scripts/run-demo-05-e2e.mjs
 
 web-test-web-01-unit:
 	node apps/web/scripts/run-web-01-unit.mjs
@@ -200,4 +212,4 @@ verify-governance: format-check verify-source test-source test-tooling verify-hi
 
 verify-backend: format-check lint typecheck test-backend
 
-verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
+verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build

@@ -33,6 +33,12 @@ export const COMMUNITY_REMINDER_TEMPLATE_ID =
   "tpl.community.events.live-session-reminder" as const;
 export const COMMUNITY_REMINDER_INSTANCE_ID =
   "inst.community.events.live-session-reminder.01" as const;
+export const PARTNERSHIP_REVIEW_SCENARIO_ID =
+  "demo.partnerships.application-review.v1" as const;
+export const PARTNERSHIP_REVIEW_TEMPLATE_ID =
+  "tpl.partnerships.implementation-partners.partner-application-reviewer" as const;
+export const PARTNERSHIP_REVIEW_INSTANCE_ID =
+  "inst.partnerships.implementation-partners.partner-application-reviewer.01" as const;
 
 const DISCOVERY_PATH = "/api/v1/demo-scenarios";
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{8,240}$/u;

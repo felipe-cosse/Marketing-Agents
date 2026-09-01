@@ -57,6 +57,15 @@ from .email_signup_onboarding import (
     EMAIL_SIGNUP_ONBOARDING_SCENARIO,
     finalize_email_signup_onboarding,
 )
+from .partnership_application_review import (
+    PARTNERSHIP_APPLICATION_REVIEW_INPUT_SCHEMA,
+    PARTNERSHIP_APPLICATION_REVIEW_MODEL_OUTPUT_SCHEMA,
+    PARTNERSHIP_APPLICATION_REVIEW_MODEL_OUTPUT_SCHEMA_ID,
+    PARTNERSHIP_APPLICATION_REVIEW_OUTPUT_SCHEMA,
+    PARTNERSHIP_APPLICATION_REVIEW_RENDERER,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
+    finalize_partnership_application_review,
+)
 from .social_content_draft import (
     SOCIAL_CONTENT_DRAFT_INPUT_SCHEMA,
     SOCIAL_CONTENT_DRAFT_MODEL_OUTPUT_SCHEMA,
@@ -71,6 +80,7 @@ _SUPPORTED_MODEL_BINDINGS = (
     (SOCIAL_CONTENT_DRAFT_SCENARIO, None),
     (BLOG_CONTENT_REVIEW_SCENARIO, None),
     (COMMUNITY_REMINDER_DRAFT_SCENARIO, None),
+    (PARTNERSHIP_APPLICATION_REVIEW_SCENARIO, None),
     (
         EMAIL_SIGNUP_ONBOARDING_SCENARIO,
         EMAIL_SIGNUP_ONBOARDING_CUSTOMER_INSTANCE_ID,
@@ -139,6 +149,7 @@ SocialContentDraftReadAdapter = DeterministicDemoReadAdapter
 BlogContentReviewReadAdapter = DeterministicDemoReadAdapter
 CommunityReminderDraftReadAdapter = DeterministicDemoReadAdapter
 EmailSignupOnboardingReadAdapter = DeterministicDemoReadAdapter
+PartnershipApplicationReviewReadAdapter = DeterministicDemoReadAdapter
 
 
 def build_demo_read_adapter(
@@ -226,6 +237,25 @@ def build_community_reminder_draft_read_adapter(
     provider_version: str = "v1",
 ) -> CommunityReminderDraftReadAdapter:
     """Build the Community compatibility entry point over the exact shared adapter."""
+
+    return build_demo_read_adapter(
+        catalog,
+        provider,
+        provider_mode=provider_mode,
+        provider_name=provider_name,
+        provider_version=provider_version,
+    )
+
+
+def build_partnership_application_review_read_adapter(
+    catalog: CompiledCatalog,
+    provider: LLMProvider | None = None,
+    *,
+    provider_mode: Literal["mock", "real", "local"] = "mock",
+    provider_name: str = "mock",
+    provider_version: str = "v1",
+) -> PartnershipApplicationReviewReadAdapter:
+    """Build the Partnership compatibility entry point over the shared adapter."""
 
     return build_demo_read_adapter(
         catalog,
@@ -353,6 +383,17 @@ def _build_demo_structured_adapter(
             ),
             _binding(
                 catalog=catalog,
+                scenario=PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
+                model_instance_id=None,
+                input_schema_id=PARTNERSHIP_APPLICATION_REVIEW_SCENARIO.input_schema_id,
+                input_schema=PARTNERSHIP_APPLICATION_REVIEW_INPUT_SCHEMA,
+                model_output_schema_id=PARTNERSHIP_APPLICATION_REVIEW_MODEL_OUTPUT_SCHEMA_ID,
+                model_output_schema=PARTNERSHIP_APPLICATION_REVIEW_MODEL_OUTPUT_SCHEMA,
+                output_schema=PARTNERSHIP_APPLICATION_REVIEW_OUTPUT_SCHEMA,
+                output_transform=finalize_partnership_application_review,
+            ),
+            _binding(
+                catalog=catalog,
                 scenario=EMAIL_SIGNUP_ONBOARDING_SCENARIO,
                 model_instance_id=EMAIL_SIGNUP_ONBOARDING_CUSTOMER_INSTANCE_ID,
                 input_schema_id=EMAIL_SIGNUP_ONBOARDING_MODEL_INPUT_SCHEMA_ID,
@@ -426,6 +467,7 @@ def build_demo_deterministic_provider(catalog: CompiledCatalog) -> Deterministic
                 SOCIAL_CONTENT_DRAFT_RENDERER,
                 BLOG_CONTENT_REVIEW_RENDERER,
                 COMMUNITY_REMINDER_DRAFT_RENDERER,
+                PARTNERSHIP_APPLICATION_REVIEW_RENDERER,
                 EMAIL_SIGNUP_ONBOARDING_RENDERER,
             )
         ),
@@ -465,11 +507,20 @@ def build_community_reminder_draft_deterministic_provider(
     return build_demo_deterministic_provider(catalog)
 
 
+def build_partnership_application_review_deterministic_provider(
+    catalog: CompiledCatalog,
+) -> DeterministicLLMProvider:
+    """Build the Partnership compatibility entry point over the shared registry."""
+
+    return build_demo_deterministic_provider(catalog)
+
+
 __all__ = [
     "BlogContentReviewReadAdapter",
     "CommunityReminderDraftReadAdapter",
     "DeterministicDemoReadAdapter",
     "EmailSignupOnboardingReadAdapter",
+    "PartnershipApplicationReviewReadAdapter",
     "SocialContentDraftReadAdapter",
     "build_blog_content_review_deterministic_provider",
     "build_blog_content_review_read_adapter",
@@ -479,6 +530,8 @@ __all__ = [
     "build_demo_read_adapter",
     "build_email_signup_onboarding_deterministic_provider",
     "build_email_signup_onboarding_read_adapter",
+    "build_partnership_application_review_deterministic_provider",
+    "build_partnership_application_review_read_adapter",
     "build_social_content_draft_deterministic_provider",
     "build_social_content_draft_read_adapter",
 ]
