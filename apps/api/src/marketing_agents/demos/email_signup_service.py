@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from marketing_agents.application.orchestration import (
@@ -640,8 +641,69 @@ class EmailSignupRunService:
             self._dependencies,
             gateway,
             WriteAuthorizationGuard(),
+            lease_duration=timedelta(minutes=1),
         )
         step_order = {step.id: step.ordinal for step in steps}
+        for action in sorted(actions, key=lambda item: step_order[item.step_id]):
+            if action.state is ExternalActionState.DISPATCHING:
+                await dispatcher.recover_action(
+                    action.id,
+                    lease_owner="worker.deterministic-demo-recovery",
+                )
+        async with self._dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(receipt.run.id)
+            inspectable = await unit_of_work.run_steps.get_inspectable_plan(receipt.run.id)
+            recovered_plan = None if inspectable is None else inspectable.plan
+            steps = () if inspectable is None else inspectable.steps
+            actions = (
+                ()
+                if recovered_plan is None
+                else await unit_of_work.external_actions.list_run_plan(
+                    receipt.run.id,
+                    recovered_plan.plan_hash,
+                )
+            )
+            selection = await unit_of_work.approvals.get_current_authorization_set(receipt.run.id)
+            approvals = (
+                ()
+                if selection is None
+                else await unit_of_work.approvals.list_current_set(
+                    receipt.run.id,
+                    selection.authorization_set.plan_hash,
+                    selection.authorization_set.proposal_revision,
+                )
+            )
+        if run is None or recovered_plan is None:
+            raise EmailSignupRunServiceError(
+                "demo_plan_missing",
+                "Email demo plan disappeared during recovery",
+                run_id=receipt.run.id,
+            )
+        self._validate_durable_contract(
+            receipt.work_item,
+            run,
+            inspectable,
+            actions,
+            selection,
+            approvals,
+        )
+        plan = recovered_plan
+        if run.state in {
+            RunState.COMPLETED,
+            RunState.CANCELLED,
+            RunState.REJECTED,
+            RunState.FAILED,
+        }:
+            return
+        if run.state is not RunState.EXECUTING:
+            raise EmailSignupRunServiceError(
+                "demo_run_not_executable",
+                "Email demo Run left execution during recovery",
+                run_id=run.id,
+            )
+        step_order = {step.id: step.ordinal for step in steps}
+        if any(action.state is ExternalActionState.DISPATCHING for action in actions):
+            return
         for action in sorted(actions, key=lambda item: step_order[item.step_id]):
             result = await dispatcher.dispatch_once(
                 action.id,

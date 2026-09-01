@@ -945,98 +945,152 @@ class ExternalActionDispatcher:
             stale = await unit_of_work.external_actions.list_stale(now=now, limit=limit)
         results: list[ExternalActionDispatchResult] = []
         for snapshot in stale:
-            lease = snapshot.lease
-            if lease is None:  # pragma: no cover - domain invariant
-                continue
-            if snapshot.call_started_at is not None:
-                call_deadline_at = snapshot.call_deadline_at
-                if call_deadline_at is None:  # pragma: no cover - domain invariant
-                    raise ExternalActionDispatchError(
-                        "recovery_call_authority_invalid",
-                        "stale action lacks its exact provider-call deadline",
-                    )
-                if now < call_deadline_at:
-                    continue
-                terminalized = await self._finalize_terminal_parent_call(snapshot)
-                if terminalized is not None:
-                    results.append(terminalized)
-                    continue
-            if (
-                snapshot.call_started_at is not None
-                and (
-                    reconciled := await self._reconcile_durable_receipt(
-                        snapshot, lease_owner=lease.owner
-                    )
-                )
-                is not None
-            ):
-                results.append(reconciled)
-                continue
-            decision = classify_stale_action_recovery(snapshot, now=now)
-            if decision is StaleActionRecoveryDecision.FAIL_PRE_CALL_EXHAUSTED:
-                async with self._dependencies.unit_of_work() as unit_of_work:
-                    changed = await self._changed_dispatch_result(unit_of_work, snapshot)
-                    if changed is not None:
-                        results.append(changed)
-                        continue
-                    run, step = await self._write_completion_context(
-                        unit_of_work,
-                        snapshot,
-                        allow_ready_step=True,
-                    )
-                    failed = await self._finalize_write_outcome_in_uow(
-                        unit_of_work,
-                        previous=snapshot,
-                        run=run,
-                        step=step,
-                        lease_owner=lease.owner,
-                        occurred_at=now,
-                        reason_code="pre_call_attempts_exhausted",
-                        pre_call_exhausted=True,
-                    )
-                    if failed is not None:
-                        await unit_of_work.commit()
-                        results.append(failed)
-                continue
-            if decision is StaleActionRecoveryDecision.OUTCOME_UNKNOWN:
-                async with self._dependencies.unit_of_work() as unit_of_work:
-                    changed = await self._changed_dispatch_result(unit_of_work, snapshot)
-                    if changed is not None:
-                        results.append(changed)
-                        continue
-                    run, step = await self._write_completion_context(unit_of_work, snapshot)
-                    unknown = await self._finalize_write_outcome_in_uow(
-                        unit_of_work,
-                        previous=snapshot,
-                        run=run,
-                        step=step,
-                        lease_owner=lease.owner,
-                        occurred_at=now,
-                        reason_code="stale_delivery_outcome_unknown",
-                        outcome_unknown=True,
-                    )
-                    if unknown is not None:
-                        await unit_of_work.commit()
-                        results.append(unknown)
-                continue
-            if decision is StaleActionRecoveryDecision.RETRY_PRE_CALL:
-                conclusion = "pre_call_expired"
-            elif decision is StaleActionRecoveryDecision.RETRY_PROVIDER_IDEMPOTENT:
-                conclusion = "provider_retry"
-            else:  # pragma: no cover - exhaustive fail-closed enum guard
-                raise ExternalActionDispatchError(
-                    "recovery_decision_invalid",
-                    "stale action recovery returned an unsupported decision",
-                )
-            released = await self._release_stale(snapshot, now, conclusion)
-            if released is None:
-                continue
-            try:
-                results.append(await self.dispatch_once(released.id, lease_owner=lease_owner))
-            except ExternalActionDispatchError:
-                latest = await self._load_required(released.id)
-                results.append(ExternalActionDispatchResult(latest, DispatchDisposition.LOST_CLAIM))
+            recovered = await self._recover_snapshot(
+                snapshot,
+                lease_owner=lease_owner,
+                now=now,
+            )
+            if recovered is not None:
+                results.append(recovered)
         return tuple(results)
+
+    async def recover_action(
+        self,
+        action_id: str,
+        *,
+        lease_owner: str,
+    ) -> ExternalActionDispatchResult:
+        """Recover only one exact action without scanning or mutating unrelated runs."""
+
+        snapshot = await self._load_required(action_id)
+        if snapshot.state is not ExternalActionState.DISPATCHING:
+            return _terminal_dispatch_result(snapshot)
+        now = self._dependencies.utc_now()
+        lease = snapshot.lease
+        if lease is None:  # pragma: no cover - domain invariant
+            raise ExternalActionDispatchError(
+                "recovery_call_authority_invalid",
+                "dispatching action lacks its exact recovery lease",
+            )
+        recovery_at = lease.expires_at
+        if snapshot.call_started_at is not None:
+            call_deadline_at = snapshot.call_deadline_at
+            if call_deadline_at is None:  # pragma: no cover - domain invariant
+                raise ExternalActionDispatchError(
+                    "recovery_call_authority_invalid",
+                    "dispatching action lacks its exact provider-call deadline",
+                )
+            recovery_at = max(recovery_at, call_deadline_at)
+        if now < recovery_at:
+            return ExternalActionDispatchResult(snapshot, DispatchDisposition.RECOVERY_PENDING)
+        recovered = await self._recover_snapshot(
+            snapshot,
+            lease_owner=lease_owner,
+            now=now,
+        )
+        if recovered is not None:
+            return recovered
+        latest = await self._load_required(action_id)
+        return ExternalActionDispatchResult(latest, DispatchDisposition.LOST_CLAIM)
+
+    async def _recover_snapshot(
+        self,
+        snapshot: ExternalAction,
+        *,
+        lease_owner: str,
+        now: datetime,
+    ) -> ExternalActionDispatchResult | None:
+        lease = snapshot.lease
+        if lease is None:  # pragma: no cover - domain invariant
+            return None
+        recovery_at = lease.expires_at
+        if snapshot.call_started_at is not None:
+            call_deadline_at = snapshot.call_deadline_at
+            if call_deadline_at is None:  # pragma: no cover - domain invariant
+                raise ExternalActionDispatchError(
+                    "recovery_call_authority_invalid",
+                    "stale action lacks its exact provider-call deadline",
+                )
+            recovery_at = max(recovery_at, call_deadline_at)
+            if now < recovery_at:
+                return None
+            terminalized = await self._finalize_terminal_parent_call(snapshot)
+            if terminalized is not None:
+                return terminalized
+        elif now < recovery_at:
+            return None
+        if (
+            snapshot.call_started_at is not None
+            and (
+                reconciled := await self._reconcile_durable_receipt(
+                    snapshot, lease_owner=lease.owner
+                )
+            )
+            is not None
+        ):
+            return reconciled
+        decision = classify_stale_action_recovery(snapshot, now=now)
+        if decision is StaleActionRecoveryDecision.FAIL_PRE_CALL_EXHAUSTED:
+            async with self._dependencies.unit_of_work() as unit_of_work:
+                changed = await self._changed_dispatch_result(unit_of_work, snapshot)
+                if changed is not None:
+                    return changed
+                run, step = await self._write_completion_context(
+                    unit_of_work,
+                    snapshot,
+                    allow_ready_step=True,
+                )
+                failed = await self._finalize_write_outcome_in_uow(
+                    unit_of_work,
+                    previous=snapshot,
+                    run=run,
+                    step=step,
+                    lease_owner=lease.owner,
+                    occurred_at=now,
+                    reason_code="pre_call_attempts_exhausted",
+                    pre_call_exhausted=True,
+                )
+                if failed is not None:
+                    await unit_of_work.commit()
+                    return failed
+            return None
+        if decision is StaleActionRecoveryDecision.OUTCOME_UNKNOWN:
+            async with self._dependencies.unit_of_work() as unit_of_work:
+                changed = await self._changed_dispatch_result(unit_of_work, snapshot)
+                if changed is not None:
+                    return changed
+                run, step = await self._write_completion_context(unit_of_work, snapshot)
+                unknown = await self._finalize_write_outcome_in_uow(
+                    unit_of_work,
+                    previous=snapshot,
+                    run=run,
+                    step=step,
+                    lease_owner=lease.owner,
+                    occurred_at=now,
+                    reason_code="stale_delivery_outcome_unknown",
+                    outcome_unknown=True,
+                )
+                if unknown is not None:
+                    await unit_of_work.commit()
+                    return unknown
+            return None
+        if decision is StaleActionRecoveryDecision.RETRY_PRE_CALL:
+            conclusion = "pre_call_expired"
+        elif decision is StaleActionRecoveryDecision.RETRY_PROVIDER_IDEMPOTENT:
+            conclusion = "provider_retry"
+        else:  # pragma: no cover - exhaustive fail-closed enum guard
+            raise ExternalActionDispatchError(
+                "recovery_decision_invalid",
+                "stale recovery returned an unsupported decision",
+            )
+        released = await self._release_stale(snapshot, now, conclusion)
+        if released is None:
+            return None
+        try:
+            return await self.dispatch_once(released.id, lease_owner=lease_owner)
+        except ExternalActionDispatchError:
+            latest = await self._load_required(released.id)
+            return ExternalActionDispatchResult(latest, DispatchDisposition.LOST_CLAIM)
 
     async def _finalize_terminal_parent_call(
         self,

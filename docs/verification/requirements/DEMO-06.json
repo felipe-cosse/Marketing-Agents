@@ -1,0 +1,92 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEMO-06",
+  "matrix_statement_sha256": "b83e4309bcd985718a22aaf46b7e2f476ec919ecf4a63706fbbad46f263181d8",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/demos/email_signup_service.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/DEMO-06.json",
+      "docs/verification/requirements/DEMO-06.md",
+      "tests/acceptance/test_email_signup_demo.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+          "apps/api/src/marketing_agents/demos/email_signup_service.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/acceptance/test_email_signup_demo.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "exact-all-approvals-zero-call-barrier",
+      "type": "negative_control",
+      "statement": "The Email authorization set remains non-dispatchable until both exact current approvals are valid: no newsletter, CRM, or model call and no connector receipt occurs before approval or after only one approval, while expired, rejected, reused, unauthorized, hash-drifted, changed-action, and pre-release cancellation cases release nothing.",
+      "test_refs": [
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_all_approved_barrier_and_worker_resume",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_unauthorized_or_drifted_approval_releases_nothing",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_pre_release_cancellation_performs_zero_calls",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_06_expired_rejected_or_reused_approval_releases_nothing",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_06_changed_approved_action_prevents_barrier_release"
+      ]
+    },
+    {
+      "id": "approved-email-mocks-execute-once",
+      "type": "journey",
+      "statement": "After both exact approvals are atomically reserved, a later worker drain sends the minimized approved payloads with stable idempotency keys to the registered newsletter and CRM mocks exactly once, persists exactly two receipts, performs one model call, creates one verified artifact, and remains inert on replay.",
+      "test_refs": [
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_all_approved_barrier_and_worker_resume"
+      ]
+    },
+    {
+      "id": "post-receipt-crash-recovers-without-duplicate-effect",
+      "type": "contract",
+      "statement": "A scoped injected crash after a deterministic mock receipt is durably committed but before local action success recovers from the authoritative receipt, records truthful completion, and does not repeat the physical mock side effect.",
+      "test_refs": [
+        "tests/acceptance/test_email_signup_demo.py::test_demo_06_post_receipt_crash_recovers_without_duplicate_side_effect"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "demo-06-email-approval-acceptance",
+      "runner": "argv",
+      "argv": ["make", "test-demo-06-backend"],
+      "cwd": ".",
+      "timeout_seconds": 420,
+      "network_requirement": "deny",
+      "covers": [
+        "exact-all-approvals-zero-call-barrier",
+        "approved-email-mocks-execute-once",
+        "post-receipt-crash-recovers-without-duplicate-effect"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/demos/email_signup_service.py"
+    ],
+    "gate_id": "demo-06-email-approval-acceptance"
+  },
+  "limitations": [
+    "The evidence uses registered deterministic newsletter, CRM, and model mocks with temporary local SQLite and a bounded local worker drain. It does not claim live-provider, deployed-worker, or production-database behavior.",
+    "Approval decisions only record and reserve authorization; connector dispatch occurs later in a worker path and never inline in an approval HTTP request.",
+    "The two durable connector receipts prove deterministic mock effects only. They do not prove a real newsletter subscription, CRM mutation, delivered message, real consent, or a production outcome.",
+    "Post-receipt recovery proves idempotency for the registered deterministic mock receipt ledger. It is not a claim of universal distributed exactly-once delivery for providers without equivalent idempotency.",
+    "The DEMO-06 Email gate exercises exact-action recovery for recovery-pending state and durable-mock-receipt reconciliation. Other stale-action classifications, lost-claim races, and post-release cancellation races remain lower-level dispatcher responsibilities and are not claimed as Email end-to-end evidence.",
+    "Cancellation before atomic barrier release proves zero calls. Cancellation after release is a forward execution fence and cannot roll back a mock receipt that is already durable.",
+    "The fixture contains synthetic contact and consent data. Durable identities, audit records, correlations, and timestamps remain intentionally unique or clock-derived."
+  ]
+}
