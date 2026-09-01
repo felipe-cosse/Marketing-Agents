@@ -85,6 +85,132 @@ async function expectCompleteHierarchyVisible(page: Page): Promise<void> {
   }
 }
 
+test("ORCH-01 keeps one visible root and excludes the control plane from all 43 source instances", async ({
+  page,
+}) => {
+  const body = await loadHierarchy(page);
+  const sourceInstanceIds = body.departments.flatMap((department) =>
+    department.functions.flatMap((agentFunction) =>
+      agentFunction.instances.map((instance) => instance.id),
+    ),
+  );
+  expect(sourceInstanceIds).toHaveLength(43);
+  expect(sourceInstanceIds).not.toContain(
+    "control-plane.marketing-orchestrator",
+  );
+
+  const desktopRoot = page.locator(
+    '[data-node-kind="root"][data-hierarchy-root-id="root"]',
+  );
+  await expect(desktopRoot).toHaveCount(1);
+  await expect(desktopRoot).toContainText("Marketing Agents");
+  const desktopControlPlane = desktopRoot.locator(
+    '[data-node-kind="control-plane"][data-control-plane-id="control-plane.marketing-orchestrator"]',
+  );
+  await expect(desktopControlPlane).toHaveCount(1);
+  await expect(desktopControlPlane).toContainText("Marketing Orchestrator");
+  await expect(desktopControlPlane).toContainText("Control plane");
+  await expect(desktopControlPlane).toHaveAttribute(
+    "data-counts-as-instance",
+    "false",
+  );
+  expect(await desktopControlPlane.getAttribute("data-instance-id")).toBeNull();
+  const desktopRootGeometry = await desktopRoot.evaluate((root) => {
+    const icon = root.querySelector<HTMLElement>(".root-node__icon");
+    const controlPlane = root.querySelector<HTMLElement>(
+      '[data-node-kind="control-plane"]',
+    );
+    if (icon === null || controlPlane === null) {
+      throw new Error("ORCH-01 root geometry markers are missing");
+    }
+    const rootRect = root.getBoundingClientRect();
+    const iconRect = icon.getBoundingClientRect();
+    const controlPlaneRect = controlPlane.getBoundingClientRect();
+    return {
+      root: {
+        left: rootRect.left,
+        right: rootRect.right,
+        top: rootRect.top,
+        bottom: rootRect.bottom,
+        width: rootRect.width,
+        height: rootRect.height,
+      },
+      icon: { width: iconRect.width, height: iconRect.height },
+      controlPlane: {
+        left: controlPlaneRect.left,
+        right: controlPlaneRect.right,
+        top: controlPlaneRect.top,
+        bottom: controlPlaneRect.bottom,
+      },
+    };
+  });
+  const renderedScale = desktopRootGeometry.root.width / 148;
+  expect(desktopRootGeometry.root.height / renderedScale).toBeCloseTo(38, 1);
+  expect(desktopRootGeometry.icon.width / renderedScale).toBeCloseTo(25, 1);
+  expect(desktopRootGeometry.icon.height / renderedScale).toBeCloseTo(25, 1);
+  expect(desktopRootGeometry.controlPlane.left).toBeGreaterThanOrEqual(
+    desktopRootGeometry.root.left,
+  );
+  expect(desktopRootGeometry.controlPlane.right).toBeLessThanOrEqual(
+    desktopRootGeometry.root.right,
+  );
+  expect(desktopRootGeometry.controlPlane.top).toBeGreaterThanOrEqual(
+    desktopRootGeometry.root.top,
+  );
+  expect(desktopRootGeometry.controlPlane.bottom).toBeLessThanOrEqual(
+    desktopRootGeometry.root.bottom,
+  );
+
+  const desktopInstanceIds = await page
+    .locator('[data-node-kind="instance"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-instance-id")),
+    );
+  expect(desktopInstanceIds).toEqual(sourceInstanceIds);
+
+  await page.setViewportSize({ width: 426, height: 923 });
+  const tree = page.getByRole("tree", {
+    name: "Marketing Agents organization tree",
+  });
+  await expect(tree).toBeVisible();
+  const functionItems = tree.locator(
+    '[role="treeitem"][data-node-kind="function"]',
+  );
+  await expect(functionItems).toHaveCount(12);
+  for (let index = 0; index < 12; index += 1) {
+    const item = functionItems.nth(index);
+    if ((await item.getAttribute("aria-expanded")) !== "true") {
+      await item.click();
+    }
+  }
+
+  await expect(tree.locator('[role="treeitem"]')).toHaveCount(61);
+  const narrowRoot = tree.locator(
+    '[role="treeitem"][data-node-kind="root"][data-hierarchy-root-id="root"]',
+  );
+  await expect(narrowRoot).toHaveCount(1);
+  await expect(narrowRoot).toContainText("Marketing Agents");
+  const narrowControlPlane = narrowRoot.locator(
+    '[data-node-kind="control-plane"][data-control-plane-id="control-plane.marketing-orchestrator"]',
+  );
+  await expect(narrowControlPlane).toHaveCount(1);
+  await expect(narrowControlPlane).toContainText("Marketing Orchestrator");
+  await expect(narrowControlPlane).toContainText("Control plane");
+  await expect(narrowControlPlane).toHaveAttribute(
+    "data-counts-as-instance",
+    "false",
+  );
+  expect(await narrowControlPlane.getAttribute("role")).not.toBe("treeitem");
+  expect(await narrowControlPlane.getAttribute("data-instance-id")).toBeNull();
+
+  const narrowInstanceIds = await tree
+    .locator('[role="treeitem"][data-node-kind="instance"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-instance-id")),
+    );
+  expect(narrowInstanceIds).toEqual(sourceInstanceIds);
+});
+
 test("WEB-01 renders the complete ordered API hierarchy with no external requests", async ({
   page,
 }, testInfo) => {

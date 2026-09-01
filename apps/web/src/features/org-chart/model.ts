@@ -54,6 +54,18 @@ export interface NormalizedHierarchy {
   readonly structuralKey: string;
 }
 
+export const MARKETING_AGENTS_ROOT = Object.freeze({
+  id: "root",
+  displayName: "Marketing Agents",
+} as const);
+
+export const MARKETING_ORCHESTRATOR_CONTROL_PLANE = Object.freeze({
+  id: "control-plane.marketing-orchestrator",
+  displayName: "Marketing Orchestrator",
+  badgeLabel: "Control plane",
+  countsAsInstance: false,
+} as const);
+
 export const EXPECTED_COUNTS = Object.freeze({
   departments: 5,
   functions: 12,

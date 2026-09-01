@@ -3,6 +3,10 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { AgentCard } from "./AgentCard";
 import { AgentsIcon } from "./icons";
 import type { HierarchyLayout } from "./layout";
+import {
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
+} from "./model";
 import type { ProjectedHierarchy } from "./projectHierarchy";
 
 interface HierarchyStageProps {
@@ -90,7 +94,8 @@ function HierarchyStageComponent({
       <div
         className="root-node"
         data-node-kind="root"
-        data-node-id="root"
+        data-node-id={MARKETING_AGENTS_ROOT.id}
+        data-hierarchy-root-id={MARKETING_AGENTS_ROOT.id}
         tabIndex={-1}
         style={{
           left: layout.root.x,
@@ -102,9 +107,21 @@ function HierarchyStageComponent({
         <span className="root-node__icon">
           <AgentsIcon />
         </span>
-        <span>
-          <strong>Marketing Agents</strong>
-          <small>Control plane</small>
+        <span className="root-node__content">
+          <strong>{MARKETING_AGENTS_ROOT.displayName}</strong>
+          <small
+            role="note"
+            aria-label={`${MARKETING_ORCHESTRATOR_CONTROL_PLANE.displayName}, implementation control plane, not included in the deployed-agent inventory`}
+            data-node-kind="control-plane"
+            data-control-plane-id={MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}
+            data-counts-as-instance={String(
+              MARKETING_ORCHESTRATOR_CONTROL_PLANE.countsAsInstance,
+            )}
+          >
+            {MARKETING_ORCHESTRATOR_CONTROL_PLANE.displayName}
+            {" · "}
+            {MARKETING_ORCHESTRATOR_CONTROL_PLANE.badgeLabel}
+          </small>
         </span>
       </div>
 

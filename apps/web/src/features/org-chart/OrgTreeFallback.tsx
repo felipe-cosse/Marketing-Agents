@@ -8,6 +8,10 @@ import {
 } from "react";
 
 import { AgentsIcon, ReadIcon, WriteIcon } from "./icons";
+import {
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
+} from "./model";
 import { presentPurpose } from "./presentation";
 import type { ProjectedHierarchy } from "./projectHierarchy";
 import {
@@ -84,7 +88,24 @@ function NodeIcon({ node }: { readonly node: OrgTreeNode }): React.JSX.Element {
 }
 
 function nodeSummary(node: OrgTreeNode): ReactNode {
-  if (node.kind === "root") return "Local control plane";
+  if (node.kind === "root") {
+    return (
+      <span
+        data-node-kind="control-plane"
+        data-control-plane-id={MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}
+        data-counts-as-instance={String(
+          MARKETING_ORCHESTRATOR_CONTROL_PLANE.countsAsInstance,
+        )}
+      >
+        {MARKETING_ORCHESTRATOR_CONTROL_PLANE.displayName}
+        {" · "}
+        {MARKETING_ORCHESTRATOR_CONTROL_PLANE.badgeLabel}
+        <span className="sr-only">
+          , not included in the deployed-agent inventory
+        </span>
+      </span>
+    );
+  }
   if (node.kind === "department") {
     return `${String(node.department.instanceCount)} deployed agents · ${String(node.department.functions.length)} functions`;
   }
@@ -323,6 +344,9 @@ export function OrgTreeFallback({
                   aria-controls={selected ? "agent-inspector" : undefined}
                   data-node-id={node.id}
                   data-node-kind={node.kind}
+                  data-hierarchy-root-id={
+                    node.kind === "root" ? MARKETING_AGENTS_ROOT.id : undefined
+                  }
                   data-department-id={
                     node.kind === "department"
                       ? node.department.id

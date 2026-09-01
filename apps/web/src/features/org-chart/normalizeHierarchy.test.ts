@@ -3,11 +3,50 @@ import { describe, expect, it } from "vitest";
 
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import {
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
+} from "./model";
+import {
   HierarchyContractError,
   normalizeHierarchy,
 } from "./normalizeHierarchy";
 
 describe("WEB-01 hierarchy normalization", () => {
+  it("ORCH-01 rejects reserved root and control-plane identities across source nodes", () => {
+    for (const reservedId of [
+      MARKETING_AGENTS_ROOT.id,
+      MARKETING_ORCHESTRATOR_CONTROL_PLANE.id,
+    ]) {
+      for (const nodeKind of ["department", "function", "instance"] as const) {
+        const payload = makeHierarchyPayload();
+        const departments = payload.departments as {
+          id: string;
+          functions: { id: string; instances: { id: string }[] }[];
+        }[];
+        const department = departments[0];
+        const agentFunction = department?.functions[0];
+        const instance = agentFunction?.instances[0];
+        expect(department).toBeDefined();
+        expect(agentFunction).toBeDefined();
+        expect(instance).toBeDefined();
+        if (
+          department === undefined ||
+          agentFunction === undefined ||
+          instance === undefined
+        ) {
+          throw new Error("ORCH-01 fixture must expose a complete source path");
+        }
+        if (nodeKind === "department") department.id = reservedId;
+        else if (nodeKind === "function") agentFunction.id = reservedId;
+        else instance.id = reservedId;
+
+        expect(() => normalizeHierarchy(payload)).toThrow(
+          `must not use the reserved UI identity "${reservedId}"`,
+        );
+      }
+    }
+  });
+
   it("accepts and freezes the exact 5/12/36/43 contract", () => {
     const hierarchy = normalizeHierarchy(makeHierarchyPayload());
 
