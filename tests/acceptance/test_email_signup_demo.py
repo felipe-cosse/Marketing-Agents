@@ -1,14 +1,20 @@
-"""DEMO-03: two exact approvals gate every mock write and the welcome draft."""
+"""DEMO-03/DEMO-06: exact approvals gate Email mock writes and recovery."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+import marketing_agents.demos.email_signup_service as email_signup_service_module
 import pytest
 from marketing_agents.application.orchestration import OrchestrationDependencies
-from marketing_agents.application.services.approval_boundaries import ApprovalBoundaryService
+from marketing_agents.application.services.approval_boundaries import (
+    ApprovalBoundaryDisposition,
+    ApprovalBoundaryService,
+)
 from marketing_agents.application.services.approval_decisions import (
     ApprovalDecisionCommand,
     ApprovalDecisionService,
@@ -40,6 +46,7 @@ from marketing_agents.infrastructure.catalog.instance_configuration_seed import 
 )
 from marketing_agents.infrastructure.db import (
     ConnectorActionReceiptRecord,
+    ExternalActionRecord,
     InstanceConfigurationSQLAlchemyUnitOfWorkFactory,
     SQLAlchemyManualAdmissionUnitOfWorkFactory,
 )
@@ -48,7 +55,7 @@ from marketing_agents.infrastructure.scheduling.cron_recurrence import (
     CroniterRecurrenceCalculator,
 )
 from marketing_agents.security.redaction import SecretValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from tests.acceptance.test_blog_seo_demo import (
     ADMISSION_KEY,
@@ -64,7 +71,15 @@ from tests.support.identity import human_principal
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "demos" / "email-signup.json"
 
 
-async def _configured_service(path: Path):  # type: ignore[no-untyped-def]
+class _MutableClock:
+    def __init__(self) -> None:
+        self.current = _Clock().now()
+
+    def now(self) -> datetime:
+        return self.current
+
+
+async def _configured_service(path: Path, *, clock=None):  # type: ignore[no-untyped-def]
     catalog = compile_catalog(CATALOG_ROOT)
     runtime = await _runtime(path)
     configuration_uow = InstanceConfigurationSQLAlchemyUnitOfWorkFactory(runtime.session_factory)
@@ -109,7 +124,7 @@ async def _configured_service(path: Path):  # type: ignore[no-untyped-def]
         )
         await unit_of_work.commit()
     dependencies = OrchestrationDependencies(
-        _Clock(),
+        _Clock() if clock is None else clock,
         _Ids(),
         SQLAlchemyManualAdmissionUnitOfWorkFactory(runtime.session_factory, _factories()),
     )
@@ -163,6 +178,36 @@ async def _requests(dependencies, run_id: str):  # type: ignore[no-untyped-def]
             selection.authorization_set.plan_hash,
             selection.authorization_set.proposal_revision,
         )
+
+
+async def _receipt_count(runtime) -> int:  # type: ignore[no-untyped-def]
+    async with runtime.session_factory() as session:
+        return int(
+            (
+                await session.execute(select(func.count(ConnectorActionReceiptRecord.receipt_id)))
+            ).scalar_one()
+        )
+
+
+class _SimulatedProcessCrash(BaseException):
+    pass
+
+
+class _CrashAfterDurableReceiptGateway:
+    def __init__(self, delegate: Any, state: dict[str, Any]) -> None:
+        self._delegate = delegate
+        self._state = state
+
+    def contract_for(self, action):  # type: ignore[no-untyped-def]
+        return self._delegate.contract_for(action)
+
+    async def execute(self, authorization):  # type: ignore[no-untyped-def]
+        self._state["physical_calls"] += 1
+        result = await self._delegate.execute(authorization)
+        if self._state["crash_pending"]:
+            self._state["crash_pending"] = False
+            raise _SimulatedProcessCrash
+        return result
 
 
 @pytest.mark.asyncio
@@ -525,5 +570,276 @@ async def test_demo_03_validator_rejects_schema_valid_routing_tamper(tmp_path: P
                 approvals,
             )
         assert rejected.value.code == "demo_durable_contract_invalid"
+    finally:
+        await runtime.dispose()
+
+
+@pytest.mark.parametrize("case", ("expired", "rejected", "reused"))
+@pytest.mark.asyncio
+async def test_demo_06_expired_rejected_or_reused_approval_releases_nothing(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    clock = _MutableClock()
+    runtime, dependencies, service, provider_calls = await _configured_service(
+        tmp_path / f"email-signup-demo-06-{case}.db",
+        clock=clock,
+    )
+    try:
+        prepared = await service.prepare(
+            EmailSignupRunCommand(
+                input_payload=fixture,
+                correlation_id=f"correlation.demo-06.{case}.prepare",
+                idempotency_key=SecretValue(f"demo-06-idempotency-{case}"),
+            ),
+            _operator(),
+        )
+        request = (await _requests(dependencies, prepared.run.id))[0].request
+        command = ApprovalDecisionCommand(
+            request_id=request.id,
+            expected_generation=request.generation,
+            expected_action_hash=request.action_hash,
+            decision=(
+                ApprovalDecisionKind.REJECT if case == "rejected" else ApprovalDecisionKind.APPROVE
+            ),
+            correlation_id=f"correlation.demo-06.{case}.decision",
+        )
+        if case == "expired":
+            await ApprovalDecisionService(dependencies).decide(
+                command,
+                principal=_approver(1),
+            )
+            current = await _requests(dependencies, prepared.run.id)
+            clock.current = min(stored.request.expires_at for stored in current)
+            expired = await ApprovalBoundaryService(dependencies).evaluate(
+                prepared.run.id,
+                audit_context=AuditContext.worker(
+                    "worker.deterministic-demo",
+                    correlation_id="correlation.demo-06.expired.evaluate",
+                ),
+            )
+            assert expired.disposition is ApprovalBoundaryDisposition.EXPIRED
+            async with dependencies.unit_of_work() as unit_of_work:
+                inspectable = await unit_of_work.run_steps.get_inspectable_plan(prepared.run.id)
+                assert inspectable is not None
+                actions = await unit_of_work.external_actions.list_run_plan(
+                    prepared.run.id,
+                    inspectable.plan.plan_hash,
+                )
+                current = await unit_of_work.approvals.list_current_set(
+                    prepared.run.id,
+                    inspectable.plan.plan_hash,
+                    current[0].request.proposal_revision,
+                )
+            assert all(stored.use is None for stored in current)
+            assert all(action.reservation is None for action in actions)
+            assert all(
+                action.state
+                not in {
+                    ExternalActionState.DISPATCH_RESERVED,
+                    ExternalActionState.DISPATCHING,
+                    ExternalActionState.SUCCEEDED,
+                }
+                for action in actions
+            )
+        else:
+            await ApprovalDecisionService(dependencies).decide(
+                command,
+                principal=_approver(1),
+            )
+            if case == "reused":
+                with pytest.raises(ApprovalDecisionServiceError) as captured:
+                    await ApprovalDecisionService(dependencies).decide(
+                        command,
+                        principal=_approver(2),
+                    )
+                assert captured.value.code == "approval_decision_conflict"
+
+        snapshot = await service.resume(
+            prepared.run.id,
+            correlation_id=f"correlation.demo-06.{case}.resume",
+        )
+        assert snapshot.run.state is (
+            RunState.REJECTED if case == "rejected" else RunState.AWAITING_APPROVAL
+        )
+        assert (snapshot.connector_calls, snapshot.model_calls) == (0, 0)
+        assert snapshot.artifact is None
+        assert provider_calls == []
+        assert await _receipt_count(runtime) == 0
+    finally:
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_demo_06_changed_approved_action_prevents_barrier_release(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    runtime, dependencies, service, provider_calls = await _configured_service(
+        tmp_path / "email-signup-demo-06-changed-action.db"
+    )
+    try:
+        prepared = await service.prepare(
+            EmailSignupRunCommand(
+                input_payload=fixture,
+                correlation_id="correlation.demo-06.changed.prepare",
+                idempotency_key=SecretValue("demo-06-idempotency-changed-action"),
+            ),
+            _operator(),
+        )
+        requests = tuple(
+            stored.request for stored in await _requests(dependencies, prepared.run.id)
+        )
+        approved_request, release_request = requests
+        await ApprovalDecisionService(dependencies).decide(
+            ApprovalDecisionCommand(
+                request_id=approved_request.id,
+                expected_generation=approved_request.generation,
+                expected_action_hash=approved_request.action_hash,
+                decision=ApprovalDecisionKind.APPROVE,
+                correlation_id="correlation.demo-06.changed.first-approval",
+            ),
+            principal=_approver(1),
+        )
+        async with runtime.session_factory() as session, session.begin():
+            record = await session.get(ExternalActionRecord, approved_request.action_id)
+            assert record is not None
+            changed_envelope = dict(record.canonical_envelope)
+            changed_payload = dict(changed_envelope["minimized_payload"])
+            changed_payload["contact_ref"] = "contact.synthetic.changed"
+            changed_envelope["minimized_payload"] = changed_payload
+            await session.execute(
+                update(ExternalActionRecord)
+                .where(ExternalActionRecord.id == approved_request.action_id)
+                .values(canonical_envelope=changed_envelope)
+            )
+
+        with pytest.raises(ApprovalDecisionServiceError) as captured:
+            await ApprovalDecisionService(dependencies).decide(
+                ApprovalDecisionCommand(
+                    request_id=release_request.id,
+                    expected_generation=release_request.generation,
+                    expected_action_hash=release_request.action_hash,
+                    decision=ApprovalDecisionKind.APPROVE,
+                    correlation_id="correlation.demo-06.changed.release-attempt",
+                ),
+                principal=_approver(2),
+            )
+        assert captured.value.code == "approval_record_corrupt"
+        async with runtime.session_factory() as session:
+            states = tuple(
+                (
+                    await session.execute(
+                        select(ExternalActionRecord.state).where(
+                            ExternalActionRecord.run_id == prepared.run.id
+                        )
+                    )
+                ).scalars()
+            )
+        assert set(states) == {
+            ExternalActionState.APPROVED.value,
+            ExternalActionState.AWAITING_APPROVAL.value,
+        }
+        assert provider_calls == []
+        assert await _receipt_count(runtime) == 0
+    finally:
+        await runtime.dispose()
+
+
+@pytest.mark.asyncio
+async def test_demo_06_post_receipt_crash_recovers_without_duplicate_side_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    clock = _MutableClock()
+    runtime, dependencies, service, provider_calls = await _configured_service(
+        tmp_path / "email-signup-demo-06-post-receipt-crash.db",
+        clock=clock,
+    )
+    command = EmailSignupRunCommand(
+        input_payload=fixture,
+        correlation_id="correlation.demo-06.crash.prepare",
+        idempotency_key=SecretValue("demo-06-idempotency-post-receipt-crash"),
+    )
+    real_gateway = email_signup_service_module.RegistryConnectorWriteGateway
+    gateway_state: dict[str, Any] = {"physical_calls": 0, "crash_pending": True}
+
+    def crash_gateway(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return _CrashAfterDurableReceiptGateway(real_gateway(*args, **kwargs), gateway_state)
+
+    try:
+        prepared = await service.prepare(command, _operator())
+        for index, stored in enumerate(await _requests(dependencies, prepared.run.id), start=1):
+            request = stored.request
+            await ApprovalDecisionService(dependencies).decide(
+                ApprovalDecisionCommand(
+                    request_id=request.id,
+                    expected_generation=request.generation,
+                    expected_action_hash=request.action_hash,
+                    decision=ApprovalDecisionKind.APPROVE,
+                    correlation_id=f"correlation.demo-06.crash.approval-{index}",
+                ),
+                principal=_approver(index),
+            )
+        monkeypatch.setattr(
+            email_signup_service_module,
+            "RegistryConnectorWriteGateway",
+            crash_gateway,
+        )
+
+        with pytest.raises(_SimulatedProcessCrash):
+            await service.resume(
+                prepared.run.id,
+                correlation_id="correlation.demo-06.crash.first-resume",
+            )
+        assert gateway_state["physical_calls"] == 1
+        assert await _receipt_count(runtime) == 1
+        assert provider_calls == []
+
+        async with dependencies.unit_of_work() as unit_of_work:
+            inspectable = await unit_of_work.run_steps.get_inspectable_plan(prepared.run.id)
+            assert inspectable is not None
+            actions = await unit_of_work.external_actions.list_run_plan(
+                prepared.run.id,
+                inspectable.plan.plan_hash,
+            )
+        crashed = next(
+            action for action in actions if action.state is ExternalActionState.DISPATCHING
+        )
+        assert crashed.call_deadline_at is not None and crashed.lease is not None
+        assert crashed.call_deadline_at < crashed.lease.expires_at
+
+        clock.current = crashed.call_deadline_at
+        pending = await service.resume(
+            prepared.run.id,
+            correlation_id="correlation.demo-06.crash.pending-resume",
+        )
+        assert pending.run.state is RunState.EXECUTING
+        assert (pending.connector_calls, pending.model_calls) == (1, 0)
+        assert gateway_state["physical_calls"] == 1
+        assert await _receipt_count(runtime) == 1
+        assert provider_calls == []
+
+        clock.current = crashed.lease.expires_at
+        completed = await service.resume(
+            prepared.run.id,
+            correlation_id="correlation.demo-06.crash.recovered-resume",
+        )
+        assert completed.run.state is RunState.COMPLETED
+        assert (completed.connector_calls, completed.model_calls) == (2, 1)
+        assert gateway_state["physical_calls"] == 2
+        assert await _receipt_count(runtime) == 2
+        assert len(provider_calls) == 1
+
+        replayed = await service.resume(
+            prepared.run.id,
+            correlation_id="correlation.demo-06.crash.replay",
+        )
+        assert replayed.artifact == completed.artifact
+        assert gateway_state["physical_calls"] == 2
+        assert await _receipt_count(runtime) == 2
+        assert len(provider_calls) == 1
     finally:
         await runtime.dispose()
