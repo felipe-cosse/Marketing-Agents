@@ -55,6 +55,7 @@ const OBJECT_KEYS = new Set([
 ]);
 const STRING_KEYS = new Set([
   ...COMMON_KEYS,
+  "const",
   "enum",
   "minLength",
   "maxLength",
@@ -69,7 +70,7 @@ const NUMBER_KEYS = new Set([
   "exclusiveMinimum",
   "exclusiveMaximum",
 ]);
-const BOOLEAN_KEYS = new Set([...COMMON_KEYS, "enum"]);
+const BOOLEAN_KEYS = new Set([...COMMON_KEYS, "const", "enum"]);
 const ARRAY_KEYS = new Set([...COMMON_KEYS, "items", "minItems", "maxItems"]);
 
 export type JsonInputValue =
@@ -700,6 +701,49 @@ function parseBooleanEnum(
   return Object.freeze(values);
 }
 
+function parseStringChoices(
+  record: JsonRecord,
+  pointer: string,
+): readonly string[] | null {
+  if (Object.hasOwn(record, "const") && Object.hasOwn(record, "enum")) {
+    fail(
+      "ambiguous_schema_choice",
+      pointer,
+      "The input schema cannot combine const and enum.",
+    );
+  }
+  if (!Object.hasOwn(record, "const")) {
+    return parseStringEnum(record.enum, pointer);
+  }
+  if (
+    typeof record.const !== "string" ||
+    record.const.length > MAX_STRING_LENGTH
+  ) {
+    fail("invalid_schema_const", pointer, "The input schema const is invalid.");
+  }
+  return Object.freeze([record.const]);
+}
+
+function parseBooleanChoices(
+  record: JsonRecord,
+  pointer: string,
+): readonly boolean[] | null {
+  if (Object.hasOwn(record, "const") && Object.hasOwn(record, "enum")) {
+    fail(
+      "ambiguous_schema_choice",
+      pointer,
+      "The input schema cannot combine const and enum.",
+    );
+  }
+  if (!Object.hasOwn(record, "const")) {
+    return parseBooleanEnum(record.enum, pointer);
+  }
+  if (typeof record.const !== "boolean") {
+    fail("invalid_schema_const", pointer, "The input schema const is invalid.");
+  }
+  return Object.freeze([record.const]);
+}
+
 function numericBounds(
   record: JsonRecord,
   pointer: string,
@@ -858,7 +902,7 @@ function compileString(
   common: CommonFields,
 ): CompiledStringSchema {
   exactKeys(record, STRING_KEYS, common.pointer);
-  const enumValues = parseStringEnum(record.enum, common.pointer);
+  const enumValues = parseStringChoices(record, common.pointer);
   const minLength = Object.hasOwn(record, "minLength")
     ? integerAt(
         record.minLength,
@@ -993,7 +1037,7 @@ function compileBoolean(
     kind: "boolean",
     ...common,
     ...emptyAnnotations<boolean>(),
-    enumValues: parseBooleanEnum(record.enum, common.pointer),
+    enumValues: parseBooleanChoices(record, common.pointer),
   });
 }
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from marketing_agents.application.orchestration.dependencies import OrchestrationDependencies
-from marketing_agents.application.orchestration.effect_planner import EffectPlan
+from marketing_agents.application.orchestration.effect_planner import EffectPlan, EffectPlannedStep
 from marketing_agents.application.orchestration.router import RoutingResult
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.audit import AuditContext, AuditEvent
@@ -61,8 +61,16 @@ class PersistedRunPlan:
 class AuditedPlanPersistenceService:
     """Persist the complete immutable plan set and Run mutation in one UoW."""
 
-    def __init__(self, dependencies: OrchestrationDependencies) -> None:
+    def __init__(
+        self,
+        dependencies: OrchestrationDependencies,
+        *,
+        require_current_configuration_lock: bool = False,
+    ) -> None:
+        if type(require_current_configuration_lock) is not bool:
+            raise TypeError("configuration-lock policy must be an exact boolean")
         self._dependencies = dependencies
+        self._require_current_configuration_lock = require_current_configuration_lock
 
     async def persist(
         self,
@@ -86,7 +94,12 @@ class AuditedPlanPersistenceService:
                     "run_not_found", "plan Run does not exist", run_id=effect_plan.run_id
                 )
             work_item = await unit_of_work.works.get(current.work_item_id)
-            _validate_admission_scope(current, work_item, effect_plan, routing)
+            _validate_admission_scope(
+                current,
+                work_item,
+                effect_plan,
+                routing,
+            )
             existing_plan = await unit_of_work.run_steps.get_plan(current.id)
             if existing_plan is not None:
                 materialized = _materialize_plan(
@@ -165,6 +178,9 @@ class AuditedPlanPersistenceService:
                     "Run changed before its deterministic plan was persisted",
                     run_id=current.id,
                 )
+
+            if self._require_current_configuration_lock:
+                await _validate_current_configurations(unit_of_work, current, effect_plan, routing)
 
             occurred_at = self._dependencies.utc_now()
             transition_result = transition_run(
@@ -565,6 +581,55 @@ def _validate_admission_scope(
             "plan, route, Run, and admitted WorkItem snapshots disagree",
             run_id=run.id,
         )
+
+
+async def _validate_current_configurations(
+    unit_of_work: UnitOfWork,
+    run: Run,
+    effect_plan: EffectPlan,
+    routing: RoutingResult,
+) -> None:
+    selected_by_id = {item.instance_id: item for item in routing.selected_instances}
+    try:
+        configurations = unit_of_work.configurations
+    except (AttributeError, RuntimeError):
+        raise PlanPersistenceError(
+            "plan_configuration_repository_unavailable",
+            "multi-instance plan requires atomic configuration revalidation",
+            run_id=run.id,
+        ) from None
+    steps_by_instance: dict[str, list[EffectPlannedStep]] = {}
+    for step in effect_plan.steps:
+        steps_by_instance.setdefault(step.selected_instance_id, []).append(step)
+    for instance_id in sorted(selected_by_id):
+        selected = selected_by_id[instance_id]
+        configuration = await configurations.get_for_update(instance_id)
+        if (
+            configuration is None
+            or not configuration.enabled
+            or configuration.configuration_revision != selected.configuration_revision
+        ):
+            raise PlanPersistenceError(
+                "plan_instance_configuration_drift",
+                "selected instance configuration changed before plan commit",
+                run_id=run.id,
+            )
+        for step in steps_by_instance.get(instance_id, []):
+            if step.connector_family in {"model", "artifact"}:
+                continue
+            binding = configuration.connector_bindings.get(step.connector_family)
+            if (
+                binding is None
+                or not binding.enabled
+                or binding.connector_family != step.connector_family
+                or binding.binding_id != step.binding_id
+                or step.binding_configuration_revision != configuration.configuration_revision
+            ):
+                raise PlanPersistenceError(
+                    "plan_connector_binding_drift",
+                    "selected connector binding changed before plan commit",
+                    run_id=run.id,
+                )
 
 
 async def _require_plan_replay(

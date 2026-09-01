@@ -7,6 +7,11 @@ import {
   BLOG_CONTENT_REVIEW_SCENARIO_ID,
   BLOG_CONTENT_REVIEW_TEMPLATE_ID,
   createDemoScenarioRun,
+  EMAIL_NEWSLETTER_INSTANCE_ID,
+  EMAIL_NEWSLETTER_TEMPLATE_ID,
+  EMAIL_ONBOARDING_INSTANCE_ID,
+  EMAIL_ONBOARDING_TEMPLATE_ID,
+  EMAIL_SIGNUP_SCENARIO_ID,
   fetchDemoScenarios,
   generateDemoScenarioIdempotencyKey,
   SOCIAL_DRAFT_INSTANCE_ID,
@@ -41,6 +46,14 @@ const DIRECT_COMPLETION_STATE_PATH = [
   "received",
   "validated",
   "planned",
+  "executing",
+  "completed",
+] as const;
+const EMAIL_APPROVAL_STATE_PATH = [
+  "received",
+  "validated",
+  "planned",
+  "awaiting_approval",
   "executing",
   "completed",
 ] as const;
@@ -191,11 +204,97 @@ const BLOG_CONTENT_REVIEW_PRESET = {
   },
 } as const satisfies DemoJsonObject;
 
+const EMAIL_SIGNUP_INPUT_SCHEMA = {
+  $schema: DRAFT_2020_12,
+  $id: "schema.demo.email.signup-onboarding.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "contact_id",
+    "name",
+    "email",
+    "newsletter_list_ref",
+    "consent",
+    "signup_at",
+    "welcome_context",
+  ],
+  properties: {
+    contact_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      pattern: "^demo-contact-[a-z0-9-]+$",
+    },
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      "x-sensitive": true,
+    },
+    email: {
+      type: "string",
+      format: "email",
+      minLength: 3,
+      maxLength: 254,
+      "x-sensitive": true,
+    },
+    newsletter_list_ref: {
+      type: "string",
+      const: "list.demo.email.signup-onboarding.v1",
+    },
+    consent: {
+      type: "object",
+      additionalProperties: false,
+      required: ["granted", "source", "captured_at"],
+      properties: {
+        granted: { type: "boolean", const: true },
+        source: { type: "string", const: "demo_signup_form" },
+        captured_at: {
+          type: "string",
+          format: "date-time",
+          maxLength: 40,
+        },
+      },
+    },
+    signup_at: {
+      type: "string",
+      format: "date-time",
+      maxLength: 40,
+    },
+    welcome_context: { type: "string", minLength: 1, maxLength: 2_000 },
+  },
+} as const satisfies DemoJsonObject;
+
+const EMAIL_SIGNUP_PRESET = {
+  contact_id: "demo-contact-0001",
+  name: "Avery Demo",
+  email: "avery.demo@example.test",
+  newsletter_list_ref: "list.demo.email.signup-onboarding.v1",
+  consent: {
+    granted: true,
+    source: "demo_signup_form",
+    captured_at: "2026-08-31T16:00:00Z",
+  },
+  signup_at: "2026-08-31T16:05:00Z",
+  welcome_context:
+    "Welcome the subscriber to governed AI updates for marketing teams.",
+} as const satisfies DemoJsonObject;
+
 interface ScenarioPresentation {
   readonly scenarioId:
-    typeof SOCIAL_DRAFT_SCENARIO_ID | typeof BLOG_CONTENT_REVIEW_SCENARIO_ID;
-  readonly templateId: string;
-  readonly instanceId: string;
+    | typeof SOCIAL_DRAFT_SCENARIO_ID
+    | typeof BLOG_CONTENT_REVIEW_SCENARIO_ID
+    | typeof EMAIL_SIGNUP_SCENARIO_ID;
+  readonly effect: DemoScenario["effect"];
+  readonly primaryInstanceId: string;
+  readonly selectedAgents: readonly {
+    readonly templateId: string;
+    readonly instanceId: string;
+    readonly templateLabel: string;
+    readonly instanceLabel: string;
+  }[];
+  readonly expected: DemoScenario["expected"];
+  readonly receiptExecutionMode: "dry_run" | "mock_execute";
   readonly displayName: string;
   readonly description: string;
   readonly inputSchema: DemoJsonObject;
@@ -204,21 +303,41 @@ interface ScenarioPresentation {
   readonly eyebrow: string;
   readonly pageTitle: string;
   readonly pageDescription: string;
+  readonly modeTitle: string;
   readonly modeDetail: string;
+  readonly modeTone: "safe" | "awaiting";
   readonly formId: string;
   readonly formLabel: string;
+  readonly formModeTitle: string;
+  readonly formModeDescription: string;
   readonly guardrailBadges: readonly string[];
-  readonly selectedTemplateLabel: string;
-  readonly selectedInstanceLabel: string;
   readonly boundaryNote: string | null;
   readonly receiptTitle: string;
   readonly receiptDescription: string;
+  readonly approvalQueueLink: boolean;
 }
 
 const SOCIAL_PRESENTATION: ScenarioPresentation = Object.freeze({
   scenarioId: SOCIAL_DRAFT_SCENARIO_ID,
-  templateId: SOCIAL_DRAFT_TEMPLATE_ID,
-  instanceId: SOCIAL_DRAFT_INSTANCE_ID,
+  effect: "read_only",
+  primaryInstanceId: SOCIAL_DRAFT_INSTANCE_ID,
+  selectedAgents: [
+    {
+      templateId: SOCIAL_DRAFT_TEMPLATE_ID,
+      instanceId: SOCIAL_DRAFT_INSTANCE_ID,
+      templateLabel: "Selected Social template",
+      instanceLabel: "Selected Social instance",
+    },
+  ],
+  expected: {
+    statePath: DIRECT_COMPLETION_STATE_PATH,
+    modelCalls: 1,
+    connectorCalls: 0,
+    externalActions: 0,
+    approvals: 0,
+    externalWrites: 0,
+  },
+  receiptExecutionMode: "dry_run",
   displayName: "Social content draft",
   description:
     "Turn a supplied content idea into an inert, reviewable LinkedIn draft artifact.",
@@ -229,22 +348,43 @@ const SOCIAL_PRESENTATION: ScenarioPresentation = Object.freeze({
   pageTitle: "Social idea to draft artifact",
   pageDescription:
     "Start from an API-declared safe preset, admit one deterministic mock run, and follow its durable timeline to the draft artifact.",
+  modeTitle: "Deterministic mock mode",
   modeDetail: "No connector delivery",
+  modeTone: "safe",
   formId: "demo-social-draft-form",
   formLabel: "Social draft demo preset",
+  formModeTitle: "Deterministic mock mode",
+  formModeDescription:
+    "The API admits durable dry-run work; the demo model response is fixed and connectors stay unused.",
   guardrailBadges: ["Read-only", "0 external writes", "No approval required"],
-  selectedTemplateLabel: "Selected Social template",
-  selectedInstanceLabel: "Selected Social instance",
   boundaryNote: null,
   receiptTitle: "Draft run accepted",
   receiptDescription:
     "Durable intake created the work receipt. Follow the run for timeline progress and the eventual draft artifact.",
+  approvalQueueLink: false,
 });
 
 const BLOG_PRESENTATION: ScenarioPresentation = Object.freeze({
   scenarioId: BLOG_CONTENT_REVIEW_SCENARIO_ID,
-  templateId: BLOG_CONTENT_REVIEW_TEMPLATE_ID,
-  instanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
+  effect: "read_only",
+  primaryInstanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
+  selectedAgents: [
+    {
+      templateId: BLOG_CONTENT_REVIEW_TEMPLATE_ID,
+      instanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
+      templateLabel: "Selected Blog & SEO template",
+      instanceLabel: "Selected Blog & SEO instance",
+    },
+  ],
+  expected: {
+    statePath: DIRECT_COMPLETION_STATE_PATH,
+    modelCalls: 1,
+    connectorCalls: 0,
+    externalActions: 0,
+    approvals: 0,
+    externalWrites: 0,
+  },
+  receiptExecutionMode: "dry_run",
   displayName: "Blog & SEO content review",
   description:
     "Review supplied article and product metadata for deterministic SEO and content gaps without fetching or updating a CMS.",
@@ -255,27 +395,91 @@ const BLOG_PRESENTATION: ScenarioPresentation = Object.freeze({
   pageTitle: "Blog metadata to SEO/content review",
   pageDescription:
     "Assess only the supplied article, timestamps, target keywords, and product metadata, then follow the durable run to an advisory review artifact.",
+  modeTitle: "Deterministic mock mode",
   modeDetail: "No crawling or CMS changes",
+  modeTone: "safe",
   formId: "demo-blog-content-review-form",
   formLabel: "Blog & SEO content review preset",
+  formModeTitle: "Deterministic mock mode",
+  formModeDescription:
+    "The API admits durable dry-run work; the demo model response is fixed and connectors stay unused.",
   guardrailBadges: [
     "Read-only",
     "0 external writes",
     "No approval required",
     "No crawling or CMS actions",
   ],
-  selectedTemplateLabel: "Selected Blog & SEO template",
-  selectedInstanceLabel: "Selected Blog & SEO instance",
   boundaryNote:
     "Only supplied metadata is reviewed. The canonical URL is provenance text and is never fetched.",
   receiptTitle: "Review run accepted",
   receiptDescription:
     "Durable intake created the work receipt. Follow the run for timeline progress and the eventual advisory content-review artifact.",
+  approvalQueueLink: false,
+});
+
+const EMAIL_PRESENTATION: ScenarioPresentation = Object.freeze({
+  scenarioId: EMAIL_SIGNUP_SCENARIO_ID,
+  effect: "mutating",
+  primaryInstanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+  selectedAgents: [
+    {
+      templateId: EMAIL_NEWSLETTER_TEMPLATE_ID,
+      instanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+      templateLabel: "Selected Newsletter template",
+      instanceLabel: "Selected Newsletter instance",
+    },
+    {
+      templateId: EMAIL_ONBOARDING_TEMPLATE_ID,
+      instanceId: EMAIL_ONBOARDING_INSTANCE_ID,
+      templateLabel: "Selected Onboarding template",
+      instanceLabel: "Selected Onboarding instance",
+    },
+  ],
+  expected: {
+    statePath: EMAIL_APPROVAL_STATE_PATH,
+    modelCalls: 1,
+    connectorCalls: 2,
+    externalActions: 2,
+    approvals: 2,
+    externalWrites: 2,
+  },
+  receiptExecutionMode: "mock_execute",
+  displayName: "Email signup onboarding",
+  description:
+    "Prepare approved mock newsletter and CRM onboarding actions, then create a welcome-message draft that is never sent.",
+  inputSchema: EMAIL_SIGNUP_INPUT_SCHEMA,
+  preset: EMAIL_SIGNUP_PRESET,
+  safeSubmitVerb: "Propose onboarding actions",
+  eyebrow: "DEMO-03 · Email workflow",
+  pageTitle: "Email signup approval boundary",
+  pageDescription:
+    "Prepare two immutable mock actions from synthetic signup data, pause for their separate exact approvals, and follow the durable run to an unsent welcome-message draft.",
+  modeTitle: "Approval-gated mock execution",
+  modeDetail: "Both approvals before any call",
+  modeTone: "awaiting",
+  formId: "demo-email-signup-form",
+  formLabel: "Email signup onboarding preset",
+  formModeTitle: "Approval-gated mock execution",
+  formModeDescription:
+    "Planning proposes two immutable mock actions. Neither connector nor the welcome-draft model runs until both exact approvals remain valid.",
+  guardrailBadges: [
+    "Mock writes only",
+    "2 exact approvals required",
+    "Both approvals before any call",
+    "Welcome draft only · not sent",
+  ],
+  boundaryNote:
+    "Submission proposes newsletter.subscribe and crm.upsert-contact. The accepted receipt is not proof of approval, connector execution, CRM completion, or email delivery.",
+  receiptTitle: "Approval-gated run accepted",
+  receiptDescription:
+    "Durable intake accepted the run for planning. Open the authoritative run and approval queue to verify its current state; this receipt does not prove zero calls or execution.",
+  approvalQueueLink: true,
 });
 
 const SUPPORTED_PRESENTATIONS = [
   SOCIAL_PRESENTATION,
   BLOG_PRESENTATION,
+  EMAIL_PRESENTATION,
 ] as const;
 
 interface PreparedScenario {
@@ -346,30 +550,43 @@ function isExactSupportedContract(
   scenario: DemoScenario,
   presentation: ScenarioPresentation,
 ): boolean {
-  const selected = scenario.selectedAgents[0];
   return (
     scenario.id === presentation.scenarioId &&
     scenario.version === 1 &&
     scenario.workflowId === presentation.scenarioId &&
     scenario.displayName === presentation.displayName &&
     scenario.description === presentation.description &&
-    scenario.effect === "read_only" &&
+    scenario.effect === presentation.effect &&
     scenario.safeSubmitVerb === presentation.safeSubmitVerb &&
     exactJson(scenario.inputSchema, presentation.inputSchema) &&
     exactJson(scenario.preset, presentation.preset) &&
-    scenario.selectedAgents.length === 1 &&
-    selected?.templateId === presentation.templateId &&
-    selected.instanceId === presentation.instanceId &&
-    scenario.expected.statePath.length ===
-      DIRECT_COMPLETION_STATE_PATH.length &&
-    scenario.expected.statePath.every(
-      (state, index) => state === DIRECT_COMPLETION_STATE_PATH[index],
+    scenario.selectedAgents.length === presentation.selectedAgents.length &&
+    scenario.selectedAgents.every((selected, index) => {
+      const expected = presentation.selectedAgents[index];
+      return exactJson(
+        selected,
+        expected === undefined
+          ? null
+          : {
+              templateId: expected.templateId,
+              instanceId: expected.instanceId,
+            },
+      );
+    }) &&
+    presentation.selectedAgents.some(
+      ({ instanceId }) => instanceId === presentation.primaryInstanceId,
     ) &&
-    scenario.expected.modelCalls === 1 &&
-    scenario.expected.connectorCalls === 0 &&
-    scenario.expected.externalActions === 0 &&
-    scenario.expected.approvals === 0 &&
-    scenario.expected.externalWrites === 0
+    scenario.expected.statePath.length ===
+      presentation.expected.statePath.length &&
+    scenario.expected.statePath.every(
+      (state, index) => state === presentation.expected.statePath[index],
+    ) &&
+    scenario.expected.modelCalls === presentation.expected.modelCalls &&
+    scenario.expected.connectorCalls === presentation.expected.connectorCalls &&
+    scenario.expected.externalActions ===
+      presentation.expected.externalActions &&
+    scenario.expected.approvals === presentation.expected.approvals &&
+    scenario.expected.externalWrites === presentation.expected.externalWrites
   );
 }
 
@@ -416,7 +633,7 @@ function SafetyFacts({
 }): React.JSX.Element {
   return (
     <section
-      className="demo-card demo-safety"
+      className={`demo-card demo-safety is-${presentation.modeTone}`}
       aria-labelledby="demo-safety-title"
     >
       <div className="demo-card__heading">
@@ -446,12 +663,20 @@ function SafetyFacts({
           <dd>{scenario.expected.approvals}</dd>
         </div>
       </dl>
-      <div className="demo-safety__agent">
-        <span>{presentation.selectedTemplateLabel}</span>
-        <code>{scenario.selectedAgents[0]?.templateId}</code>
-        <span>{presentation.selectedInstanceLabel}</span>
-        <code>{scenario.selectedAgents[0]?.instanceId}</code>
-      </div>
+      <ol className="demo-safety__agents" aria-label="Selected demo agents">
+        {scenario.selectedAgents.map((selected, index) => {
+          const labels = presentation.selectedAgents[index];
+          if (labels === undefined) return null;
+          return (
+            <li key={selected.instanceId} className="demo-safety__agent">
+              <span>{labels.templateLabel}</span>
+              <code>{selected.templateId}</code>
+              <span>{labels.instanceLabel}</span>
+              <code>{selected.instanceId}</code>
+            </li>
+          );
+        })}
+      </ol>
       {presentation.boundaryNote === null ? null : (
         <p className="demo-safety__boundary">{presentation.boundaryNote}</p>
       )}
@@ -531,6 +756,11 @@ function AcceptedReceipt({
         <Link to={runPath}>Open accepted run</Link>
         <Link to={`${runPath}#timeline-title`}>Open timeline</Link>
         <Link to={`${runPath}#run-artifacts-title`}>Open artifacts</Link>
+        {presentation.approvalQueueLink ? (
+          <Link to={`/approvals?run_id=${encodeURIComponent(receipt.runId)}`}>
+            Open approval queue
+          </Link>
+        ) : null}
       </nav>
     </section>
   );
@@ -617,9 +847,10 @@ function DemoWorkspace({
     try {
       const accepted = await createDemoScenarioRun({
         scenarioId: scenario.id,
-        instanceId: scenario.selectedAgents[0]?.instanceId ?? "",
+        instanceId: presentation.primaryInstanceId,
         overrides: validation.input,
         idempotencyKey,
+        expectedExecutionMode: presentation.receiptExecutionMode,
         signal: controller.signal,
       });
       if (!mountedRef.current) return;
@@ -662,6 +893,9 @@ function DemoWorkspace({
           formId={presentation.formId}
           ariaLabel={presentation.formLabel}
           submitLabel={presentation.safeSubmitVerb}
+          modeTitle={presentation.formModeTitle}
+          modeDescription={presentation.formModeDescription}
+          modeTone={presentation.modeTone}
           schema={schema}
           draft={draft}
           issues={issues}
@@ -801,10 +1035,13 @@ export function DemosPage(): React.JSX.Element {
           <h1 id="demo-page-title">{activePresentation.pageTitle}</h1>
           <p>{activePresentation.pageDescription}</p>
         </div>
-        <div className="demo-page__mode" aria-label="Demo execution boundary">
+        <div
+          className={`demo-page__mode is-${activePresentation.modeTone}`}
+          aria-label="Demo execution boundary"
+        >
           <span aria-hidden="true">◆</span>
           <span>
-            <strong>Deterministic mock mode</strong>
+            <strong>{activePresentation.modeTitle}</strong>
             {activePresentation.modeDetail}
           </span>
         </div>

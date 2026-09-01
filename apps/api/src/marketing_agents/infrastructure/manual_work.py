@@ -418,15 +418,27 @@ class CompiledCatalogManualAdmissionResolver:
         scenario: DemoScenarioDefinition | None,
     ) -> tuple[ToolCapabilityRecord, ...]:
         selected: list[ToolCapabilityRecord] = []
-        identifiers = (
-            tuple(dict.fromkeys(step.capability_id for step in scenario.steps))
-            if scenario is not None
-            else template.allowed_tool_capability_ids
-        )
-        if any(
-            identifier not in template.allowed_tool_capability_ids for identifier in identifiers
-        ):
-            raise _unavailable()
+        if scenario is None:
+            identifiers = template.allowed_tool_capability_ids
+        else:
+            identifiers = tuple(dict.fromkeys(step.capability_id for step in scenario.steps))
+            selected_agents = {agent.instance_id: agent for agent in scenario.selected_agents}
+            for step in scenario.steps:
+                agent = selected_agents.get(step.selected_instance_id)
+                instance = self._instances.get(step.selected_instance_id)
+                owner_template = (
+                    None
+                    if agent is None or instance is None
+                    else self._templates.get(agent.template_id)
+                )
+                if (
+                    agent is None
+                    or instance is None
+                    or type(owner_template) is not AgentTemplateRecord
+                    or instance.template_id != agent.template_id
+                    or step.capability_id not in owner_template.allowed_tool_capability_ids
+                ):
+                    raise _unavailable()
         for identifier in identifiers:
             capability = self._capabilities.get(identifier)
             if type(capability) is not ToolCapabilityRecord:

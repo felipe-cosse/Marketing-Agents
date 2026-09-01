@@ -52,6 +52,20 @@ import "./approval-queue.css";
 const PAGE_SIZE = 25;
 const EMAIL_RUN_APPROVAL_LIMIT = 100;
 const APPROVAL_REVIEW_SHEET_MEDIA_QUERY = "(max-width: 900px)";
+const INVALID_URL_RUN_ID = "run.invalid-url-parameter";
+
+function approvalRunIdFromLocation(): string | null {
+  const values = new URLSearchParams(window.location.search).getAll("run_id");
+  if (values.length === 0) return null;
+  if (values.length !== 1) return INVALID_URL_RUN_ID;
+  const value = values[0];
+  if (value === undefined) return INVALID_URL_RUN_ID;
+  try {
+    return approvalListQueryKey({ runId: value })[2].runId;
+  } catch {
+    return INVALID_URL_RUN_ID;
+  }
+}
 
 interface DecisionRequest {
   readonly approval: ApprovalDetail;
@@ -119,6 +133,7 @@ export function ApprovalPendingCountBadge(): React.JSX.Element | null {
 
 export function ApprovalQueuePage(): React.JSX.Element {
   const queryClient = useQueryClient();
+  const requestedRunId = useMemo(() => approvalRunIdFromLocation(), []);
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "">(
     "pending",
   );
@@ -138,9 +153,10 @@ export function ApprovalQueuePage(): React.JSX.Element {
   const listBaseQuery = useMemo(
     () => ({
       ...(statusFilter === "" ? {} : { status: statusFilter }),
+      ...(requestedRunId === null ? {} : { runId: requestedRunId }),
       limit: PAGE_SIZE,
     }),
-    [statusFilter],
+    [requestedRunId, statusFilter],
   );
   const approvalsQuery = useInfiniteQuery({
     queryKey: approvalListQueryKey(listBaseQuery),

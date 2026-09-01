@@ -559,12 +559,12 @@ def test_run_02_hash_domains_have_fixed_golden_vectors() -> None:
     plan = planner.plan(_request(include_write=True))
     proposal = plan.proposed_actions[0]
 
-    assert plan.plan_hash == "2c91ead7583e11bca3f729ad8951c341a57ea950bd27d4e64c706eae0ef9832b"
+    assert plan.plan_hash == "971a7bf0f8d2e562ae3e74a17aff0f98673f31590e8c91bd0276869346d7a49b"
     assert proposal.envelope.semantic_action_hash == (
         "4f4bee4353522eac5819cbc2ecec847b0363793723366418bfa3d8284a19a223"
     )
     assert proposal.action_hash == (
-        "78b9a84553dd0b19ac9732141d6251f9b5f5100585295879abdc8caafa2e4b49"
+        "67eceeef9e52a58056f86b554a6e48d569333815d882728ae67c22ee119b9643"
     )
     assert proposal.envelope.destination == (
         "destination-sha256-v1:b074c70e6a182db3e95b92955b4e844318b52194d9ed0221ad0c13bc5300e386"

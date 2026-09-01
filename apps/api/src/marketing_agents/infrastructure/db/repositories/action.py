@@ -517,6 +517,7 @@ class SQLAlchemyExternalActionRepository:
                     ),
                 ),
             )
+            .correlate(ExternalActionRecord)
             .exists()
         )
         any_started_attempt = (
@@ -526,6 +527,7 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionDispatchAttemptRecord.attempt_number < history_limit,
                 ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
             )
+            .correlate(ExternalActionRecord)
             .exists()
         )
         prior_provider_retry = (
@@ -541,6 +543,7 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionDispatchAttemptRecord.completed_at.is_not(None),
                 ExternalActionDispatchAttemptRecord.conclusion == "provider_retry",
             )
+            .correlate(ExternalActionRecord)
             .exists()
         )
         if authority.call_mode is ReleaseCallMode.FIRST_CALL:
@@ -558,6 +561,7 @@ class SQLAlchemyExternalActionRepository:
                     > prior_started_attempt_number,
                     ExternalActionDispatchAttemptRecord.call_started_at.is_not(None),
                 )
+                .correlate(ExternalActionRecord)
                 .exists()
             )
             call_mode_fence = (
@@ -837,6 +841,7 @@ class SQLAlchemyExternalActionRepository:
                 ExternalActionDispatchAttemptRecord.completed_at.is_(None),
                 ExternalActionDispatchAttemptRecord.conclusion.is_(None),
             )
+            .correlate(ExternalActionRecord)
             .exists()
         )
         try:

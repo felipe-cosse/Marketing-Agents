@@ -6,6 +6,11 @@ import {
   BLOG_CONTENT_REVIEW_SCENARIO_ID,
   BLOG_CONTENT_REVIEW_TEMPLATE_ID,
   createDemoScenarioRun,
+  EMAIL_NEWSLETTER_INSTANCE_ID,
+  EMAIL_NEWSLETTER_TEMPLATE_ID,
+  EMAIL_ONBOARDING_INSTANCE_ID,
+  EMAIL_ONBOARDING_TEMPLATE_ID,
+  EMAIL_SIGNUP_SCENARIO_ID,
   fetchDemoScenarios,
   SOCIAL_DRAFT_INSTANCE_ID,
   SOCIAL_DRAFT_SCENARIO_ID,
@@ -164,6 +169,78 @@ const BLOG_PRESET = {
   },
 } as const;
 
+const EMAIL_INPUT_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "schema.demo.email.signup-onboarding.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "contact_id",
+    "name",
+    "email",
+    "newsletter_list_ref",
+    "consent",
+    "signup_at",
+    "welcome_context",
+  ],
+  properties: {
+    contact_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 200,
+      pattern: "^demo-contact-[a-z0-9-]+$",
+    },
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      "x-sensitive": true,
+    },
+    email: {
+      type: "string",
+      format: "email",
+      minLength: 3,
+      maxLength: 254,
+      "x-sensitive": true,
+    },
+    newsletter_list_ref: {
+      type: "string",
+      const: "list.demo.email.signup-onboarding.v1",
+    },
+    consent: {
+      type: "object",
+      additionalProperties: false,
+      required: ["granted", "source", "captured_at"],
+      properties: {
+        granted: { type: "boolean", const: true },
+        source: { type: "string", const: "demo_signup_form" },
+        captured_at: {
+          type: "string",
+          format: "date-time",
+          maxLength: 40,
+        },
+      },
+    },
+    signup_at: { type: "string", format: "date-time", maxLength: 40 },
+    welcome_context: { type: "string", minLength: 1, maxLength: 2_000 },
+  },
+} as const;
+
+const EMAIL_PRESET = {
+  contact_id: "demo-contact-0001",
+  name: "Avery Demo",
+  email: "avery.demo@example.test",
+  newsletter_list_ref: "list.demo.email.signup-onboarding.v1",
+  consent: {
+    granted: true,
+    source: "demo_signup_form",
+    captured_at: "2026-08-31T16:00:00Z",
+  },
+  signup_at: "2026-08-31T16:05:00Z",
+  welcome_context:
+    "Welcome the subscriber to governed AI updates for marketing teams.",
+} as const;
+
 function scenarioBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -230,6 +307,50 @@ function blogScenarioBody(
   };
 }
 
+function emailScenarioBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: EMAIL_SIGNUP_SCENARIO_ID,
+    version: 1,
+    displayName: "Email signup onboarding",
+    description:
+      "Prepare approved mock newsletter and CRM onboarding actions, then create a welcome-message draft that is never sent.",
+    workflowId: EMAIL_SIGNUP_SCENARIO_ID,
+    effect: "mutating",
+    mode: "deterministic_mock",
+    selectedAgents: [
+      {
+        templateId: EMAIL_NEWSLETTER_TEMPLATE_ID,
+        instanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+      },
+      {
+        templateId: EMAIL_ONBOARDING_TEMPLATE_ID,
+        instanceId: EMAIL_ONBOARDING_INSTANCE_ID,
+      },
+    ],
+    inputSchema: EMAIL_INPUT_SCHEMA,
+    preset: EMAIL_PRESET,
+    safeSubmitVerb: "Propose onboarding actions",
+    expected: {
+      statePath: [
+        "received",
+        "validated",
+        "planned",
+        "awaiting_approval",
+        "executing",
+        "completed",
+      ],
+      modelCalls: 1,
+      connectorCalls: 2,
+      externalActions: 2,
+      approvals: 2,
+      externalWrites: 2,
+    },
+    ...overrides,
+  };
+}
+
 function receiptBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -245,6 +366,26 @@ function receiptBody(
     runUrl: `/api/v1/runs/${RUN_ID}`,
     timelineUrl: `/api/v1/runs/${RUN_ID}/timeline`,
     artifactsUrl: `/api/v1/runs/${RUN_ID}/artifacts`,
+    ...overrides,
+  };
+}
+
+function emailReceiptBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const runId = "run.demo.email.01";
+  return {
+    status: "accepted",
+    disposition: "created",
+    scenarioId: EMAIL_SIGNUP_SCENARIO_ID,
+    eventId: `manual-event-hmac-sha256-v1:${"e".repeat(64)}`,
+    workId: "work.demo.email.01",
+    runId,
+    executionMode: "mock_execute",
+    instanceUrl: `/api/v1/agent-instances/${EMAIL_NEWSLETTER_INSTANCE_ID}`,
+    runUrl: `/api/v1/runs/${runId}`,
+    timelineUrl: `/api/v1/runs/${runId}/timeline`,
+    artifactsUrl: `/api/v1/runs/${runId}/artifacts`,
     ...overrides,
   };
 }
@@ -347,6 +488,55 @@ describe("DEMO-01 demo scenario transport", () => {
     expect(Object.isFrozen(scenarios[0]?.preset.current_product_metadata)).toBe(
       true,
     );
+  });
+
+  it("DEMO-03 discovers and freezes the exact two-agent Email approval-boundary projection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          items: [emailScenarioBody(), blogScenarioBody(), scenarioBody()],
+        }),
+      ),
+    );
+
+    const scenarios = await fetchDemoScenarios();
+    const email = scenarios[0];
+
+    expect(email).toMatchObject({
+      id: EMAIL_SIGNUP_SCENARIO_ID,
+      effect: "mutating",
+      safeSubmitVerb: "Propose onboarding actions",
+      selectedAgents: [
+        {
+          templateId: EMAIL_NEWSLETTER_TEMPLATE_ID,
+          instanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+        },
+        {
+          templateId: EMAIL_ONBOARDING_TEMPLATE_ID,
+          instanceId: EMAIL_ONBOARDING_INSTANCE_ID,
+        },
+      ],
+      expected: {
+        statePath: [
+          "received",
+          "validated",
+          "planned",
+          "awaiting_approval",
+          "executing",
+          "completed",
+        ],
+        modelCalls: 1,
+        connectorCalls: 2,
+        externalActions: 2,
+        approvals: 2,
+        externalWrites: 2,
+      },
+    });
+    expect(Object.isFrozen(email)).toBe(true);
+    expect(Object.isFrozen(email?.selectedAgents)).toBe(true);
+    expect(Object.isFrozen(email?.inputSchema)).toBe(true);
+    expect(Object.isFrozen(email?.preset.consent)).toBe(true);
   });
 
   it("DEMO-01 keeps the shared discovery decoder future-safe without weakening bounds", async () => {
@@ -454,6 +644,7 @@ describe("DEMO-01 demo scenario transport", () => {
       instanceId: SOCIAL_DRAFT_INSTANCE_ID,
       overrides: PRESET,
       idempotencyKey: IDEMPOTENCY_KEY,
+      expectedExecutionMode: "dry_run",
     });
 
     expect(receipt).toEqual(receiptBody());
@@ -476,6 +667,42 @@ describe("DEMO-01 demo scenario transport", () => {
     );
   });
 
+  it("DEMO-03 cross-binds the Email receipt to mock execution and its primary instance", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(sessionBody()))
+      .mockResolvedValueOnce(jsonResponse(emailReceiptBody(), 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createDemoScenarioRun({
+        scenarioId: EMAIL_SIGNUP_SCENARIO_ID,
+        instanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+        overrides: EMAIL_PRESET,
+        idempotencyKey: "demo-email-signup-retry-0001",
+        expectedExecutionMode: "mock_execute",
+      }),
+    ).resolves.toEqual(emailReceiptBody());
+
+    clearLocalSession();
+    const driftedFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(sessionBody()))
+      .mockResolvedValueOnce(
+        jsonResponse(emailReceiptBody({ executionMode: "dry_run" }), 202),
+      );
+    vi.stubGlobal("fetch", driftedFetch);
+    await expect(
+      createDemoScenarioRun({
+        scenarioId: EMAIL_SIGNUP_SCENARIO_ID,
+        instanceId: EMAIL_NEWSLETTER_INSTANCE_ID,
+        overrides: EMAIL_PRESET,
+        idempotencyKey: "demo-email-signup-retry-0002",
+        expectedExecutionMode: "mock_execute",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_demo_scenario_response" });
+  });
+
   it("DEMO-01 rejects a receipt whose scenario, mode, or links drift", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -496,6 +723,7 @@ describe("DEMO-01 demo scenario transport", () => {
         instanceId: SOCIAL_DRAFT_INSTANCE_ID,
         overrides: PRESET,
         idempotencyKey: IDEMPOTENCY_KEY,
+        expectedExecutionMode: "dry_run",
       }),
     ).rejects.toMatchObject({ code: "invalid_demo_scenario_response" });
   });
@@ -511,6 +739,7 @@ describe("DEMO-01 demo scenario transport", () => {
         instanceId: SOCIAL_DRAFT_INSTANCE_ID,
         overrides: PRESET,
         idempotencyKey: IDEMPOTENCY_KEY,
+        expectedExecutionMode: "dry_run",
       }),
     ).rejects.toMatchObject({ code: "invalid_demo_scenario_request" });
     await expect(
@@ -519,6 +748,7 @@ describe("DEMO-01 demo scenario transport", () => {
         instanceId: SOCIAL_DRAFT_INSTANCE_ID,
         overrides: { source_urls: sparse },
         idempotencyKey: IDEMPOTENCY_KEY,
+        expectedExecutionMode: "dry_run",
       }),
     ).rejects.toMatchObject({ code: "invalid_demo_scenario_request" });
     expect(fetchMock).not.toHaveBeenCalled();

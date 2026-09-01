@@ -1,0 +1,203 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEMO-03",
+  "matrix_statement_sha256": "dc35feb8061d792643b2a7d2e7eed963bdbdcb2b1e105144539067ede0e9c244",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/api/routes/demo_scenarios.py",
+      "apps/api/src/marketing_agents/api/schemas/demo_scenarios.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/demos/**",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/manual_work.py",
+      "apps/web/e2e/demo-03-email-signup.spec.ts",
+      "apps/web/package.json",
+      "apps/web/scripts/run-demo-03-e2e.mjs",
+      "apps/web/scripts/run-demo-03-unit.mjs",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/src/api/demoScenarios.test.ts",
+      "apps/web/src/api/demoScenarios.ts",
+      "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx",
+      "apps/web/src/features/approvals/ApprovalQueuePage.tsx",
+      "apps/web/src/features/demos/**",
+      "apps/web/src/features/dry-run/schemaModel.ts",
+      "catalog/v1/instances/email.yaml",
+      "catalog/v1/release.lock.json",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/DEMO-03.json",
+      "docs/verification/requirements/DEMO-03.md",
+      "tests/acceptance/test_email_signup_demo.py",
+      "tests/acceptance/test_email_signup_demo_contract.py",
+      "tests/fixtures/demos/email-signup.json",
+      "tests/integration/api/test_api_02_catalog_hierarchy.py",
+      "tests/integration/api/test_demo_02_scenarios.py",
+      "tests/integration/api/test_demo_03_scenarios.py",
+      "tests/unit/application/test_run_02_effect_aware_planning.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/demos/email_signup_onboarding.py",
+          "apps/api/src/marketing_agents/demos/email_signup_service.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+          "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+          "apps/api/src/marketing_agents/infrastructure/manual_work.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/api/routes/demo_scenarios.py",
+          "apps/api/src/marketing_agents/api/schemas/demo_scenarios.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/demoScenarios.ts",
+          "apps/web/src/features/demos/DemosPage.tsx",
+          "apps/web/src/features/approvals/ApprovalQueuePage.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/test_email_signup_demo.py",
+          "tests/acceptance/test_email_signup_demo_contract.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/api/test_demo_03_scenarios.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/demos/DemosPage.demo03.test.tsx",
+          "apps/web/e2e/demo-03-email-signup.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "approval-gated-email-onboarding-artifact",
+      "type": "journey",
+      "statement": "The exact Email signup scenario and committed synthetic fixture create two independently approved, registered mock actions followed by one dependent deterministic model step; a later worker drain records exactly two ordered durable mock receipts, performs one model call, and creates one schema-valid email_onboarding_summary ArtifactEnvelope containing an unsent welcome_message_draft and complete frozen-demo provenance. Replay performs no duplicate connector or model calls.",
+      "test_refs": [
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_all_approved_barrier_and_worker_resume",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_configuration_drift_fails_before_plan_commit_or_call",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_validator_rejects_schema_valid_routing_tamper",
+        "tests/acceptance/test_email_signup_demo_contract.py::test_demo_03_expected_artifact_is_one_mock_only_never_sent_summary",
+        "tests/acceptance/test_email_signup_demo_contract.py::test_demo_03_composition_binds_model_to_customer_onboarder_only"
+      ]
+    },
+    {
+      "id": "atomic-two-approval-zero-call-boundary",
+      "type": "negative_control",
+      "statement": "Both exact action approvals form one atomic release barrier: the first approval, a wrong action hash, an under-scoped approver, pre-release cancellation, selected-configuration drift, and frozen routing drift all leave connector and model call counts at zero. Approval handling never dispatches inline, caller input cannot select capabilities or bindings, and cap.email.send-message is absent from the plan and artifact authority.",
+      "test_refs": [
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_all_approved_barrier_and_worker_resume",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_unauthorized_or_drifted_approval_releases_nothing",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_configuration_drift_fails_before_plan_commit_or_call",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_pre_release_cancellation_performs_zero_calls",
+        "tests/acceptance/test_email_signup_demo.py::test_demo_03_validator_rejects_schema_valid_routing_tamper",
+        "tests/acceptance/test_email_signup_demo_contract.py::test_demo_03_registry_rejects_unsafe_or_noncanonical_authority"
+      ]
+    },
+    {
+      "id": "private-asynchronous-mock-execution-api",
+      "type": "contract",
+      "statement": "Authenticated discovery freezes the two selected agents, mutating effect, six-state approval path, expected counts, closed schema, synthetic preset, and safe submit verb. Operator-only POST resolves server-owned input and admits a durable mock_execution Work/Run before returning a private 202 mock_execute receipt; it does not expose an approvals URL or perform planning, approval, dispatch, model execution, or completion inline.",
+      "test_refs": [
+        "tests/integration/api/test_demo_03_scenarios.py::test_demo_03_discovery_freezes_two_agents_approval_path_and_counts",
+        "tests/integration/api/test_demo_03_scenarios.py::test_demo_03_run_uses_trusted_mock_execution_without_approvals_url"
+      ]
+    },
+    {
+      "id": "truthful-email-approval-control-surface",
+      "type": "positive",
+      "statement": "The production Demos route renders Email only after exact contract validation, preserves Social as the default, presents the two agents and amber approval boundary, submits only with Propose onboarding actions, labels acceptance without claiming execution, and links the authoritative run and a run-filtered approval queue. Invalid run filters fail closed, while the Demos page exposes no approve, dispatch, or send control and removes submission on contract drift.",
+      "test_refs": [
+        "apps/web/src/api/demoScenarios.test.ts::DEMO-03 discovers and freezes the exact two-agent Email approval-boundary projection",
+        "apps/web/src/api/demoScenarios.test.ts::DEMO-03 cross-binds the Email receipt to mock execution and its primary instance",
+        "apps/web/src/features/demos/DemosPage.demo03.test.tsx::DEMO-03 selects the exact Email preset and proposes only approval-gated mock actions",
+        "apps/web/src/features/demos/DemosPage.demo03.test.tsx::DEMO-03 removes Email submission when its two-action approval contract drifts",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::filters the approval queue to the exact run_id carried by a demo receipt",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx::fails closed instead of opening an unfiltered queue for an invalid run_id",
+        "apps/web/e2e/demo-03-email-signup.spec.ts::DEMO-03 proposes Email signup actions and exposes approval-gated durable resources",
+        "apps/web/e2e/demo-03-email-signup.spec.ts::DEMO-03 fails closed when the Email approval boundary drifts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "demo-03-backend-acceptance",
+      "runner": "argv",
+      "argv": ["make", "test-demo-03-backend"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "approval-gated-email-onboarding-artifact",
+        "atomic-two-approval-zero-call-boundary",
+        "private-asynchronous-mock-execution-api"
+      ]
+    },
+    {
+      "id": "demo-03-web-unit",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-03-unit"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "atomic-two-approval-zero-call-boundary",
+        "truthful-email-approval-control-surface"
+      ]
+    },
+    {
+      "id": "demo-03-real-browser",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-03-e2e"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "atomic-two-approval-zero-call-boundary",
+        "private-asynchronous-mock-execution-api",
+        "truthful-email-approval-control-surface"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/api/routes/demo_scenarios.py",
+      "apps/api/src/marketing_agents/api/schemas/demo_scenarios.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/demos/**",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/action.py",
+      "apps/api/src/marketing_agents/infrastructure/manual_work.py"
+    ],
+    "gate_id": "demo-03-backend-acceptance"
+  },
+  "limitations": [
+    "The completed journey uses registered deterministic mocks and temporary local SQLite through a bounded worker/test drain. It does not claim real newsletter, CRM, model-provider, production-database, or deployed-worker behavior.",
+    "The HTTP POST proves durable asynchronous intake only. The default API composition still requires the existing manual-admission and worker dependencies before it can accept or drain work in a deployed process.",
+    "The browser gate uses the production Vite build with deterministic same-origin scenario and receipt fixtures plus the real local session endpoint. It proves the control surface and transport boundary, not browser-observed worker completion.",
+    "The two durable connector receipts are mock-only control-plane evidence. They do not prove a real subscription, CRM update, delivered email, marketing consent outside the synthetic fixture, or a production outcome.",
+    "Cancellation before release proves zero calls. Post-release cancellation is a forward execution fence and cannot roll back a connector call whose durable mock receipt already exists.",
+    "Determinism covers the normalized business payload and exact frozen demo contract. Durable identities, audit records, correlations, and timestamps remain intentionally unique or clock-derived, and DEMO-04 through DEMO-06 remain separately owned."
+  ]
+}

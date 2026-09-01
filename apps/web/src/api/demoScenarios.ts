@@ -17,6 +17,16 @@ export const BLOG_CONTENT_REVIEW_TEMPLATE_ID =
   "tpl.blog-seo.new-content.blog-post-updater" as const;
 export const BLOG_CONTENT_REVIEW_INSTANCE_ID =
   "inst.blog-seo.new-content.blog-post-updater.01" as const;
+export const EMAIL_SIGNUP_SCENARIO_ID =
+  "demo.email.signup-onboarding.v1" as const;
+export const EMAIL_NEWSLETTER_TEMPLATE_ID =
+  "tpl.email.newsletter.newsletter-subscriber" as const;
+export const EMAIL_NEWSLETTER_INSTANCE_ID =
+  "inst.email.newsletter.newsletter-subscriber.01" as const;
+export const EMAIL_ONBOARDING_TEMPLATE_ID =
+  "tpl.email.lifecycle-marketing.customer-onboarder" as const;
+export const EMAIL_ONBOARDING_INSTANCE_ID =
+  "inst.email.lifecycle-marketing.customer-onboarder.01" as const;
 
 const DISCOVERY_PATH = "/api/v1/demo-scenarios";
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{8,240}$/u;
@@ -120,6 +130,7 @@ export interface CreateDemoScenarioRunInput {
   readonly instanceId: string;
   readonly overrides: Readonly<Record<string, unknown>>;
   readonly idempotencyKey: string;
+  readonly expectedExecutionMode: "dry_run" | "mock_execute";
   readonly signal?: AbortSignal;
 }
 
@@ -130,7 +141,7 @@ export interface DemoScenarioRunReceipt {
   readonly eventId: string;
   readonly workId: string;
   readonly runId: string;
-  readonly executionMode: "dry_run";
+  readonly executionMode: "dry_run" | "mock_execute";
   readonly instanceUrl: string;
   readonly runUrl: string;
   readonly timelineUrl: string;
@@ -534,7 +545,10 @@ function prefixedResourceId(value: unknown, prefix: "work." | "run."): string {
 
 function normalizeReceipt(
   value: unknown,
-  input: Pick<CreateDemoScenarioRunInput, "scenarioId" | "instanceId">,
+  input: Pick<
+    CreateDemoScenarioRunInput,
+    "scenarioId" | "instanceId" | "expectedExecutionMode"
+  >,
 ): DemoScenarioRunReceipt {
   const record = asRecord(value, "demo scenario receipt");
   assertExactFields(record, RECEIPT_FIELDS, "demo scenario receipt");
@@ -542,7 +556,7 @@ function normalizeReceipt(
     record.status !== "accepted" ||
     (record.disposition !== "created" && record.disposition !== "replayed") ||
     record.scenarioId !== input.scenarioId ||
-    record.executionMode !== "dry_run"
+    record.executionMode !== input.expectedExecutionMode
   ) {
     throw new ContractViolation("demo scenario receipt binding is invalid");
   }
@@ -584,7 +598,7 @@ function normalizeReceipt(
     eventId,
     workId,
     runId,
-    executionMode: "dry_run",
+    executionMode: input.expectedExecutionMode,
     instanceUrl,
     runUrl,
     timelineUrl,

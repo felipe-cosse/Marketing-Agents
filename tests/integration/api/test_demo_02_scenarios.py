@@ -27,6 +27,7 @@ from marketing_agents.config import Settings
 from marketing_agents.demos import (
     BLOG_CONTENT_REVIEW_SCENARIO_ID,
     DEMO_SCENARIOS,
+    EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
     SOCIAL_CONTENT_DRAFT_SCENARIO_ID,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
@@ -150,6 +151,7 @@ async def test_demo_02_discovery_is_exact_safe_and_private() -> None:
     items = response.json()["items"]
     assert [item["id"] for item in items] == [
         BLOG_CONTENT_REVIEW_SCENARIO_ID,
+        EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
         SOCIAL_CONTENT_DRAFT_SCENARIO_ID,
     ]
     assert items[0] == {
