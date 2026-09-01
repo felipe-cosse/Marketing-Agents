@@ -27,6 +27,12 @@ export const EMAIL_ONBOARDING_TEMPLATE_ID =
   "tpl.email.lifecycle-marketing.customer-onboarder" as const;
 export const EMAIL_ONBOARDING_INSTANCE_ID =
   "inst.email.lifecycle-marketing.customer-onboarder.01" as const;
+export const COMMUNITY_REMINDER_SCENARIO_ID =
+  "demo.community.reminder-draft.v1" as const;
+export const COMMUNITY_REMINDER_TEMPLATE_ID =
+  "tpl.community.events.live-session-reminder" as const;
+export const COMMUNITY_REMINDER_INSTANCE_ID =
+  "inst.community.events.live-session-reminder.01" as const;
 
 const DISCOVERY_PATH = "/api/v1/demo-scenarios";
 const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{8,240}$/u;

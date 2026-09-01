@@ -116,7 +116,7 @@ Allowed status values:
 | DEMO-01 | Social idea to draft artifact. | 11 | Social workflow | Social acceptance | verified |
 | DEMO-02 | Blog metadata to SEO/content review. | 11 | Blog workflow | Blog acceptance | verified |
 | DEMO-03 | Email signup to subscriber/onboarding actions. | 11 | Two actions + welcome artifact | Email acceptance | verified |
-| DEMO-04 | Community event signup to reminder draft. | 11 | Reminder draft/recommended time | Community acceptance | planned |
+| DEMO-04 | Community event signup to reminder draft. | 11 | Reminder draft/recommended time | Community acceptance | verified |
 | DEMO-05 | Partnership application to structured recommendation. | 11 | Advisory review workflow | Partnerships acceptance | planned |
 | DEMO-06 | Writes await exact approval; Email has zero calls before and mocks after. | 06, 11 | All-approvals barrier | Email negative/positive/crash tests | planned |
 | SAFE-01 | Default dry-run/mock providers/connectors. | 01, 10 | Settings/registry/UI banner | Startup/session tests | verified |

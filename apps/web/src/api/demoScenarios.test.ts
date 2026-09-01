@@ -5,6 +5,9 @@ import {
   BLOG_CONTENT_REVIEW_INSTANCE_ID,
   BLOG_CONTENT_REVIEW_SCENARIO_ID,
   BLOG_CONTENT_REVIEW_TEMPLATE_ID,
+  COMMUNITY_REMINDER_INSTANCE_ID,
+  COMMUNITY_REMINDER_SCENARIO_ID,
+  COMMUNITY_REMINDER_TEMPLATE_ID,
   createDemoScenarioRun,
   EMAIL_NEWSLETTER_INSTANCE_ID,
   EMAIL_NEWSLETTER_TEMPLATE_ID,
@@ -241,6 +244,90 @@ const EMAIL_PRESET = {
     "Welcome the subscriber to governed AI updates for marketing teams.",
 } as const;
 
+const COMMUNITY_INPUT_SCHEMA = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "schema.demo.community.reminder-draft.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "event_id",
+    "event_name",
+    "signup_event_id",
+    "admitted_source",
+    "signup_at",
+    "session_local_start",
+    "session_timezone",
+    "reminder_offset_minutes",
+    "attendee_display_name",
+    "channel_label",
+    "event_details",
+  ],
+  properties: {
+    event_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+    },
+    event_name: { type: "string", minLength: 1, maxLength: 160 },
+    signup_event_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+    },
+    admitted_source: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+    },
+    signup_at: { type: "string", format: "date-time", maxLength: 40 },
+    session_local_start: {
+      type: "string",
+      pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$",
+      maxLength: 19,
+    },
+    session_timezone: {
+      type: "string",
+      minLength: 1,
+      maxLength: 64,
+      pattern: "^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*$",
+    },
+    reminder_offset_minutes: {
+      type: "integer",
+      minimum: 1,
+      maximum: 10_080,
+    },
+    attendee_display_name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      "x-sensitive": true,
+    },
+    channel_label: {
+      type: "string",
+      enum: ["email", "community", "in_app"],
+    },
+    event_details: { type: "string", minLength: 1, maxLength: 2_000 },
+  },
+} as const;
+
+const COMMUNITY_PRESET = {
+  event_id: "event.community-live-session.2026-09-17",
+  event_name: "Marketing operators live session",
+  signup_event_id: "signup.community-demo-0001",
+  admitted_source: "fixture.community-signup",
+  signup_at: "2026-09-01T16:30:00Z",
+  session_local_start: "2026-09-17T09:00:00",
+  session_timezone: "America/Los_Angeles",
+  reminder_offset_minutes: 1_440,
+  attendee_display_name: "Demo Attendee",
+  channel_label: "email",
+  event_details:
+    "A live session on governed marketing automation and approval-safe workflows.",
+} as const;
+
 function scenarioBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -351,6 +438,39 @@ function emailScenarioBody(
   };
 }
 
+function communityScenarioBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: COMMUNITY_REMINDER_SCENARIO_ID,
+    version: 1,
+    displayName: "Community reminder draft",
+    description:
+      "Create a deterministic reminder draft and recommended UTC time from supplied event signup details without scheduling or sending.",
+    workflowId: COMMUNITY_REMINDER_SCENARIO_ID,
+    effect: "read_only",
+    mode: "deterministic_mock",
+    selectedAgents: [
+      {
+        templateId: COMMUNITY_REMINDER_TEMPLATE_ID,
+        instanceId: COMMUNITY_REMINDER_INSTANCE_ID,
+      },
+    ],
+    inputSchema: COMMUNITY_INPUT_SCHEMA,
+    preset: COMMUNITY_PRESET,
+    safeSubmitVerb: "Create reminder draft",
+    expected: {
+      statePath: ["received", "validated", "planned", "executing", "completed"],
+      modelCalls: 1,
+      connectorCalls: 0,
+      externalActions: 0,
+      approvals: 0,
+      externalWrites: 0,
+    },
+    ...overrides,
+  };
+}
+
 function receiptBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -383,6 +503,26 @@ function emailReceiptBody(
     runId,
     executionMode: "mock_execute",
     instanceUrl: `/api/v1/agent-instances/${EMAIL_NEWSLETTER_INSTANCE_ID}`,
+    runUrl: `/api/v1/runs/${runId}`,
+    timelineUrl: `/api/v1/runs/${runId}/timeline`,
+    artifactsUrl: `/api/v1/runs/${runId}/artifacts`,
+    ...overrides,
+  };
+}
+
+function communityReceiptBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const runId = "run.demo.community.01";
+  return {
+    status: "accepted",
+    disposition: "created",
+    scenarioId: COMMUNITY_REMINDER_SCENARIO_ID,
+    eventId: `manual-event-hmac-sha256-v1:${"f".repeat(64)}`,
+    workId: "work.demo.community.01",
+    runId,
+    executionMode: "dry_run",
+    instanceUrl: `/api/v1/agent-instances/${COMMUNITY_REMINDER_INSTANCE_ID}`,
     runUrl: `/api/v1/runs/${runId}`,
     timelineUrl: `/api/v1/runs/${runId}/timeline`,
     artifactsUrl: `/api/v1/runs/${runId}/artifacts`,
@@ -537,6 +677,53 @@ describe("DEMO-01 demo scenario transport", () => {
     expect(Object.isFrozen(email?.selectedAgents)).toBe(true);
     expect(Object.isFrozen(email?.inputSchema)).toBe(true);
     expect(Object.isFrozen(email?.preset.consent)).toBe(true);
+  });
+
+  it("DEMO-04 discovers and freezes the exact Community UTC reminder projection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        jsonResponse({
+          items: [
+            communityScenarioBody(),
+            emailScenarioBody(),
+            blogScenarioBody(),
+            scenarioBody(),
+          ],
+        }),
+      ),
+    );
+
+    const scenarios = await fetchDemoScenarios();
+    const community = scenarios[0];
+    expect(community).toMatchObject({
+      id: COMMUNITY_REMINDER_SCENARIO_ID,
+      effect: "read_only",
+      safeSubmitVerb: "Create reminder draft",
+      selectedAgents: [
+        {
+          templateId: COMMUNITY_REMINDER_TEMPLATE_ID,
+          instanceId: COMMUNITY_REMINDER_INSTANCE_ID,
+        },
+      ],
+      expected: {
+        statePath: [
+          "received",
+          "validated",
+          "planned",
+          "executing",
+          "completed",
+        ],
+        modelCalls: 1,
+        connectorCalls: 0,
+        externalActions: 0,
+        approvals: 0,
+        externalWrites: 0,
+      },
+    });
+    expect(Object.isFrozen(community)).toBe(true);
+    expect(Object.isFrozen(community?.inputSchema)).toBe(true);
+    expect(Object.isFrozen(community?.preset)).toBe(true);
   });
 
   it("DEMO-01 keeps the shared discovery decoder future-safe without weakening bounds", async () => {
@@ -701,6 +888,24 @@ describe("DEMO-01 demo scenario transport", () => {
         expectedExecutionMode: "mock_execute",
       }),
     ).rejects.toMatchObject({ code: "invalid_demo_scenario_response" });
+  });
+
+  it("DEMO-04 cross-binds the Community receipt to dry-run and its reminder instance", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(sessionBody()))
+      .mockResolvedValueOnce(jsonResponse(communityReceiptBody(), 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createDemoScenarioRun({
+        scenarioId: COMMUNITY_REMINDER_SCENARIO_ID,
+        instanceId: COMMUNITY_REMINDER_INSTANCE_ID,
+        overrides: COMMUNITY_PRESET,
+        idempotencyKey: "demo-community-reminder-retry-0001",
+        expectedExecutionMode: "dry_run",
+      }),
+    ).resolves.toEqual(communityReceiptBody());
   });
 
   it("DEMO-01 rejects a receipt whose scenario, mode, or links drift", async () => {

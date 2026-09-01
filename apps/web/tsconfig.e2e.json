@@ -5,6 +5,7 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowJs": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -15,5 +16,5 @@
     "skipLibCheck": false,
     "types": ["node"]
   },
-  "include": ["e2e"]
+  "include": ["e2e", "../../scripts/browser-network-policy.mjs"]
 }
