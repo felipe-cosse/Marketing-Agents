@@ -77,7 +77,7 @@ class DemoScenarioRunResponse(DemoScenarioApiModel):
     event_id: str
     work_id: str
     run_id: str
-    execution_mode: Literal["dry_run"]
+    execution_mode: Literal["dry_run", "mock_execute"]
     instance_url: str
     run_url: str
     timeline_url: str

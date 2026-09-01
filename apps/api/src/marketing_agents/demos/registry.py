@@ -22,6 +22,10 @@ from .blog_content_review import (
     BLOG_CONTENT_REVIEW_SCENARIO_ID,
 )
 from .contracts import DemoScenarioDefinition, DemoScenarioInputError, DemoScenarioRegistryError
+from .email_signup_onboarding import (
+    EMAIL_SIGNUP_ONBOARDING_SCENARIO,
+    EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
+)
 from .social_content_draft import SOCIAL_CONTENT_DRAFT_SCENARIO, SOCIAL_CONTENT_DRAFT_SCENARIO_ID
 
 _RFC3339_TIMESTAMP = re.compile(
@@ -97,6 +101,7 @@ def build_demo_scenario_registry() -> DemoScenarioRegistry:
     return DemoScenarioRegistry(
         (
             BLOG_CONTENT_REVIEW_SCENARIO,
+            EMAIL_SIGNUP_ONBOARDING_SCENARIO,
             SOCIAL_CONTENT_DRAFT_SCENARIO,
         )
     )
@@ -168,6 +173,8 @@ def _validate_scenario_input(
                 normalized_payload["source_urls"] = normalized
     elif scenario.id == BLOG_CONTENT_REVIEW_SCENARIO_ID:
         _normalize_blog_input(normalized_payload)
+    elif scenario.id == EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID:
+        _normalize_email_signup_input(normalized_payload)
     try:
         compiled = compile_json_schema(
             scenario.input_schema,
@@ -233,6 +240,46 @@ def _normalize_blog_input(payload: dict[str, Any]) -> None:
                 "demo_scenario_invalid",
                 "last-updated timestamp cannot be after the assessment timestamp",
                 pointer="/last_updated_at",
+            )
+
+
+def _normalize_email_signup_input(payload: dict[str, Any]) -> None:
+    email = payload.get("email")
+    if type(email) is str and "@" in email:
+        local_part, domain = email.rsplit("@", 1)
+        normalized_domain = domain.casefold()
+        payload["email"] = f"{local_part}@{normalized_domain}"
+        if not normalized_domain.endswith(".test"):
+            raise DemoScenarioInputError(
+                "demo_scenario_invalid",
+                "Email demo addresses must use the reserved .test domain",
+                pointer="/email",
+            )
+
+    consent = payload.get("consent")
+    captured_at: str | None = None
+    if type(consent) is dict:
+        raw_captured_at = consent.get("captured_at")
+        if type(raw_captured_at) is str:
+            captured_at = _canonical_utc_timestamp(
+                raw_captured_at,
+                pointer="/consent/captured_at",
+            )
+            consent["captured_at"] = captured_at
+
+    signup_at = payload.get("signup_at")
+    if type(signup_at) is str:
+        signup_at = _canonical_utc_timestamp(signup_at, pointer="/signup_at")
+        payload["signup_at"] = signup_at
+
+    if captured_at is not None and type(signup_at) is str:
+        captured = _parse_canonical_utc(captured_at, pointer="/consent/captured_at")
+        signup = _parse_canonical_utc(signup_at, pointer="/signup_at")
+        if captured > signup:
+            raise DemoScenarioInputError(
+                "demo_scenario_invalid",
+                "Email consent cannot be captured after signup",
+                pointer="/consent/captured_at",
             )
 
 

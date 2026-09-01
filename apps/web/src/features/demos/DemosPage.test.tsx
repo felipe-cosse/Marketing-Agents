@@ -203,6 +203,7 @@ describe("DEMO-01 Social demo page", () => {
         idea: "Explain why durable AI drafts are easier to review.",
       },
       idempotencyKey: "demo-social-draft-retry-0001",
+      expectedExecutionMode: "dry_run",
       signal: expect.any(AbortSignal),
     });
     expect(

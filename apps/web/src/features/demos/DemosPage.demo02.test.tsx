@@ -354,6 +354,7 @@ describe("DEMO-02 Blog & SEO demo page", () => {
       instanceId: BLOG_CONTENT_REVIEW_INSTANCE_ID,
       overrides: BLOG_PRESET,
       idempotencyKey: "demo-blog-review-retry-0001",
+      expectedExecutionMode: "dry_run",
       signal: expect.any(AbortSignal),
     });
     expect(

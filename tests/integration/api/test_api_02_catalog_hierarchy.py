@@ -42,7 +42,7 @@ from tests.support.identity import (
 
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG_ROOT = ROOT / "catalog" / "v1"
-EXPECTED_HASH = "catalog-sha256-v1:9f25d2f6838848a63ae858d4661f89ea0054be21f1f0b4fc35765877b99d6a7a"
+EXPECTED_HASH = "catalog-sha256-v1:3970f3f23341d3e43a83ff73985e0485addd6c0df7519595f535420c09a9ced1"
 AGGREGATE_PATHS = ("/api/v1/catalog", "/api/v1/catalog/hierarchy")
 _UNCHANGED = object()
 

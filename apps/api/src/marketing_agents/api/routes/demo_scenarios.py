@@ -474,14 +474,14 @@ def _result_is_bound(
         disposition_is_coherent = False
     return (
         type(result.disposition) is WorkRunReceiptDisposition
-        and result.mode is WorkMode.DRY_RUN
+        and result.mode is command.mode
         and result.event_id == work_item.event_id
         and disposition_is_coherent
         and work_item.instance_id == definition.instance_id
         and work_item.workflow_id == definition.workflow_id
         and work_item.input_schema_id == definition.input_schema_id
         and work_item.source == "manual"
-        and work_item.mode is WorkMode.DRY_RUN
+        and work_item.mode is command.mode
         and work_item.brief_id is None
         and exact_payload
         and run.work_item_id == work_item.id
@@ -590,10 +590,11 @@ async def create_demo_scenario_run(
         resolved_input = registry.resolve_input(scenario_id, body.overrides)
         if not _resolved_input_is_bound(definition, resolved_input):
             raise TypeError("demo registry returned invalid resolved input")
+        mode = WorkMode.MOCK_EXECUTION if definition.effect == "mutating" else WorkMode.DRY_RUN
         command = ManualDryRunCommand(
             instance_id=definition.instance_id,
             input_payload=resolved_input,
-            mode=WorkMode.DRY_RUN,
+            mode=mode,
             idempotency_key=idempotency_key,
             campaign_brief_id=None,
             demo_scenario_id=definition.id,
@@ -648,7 +649,7 @@ async def create_demo_scenario_run(
         event_id=result.event_id,
         work_id=result.work_item.id,
         run_id=result.run.id,
-        execution_mode="dry_run",
+        execution_mode=("mock_execute" if command.mode is WorkMode.MOCK_EXECUTION else "dry_run"),
         instance_url=f"/api/v1/agent-instances/{definition.instance_id}",
         run_url=f"/api/v1/runs/{result.run.id}",
         timeline_url=f"/api/v1/runs/{result.run.id}/timeline",

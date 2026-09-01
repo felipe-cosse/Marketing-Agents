@@ -1,0 +1,13 @@
+{
+  "contact_id": "demo-contact-0001",
+  "name": "Avery Demo",
+  "email": "avery.demo@example.test",
+  "newsletter_list_ref": "list.demo.email.signup-onboarding.v1",
+  "consent": {
+    "granted": true,
+    "source": "demo_signup_form",
+    "captured_at": "2026-08-31T16:00:00Z"
+  },
+  "signup_at": "2026-08-31T16:05:00Z",
+  "welcome_context": "Welcome the subscriber to governed AI updates for marketing teams."
+}

@@ -15,6 +15,9 @@ interface DemoScenarioFormProps {
   readonly formId: string;
   readonly ariaLabel: string;
   readonly submitLabel: string;
+  readonly modeTitle: string;
+  readonly modeDescription: string;
+  readonly modeTone: "safe" | "awaiting";
   readonly schema: CompiledObjectSchema;
   readonly draft: SchemaDraftObject;
   readonly issues: readonly SchemaValidationIssue[];
@@ -42,6 +45,9 @@ export function DemoScenarioForm({
   formId,
   ariaLabel,
   submitLabel,
+  modeTitle,
+  modeDescription,
+  modeTone,
   schema,
   draft,
   issues,
@@ -129,14 +135,16 @@ export function DemoScenarioForm({
         })}
       </div>
 
-      <div className="demo-scenario-form__mode" aria-label="Execution mode">
+      <div
+        className={`demo-scenario-form__mode is-${modeTone}`}
+        aria-label="Execution mode"
+      >
         <span className="demo-scenario-form__mode-icon" aria-hidden="true">
           ◆
         </span>
         <span>
-          <strong>Deterministic mock mode</strong>
-          The API admits durable dry-run work; the demo model response is fixed
-          and connectors stay unused.
+          <strong>{modeTitle}</strong>
+          {modeDescription}
         </span>
       </div>
 

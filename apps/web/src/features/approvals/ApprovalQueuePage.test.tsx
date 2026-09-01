@@ -119,10 +119,50 @@ const fetchHierarchyMock = vi.mocked(fetchCatalogHierarchy);
 describe("WEB-05 ApprovalQueuePage", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.history.replaceState({}, "", "/approvals");
     fetchPageMock.mockResolvedValue(PENDING_PAGE);
     fetchDetailMock.mockResolvedValue(makeApprovalDetail());
     fetchRunSafetyMock.mockResolvedValue(makeApprovalRunSafety());
     fetchHierarchyMock.mockResolvedValue(APPROVAL_HIERARCHY);
+  });
+
+  it("filters the approval queue to the exact run_id carried by a demo receipt", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/approvals?run_id=run.demo-03.browser",
+    );
+    renderPage();
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Approval queue" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(fetchPageMock).toHaveBeenCalledWith(
+        { status: "pending", runId: "run.demo-03.browser", limit: 25 },
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("fails closed instead of opening an unfiltered queue for an invalid run_id", async () => {
+    window.history.replaceState({}, "", "/approvals?run_id=%2Fnot-a-run");
+    renderPage();
+
+    await waitFor(() =>
+      expect(fetchPageMock).toHaveBeenCalledWith(
+        {
+          status: "pending",
+          runId: "run.invalid-url-parameter",
+          limit: 25,
+        },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(fetchPageMock).not.toHaveBeenCalledWith(
+      { status: "pending", limit: 25 },
+      expect.anything(),
+    );
   });
 
   it("defaults to pending and applies truthful raw loaded-page filters", async () => {

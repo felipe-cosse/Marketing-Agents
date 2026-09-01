@@ -62,7 +62,10 @@
     "test:demo-01:unit": "node scripts/run-demo-01-unit.mjs",
     "test:demo-02": "pnpm test:demo-02:unit && pnpm test:demo-02:e2e",
     "test:demo-02:e2e": "node scripts/run-demo-02-e2e.mjs",
-    "test:demo-02:unit": "node scripts/run-demo-02-unit.mjs"
+    "test:demo-02:unit": "node scripts/run-demo-02-unit.mjs",
+    "test:demo-03": "pnpm test:demo-03:unit && pnpm test:demo-03:e2e",
+    "test:demo-03:e2e": "node scripts/run-demo-03-e2e.mjs",
+    "test:demo-03:unit": "node scripts/run-demo-03-unit.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.102.8",
