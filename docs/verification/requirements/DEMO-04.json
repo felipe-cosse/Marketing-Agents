@@ -1,0 +1,161 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEMO-04",
+  "matrix_statement_sha256": "a0d7c62711ae6b36a8a7df15d26dbc7b13d97f6d429faf0ad66f93cd24d62236",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/demos/**",
+      "apps/web/e2e/demo-04-community-reminder.spec.ts",
+      "apps/web/package.json",
+      "apps/web/scripts/run-demo-04-e2e.mjs",
+      "apps/web/scripts/run-demo-04-unit.mjs",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/src/api/demoScenarios.test.ts",
+      "apps/web/src/api/demoScenarios.ts",
+      "apps/web/src/features/demos/**",
+      "apps/web/src/features/dry-run/schemaModel.ts",
+      "apps/web/tsconfig.e2e.json",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/DEMO-04.json",
+      "docs/verification/requirements/DEMO-04.md",
+      "tests/acceptance/test_community_reminder_demo.py",
+      "tests/fixtures/demos/community-reminder-draft.json",
+      "tests/integration/api/test_demo_02_scenarios.py",
+      "tests/integration/api/test_demo_04_scenarios.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/demos/community_reminder_draft.py",
+          "apps/api/src/marketing_agents/demos/composition.py",
+          "apps/api/src/marketing_agents/demos/registry.py",
+          "apps/api/src/marketing_agents/demos/service.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/demoScenarios.ts",
+          "apps/web/src/features/demos/DemosPage.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/acceptance/test_community_reminder_demo.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/integration/api/test_demo_04_scenarios.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/demos/DemosPage.demo04.test.tsx",
+          "apps/web/e2e/demo-04-community-reminder.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "deterministic-community-reminder-artifact",
+      "type": "journey",
+      "statement": "The exact Community event-signup scenario and committed synthetic fixture validate the local session time and IANA timezone, calculate one recommended UTC reminder time, perform one deterministic structured model call, and persist one schema-valid scheduled_reminder_draft ArtifactEnvelope with complete immutable provenance; replay does not call the model again.",
+      "test_refs": [
+        "tests/acceptance/test_community_reminder_demo.py::test_demo_04_reminder_is_deterministic_inert_and_replay_safe",
+        "tests/acceptance/test_community_reminder_demo.py::test_demo_04_recommended_time_uses_iana_timezone_and_minute_offset",
+        "tests/acceptance/test_community_reminder_demo.py::test_demo_04_rejects_invalid_or_unactionable_local_time_before_model_call"
+      ]
+    },
+    {
+      "id": "draft-only-zero-egress-boundary",
+      "type": "negative_control",
+      "statement": "Event, signup, attendee, channel, and timezone values remain bounded untrusted drafting input; sockets are denied and no event lookup, attendee enrollment, calendar mutation, provider schedule, external action, approval, messaging connector, or send operation is invoked or persisted.",
+      "test_refs": [
+        "tests/acceptance/test_community_reminder_demo.py::test_demo_04_reminder_is_deterministic_inert_and_replay_safe",
+        "apps/web/src/features/demos/DemosPage.demo04.test.tsx::DEMO-04 renders UTC provenance and creates only an inert reminder draft",
+        "apps/web/e2e/demo-04-community-reminder.spec.ts::DEMO-04 creates an inert reminder draft with UTC provenance and no external request"
+      ]
+    },
+    {
+      "id": "private-asynchronous-community-api",
+      "type": "contract",
+      "statement": "Authenticated discovery exposes the immutable Community preset alongside the existing demos, while operator-only POST applies CSRF, strict JSON, bounded schema and timezone validation, exact scenario and instance binding, dry-run mode, and idempotency before returning a private 202 durable receipt without draining execution inline.",
+      "test_refs": [
+        "tests/integration/api/test_demo_04_scenarios.py::test_demo_04_discovery_freezes_read_only_agent_time_and_zero_call_contract",
+        "tests/integration/api/test_demo_04_scenarios.py::test_demo_04_run_uses_resolved_preset_and_dry_run_only",
+        "tests/integration/api/test_demo_04_scenarios.py::test_demo_04_rejects_invalid_overrides_before_admission",
+        "tests/integration/api/test_demo_04_scenarios.py::test_demo_04_post_requires_a_human_operator_before_submit",
+        "tests/integration/api/test_demo_04_scenarios.py::test_demo_04_enforces_csrf_strict_json_and_bounded_idempotency_before_submit"
+      ]
+    },
+    {
+      "id": "truthful-community-reminder-control-surface",
+      "type": "positive",
+      "statement": "The production Demos route renders Community only after exact safety-contract validation, displays the API-owned preset and recommended-time boundary, labels deterministic mock, read-only, unscheduled, and unsent behavior, reports asynchronous acceptance without claiming completion, links durable run resources, preserves Social as the default, and removes submission on contract drift.",
+      "test_refs": [
+        "apps/web/src/api/demoScenarios.test.ts::DEMO-04 discovers and freezes the exact Community UTC reminder projection",
+        "apps/web/src/features/demos/DemosPage.demo04.test.tsx::DEMO-04 renders UTC provenance and creates only an inert reminder draft",
+        "apps/web/src/features/demos/DemosPage.demo04.test.tsx::DEMO-04 fails closed when the zero-connector contract drifts",
+        "apps/web/e2e/demo-04-community-reminder.spec.ts::DEMO-04 fails closed when the zero-connector boundary drifts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "demo-04-backend-acceptance",
+      "runner": "argv",
+      "argv": ["make", "test-demo-04-backend"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "deterministic-community-reminder-artifact",
+        "draft-only-zero-egress-boundary",
+        "private-asynchronous-community-api"
+      ]
+    },
+    {
+      "id": "demo-04-web-unit",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-04-unit"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "draft-only-zero-egress-boundary",
+        "truthful-community-reminder-control-surface"
+      ]
+    },
+    {
+      "id": "demo-04-real-browser",
+      "runner": "argv",
+      "argv": ["make", "web-test-demo-04-e2e"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "draft-only-zero-egress-boundary",
+        "truthful-community-reminder-control-surface"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/demos/**"
+    ],
+    "gate_id": "demo-04-backend-acceptance"
+  },
+  "limitations": [
+    "The completed journey uses a deterministic mock model and temporary local SQLite through a bounded worker/test drain. It does not claim real-model quality, deployed-worker composition, production-database behavior, or live event-provider integration.",
+    "The HTTP POST proves durable asynchronous intake only; it does not execute the model or complete the artifact inline.",
+    "The browser gate uses deterministic same-origin discovery and receipt fixtures with the real local session boundary. It proves the control surface and transport contract, not browser-observed worker completion.",
+    "The recommended UTC time is a calculated draft field only. The demo does not enroll an attendee, mutate a calendar, create a provider schedule, invoke a messaging connector, or send a reminder.",
+    "Event, signup, attendee, and channel values are synthetic or caller-supplied test data and are not independently verified against a live event system.",
+    "Determinism covers normalized business payloads. Durable identities, audit records, correlations, and timestamps remain intentionally unique or clock-derived, and DEMO-05 and DEMO-06 remain separately owned."
+  ]
+}

@@ -36,6 +36,15 @@ from .blog_content_review import (
     BLOG_CONTENT_REVIEW_SCENARIO,
     finalize_blog_content_review,
 )
+from .community_reminder_draft import (
+    COMMUNITY_REMINDER_DRAFT_INPUT_SCHEMA,
+    COMMUNITY_REMINDER_DRAFT_MODEL_OUTPUT_SCHEMA,
+    COMMUNITY_REMINDER_DRAFT_MODEL_OUTPUT_SCHEMA_ID,
+    COMMUNITY_REMINDER_DRAFT_OUTPUT_SCHEMA,
+    COMMUNITY_REMINDER_DRAFT_RENDERER,
+    COMMUNITY_REMINDER_DRAFT_SCENARIO,
+    finalize_community_reminder_draft,
+)
 from .contracts import DemoScenarioDefinition
 from .email_signup_onboarding import (
     EMAIL_SIGNUP_ONBOARDING_CUSTOMER_INSTANCE_ID,
@@ -61,6 +70,7 @@ from .social_content_draft import (
 _SUPPORTED_MODEL_BINDINGS = (
     (SOCIAL_CONTENT_DRAFT_SCENARIO, None),
     (BLOG_CONTENT_REVIEW_SCENARIO, None),
+    (COMMUNITY_REMINDER_DRAFT_SCENARIO, None),
     (
         EMAIL_SIGNUP_ONBOARDING_SCENARIO,
         EMAIL_SIGNUP_ONBOARDING_CUSTOMER_INSTANCE_ID,
@@ -127,6 +137,7 @@ class DeterministicDemoReadAdapter:
 # Backward-compatible exact runtime aliases retained for DEMO-01 callers.
 SocialContentDraftReadAdapter = DeterministicDemoReadAdapter
 BlogContentReviewReadAdapter = DeterministicDemoReadAdapter
+CommunityReminderDraftReadAdapter = DeterministicDemoReadAdapter
 EmailSignupOnboardingReadAdapter = DeterministicDemoReadAdapter
 
 
@@ -196,6 +207,25 @@ def build_email_signup_onboarding_read_adapter(
     provider_version: str = "v1",
 ) -> EmailSignupOnboardingReadAdapter:
     """Build the Email compatibility entry point over the exact shared adapter."""
+
+    return build_demo_read_adapter(
+        catalog,
+        provider,
+        provider_mode=provider_mode,
+        provider_name=provider_name,
+        provider_version=provider_version,
+    )
+
+
+def build_community_reminder_draft_read_adapter(
+    catalog: CompiledCatalog,
+    provider: LLMProvider | None = None,
+    *,
+    provider_mode: Literal["mock", "real", "local"] = "mock",
+    provider_name: str = "mock",
+    provider_version: str = "v1",
+) -> CommunityReminderDraftReadAdapter:
+    """Build the Community compatibility entry point over the exact shared adapter."""
 
     return build_demo_read_adapter(
         catalog,
@@ -312,6 +342,17 @@ def _build_demo_structured_adapter(
             ),
             _binding(
                 catalog=catalog,
+                scenario=COMMUNITY_REMINDER_DRAFT_SCENARIO,
+                model_instance_id=None,
+                input_schema_id=COMMUNITY_REMINDER_DRAFT_SCENARIO.input_schema_id,
+                input_schema=COMMUNITY_REMINDER_DRAFT_INPUT_SCHEMA,
+                model_output_schema_id=COMMUNITY_REMINDER_DRAFT_MODEL_OUTPUT_SCHEMA_ID,
+                model_output_schema=COMMUNITY_REMINDER_DRAFT_MODEL_OUTPUT_SCHEMA,
+                output_schema=COMMUNITY_REMINDER_DRAFT_OUTPUT_SCHEMA,
+                output_transform=finalize_community_reminder_draft,
+            ),
+            _binding(
+                catalog=catalog,
                 scenario=EMAIL_SIGNUP_ONBOARDING_SCENARIO,
                 model_instance_id=EMAIL_SIGNUP_ONBOARDING_CUSTOMER_INSTANCE_ID,
                 input_schema_id=EMAIL_SIGNUP_ONBOARDING_MODEL_INPUT_SCHEMA_ID,
@@ -384,6 +425,7 @@ def build_demo_deterministic_provider(catalog: CompiledCatalog) -> Deterministic
             (
                 SOCIAL_CONTENT_DRAFT_RENDERER,
                 BLOG_CONTENT_REVIEW_RENDERER,
+                COMMUNITY_REMINDER_DRAFT_RENDERER,
                 EMAIL_SIGNUP_ONBOARDING_RENDERER,
             )
         ),
@@ -415,13 +457,24 @@ def build_email_signup_onboarding_deterministic_provider(
     return build_demo_deterministic_provider(catalog)
 
 
+def build_community_reminder_draft_deterministic_provider(
+    catalog: CompiledCatalog,
+) -> DeterministicLLMProvider:
+    """Build the Community compatibility entry point over the exact shared registry."""
+
+    return build_demo_deterministic_provider(catalog)
+
+
 __all__ = [
     "BlogContentReviewReadAdapter",
+    "CommunityReminderDraftReadAdapter",
     "DeterministicDemoReadAdapter",
     "EmailSignupOnboardingReadAdapter",
     "SocialContentDraftReadAdapter",
     "build_blog_content_review_deterministic_provider",
     "build_blog_content_review_read_adapter",
+    "build_community_reminder_draft_deterministic_provider",
+    "build_community_reminder_draft_read_adapter",
     "build_demo_deterministic_provider",
     "build_demo_read_adapter",
     "build_email_signup_onboarding_deterministic_provider",

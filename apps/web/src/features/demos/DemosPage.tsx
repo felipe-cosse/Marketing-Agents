@@ -6,6 +6,9 @@ import {
   BLOG_CONTENT_REVIEW_INSTANCE_ID,
   BLOG_CONTENT_REVIEW_SCENARIO_ID,
   BLOG_CONTENT_REVIEW_TEMPLATE_ID,
+  COMMUNITY_REMINDER_INSTANCE_ID,
+  COMMUNITY_REMINDER_SCENARIO_ID,
+  COMMUNITY_REMINDER_TEMPLATE_ID,
   createDemoScenarioRun,
   EMAIL_NEWSLETTER_INSTANCE_ID,
   EMAIL_NEWSLETTER_TEMPLATE_ID,
@@ -280,11 +283,96 @@ const EMAIL_SIGNUP_PRESET = {
     "Welcome the subscriber to governed AI updates for marketing teams.",
 } as const satisfies DemoJsonObject;
 
+const COMMUNITY_REMINDER_INPUT_SCHEMA = {
+  $schema: DRAFT_2020_12,
+  $id: "schema.demo.community.reminder-draft.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "event_id",
+    "event_name",
+    "signup_event_id",
+    "admitted_source",
+    "signup_at",
+    "session_local_start",
+    "session_timezone",
+    "reminder_offset_minutes",
+    "attendee_display_name",
+    "channel_label",
+    "event_details",
+  ],
+  properties: {
+    event_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+    },
+    event_name: { type: "string", minLength: 1, maxLength: 160 },
+    signup_event_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$",
+    },
+    admitted_source: {
+      type: "string",
+      minLength: 1,
+      maxLength: 80,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+    },
+    signup_at: { type: "string", format: "date-time", maxLength: 40 },
+    session_local_start: {
+      type: "string",
+      pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$",
+      maxLength: 19,
+    },
+    session_timezone: {
+      type: "string",
+      minLength: 1,
+      maxLength: 64,
+      pattern: "^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*$",
+    },
+    reminder_offset_minutes: {
+      type: "integer",
+      minimum: 1,
+      maximum: 10_080,
+    },
+    attendee_display_name: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      "x-sensitive": true,
+    },
+    channel_label: {
+      type: "string",
+      enum: ["email", "community", "in_app"],
+    },
+    event_details: { type: "string", minLength: 1, maxLength: 2_000 },
+  },
+} as const satisfies DemoJsonObject;
+
+const COMMUNITY_REMINDER_PRESET = {
+  event_id: "event.community-live-session.2026-09-17",
+  event_name: "Marketing operators live session",
+  signup_event_id: "signup.community-demo-0001",
+  admitted_source: "fixture.community-signup",
+  signup_at: "2026-09-01T16:30:00Z",
+  session_local_start: "2026-09-17T09:00:00",
+  session_timezone: "America/Los_Angeles",
+  reminder_offset_minutes: 1_440,
+  attendee_display_name: "Demo Attendee",
+  channel_label: "email",
+  event_details:
+    "A live session on governed marketing automation and approval-safe workflows.",
+} as const satisfies DemoJsonObject;
+
 interface ScenarioPresentation {
   readonly scenarioId:
     | typeof SOCIAL_DRAFT_SCENARIO_ID
     | typeof BLOG_CONTENT_REVIEW_SCENARIO_ID
-    | typeof EMAIL_SIGNUP_SCENARIO_ID;
+    | typeof EMAIL_SIGNUP_SCENARIO_ID
+    | typeof COMMUNITY_REMINDER_SCENARIO_ID;
   readonly effect: DemoScenario["effect"];
   readonly primaryInstanceId: string;
   readonly selectedAgents: readonly {
@@ -476,10 +564,64 @@ const EMAIL_PRESENTATION: ScenarioPresentation = Object.freeze({
   approvalQueueLink: true,
 });
 
+const COMMUNITY_PRESENTATION: ScenarioPresentation = Object.freeze({
+  scenarioId: COMMUNITY_REMINDER_SCENARIO_ID,
+  effect: "read_only",
+  primaryInstanceId: COMMUNITY_REMINDER_INSTANCE_ID,
+  selectedAgents: [
+    {
+      templateId: COMMUNITY_REMINDER_TEMPLATE_ID,
+      instanceId: COMMUNITY_REMINDER_INSTANCE_ID,
+      templateLabel: "Selected Community template",
+      instanceLabel: "Selected Community instance",
+    },
+  ],
+  expected: {
+    statePath: DIRECT_COMPLETION_STATE_PATH,
+    modelCalls: 1,
+    connectorCalls: 0,
+    externalActions: 0,
+    approvals: 0,
+    externalWrites: 0,
+  },
+  receiptExecutionMode: "dry_run",
+  displayName: "Community reminder draft",
+  description:
+    "Create a deterministic reminder draft and recommended UTC time from supplied event signup details without scheduling or sending.",
+  inputSchema: COMMUNITY_REMINDER_INPUT_SCHEMA,
+  preset: COMMUNITY_REMINDER_PRESET,
+  safeSubmitVerb: "Create reminder draft",
+  eyebrow: "DEMO-04 · Community workflow",
+  pageTitle: "Event signup to reminder draft",
+  pageDescription:
+    "Resolve the supplied local session time to UTC, recommend a reminder time, and create a reviewable draft without touching an event, calendar, scheduler, or messaging provider.",
+  modeTitle: "Deterministic mock mode",
+  modeDetail: "Recommended UTC · never scheduled",
+  modeTone: "safe",
+  formId: "demo-community-reminder-form",
+  formLabel: "Community reminder draft preset",
+  formModeTitle: "Read-only reminder planning",
+  formModeDescription:
+    "The supplied IANA timezone and offset produce UTC provenance. The draft remains local and is never scheduled or sent.",
+  guardrailBadges: [
+    "Read-only",
+    "Recommended UTC time",
+    "Not sent · not scheduled",
+    "No calendar or enrollment",
+  ],
+  boundaryNote:
+    "The channel is drafting context only. This demo does not enroll an attendee, mutate a calendar, create a provider schedule, or send a reminder.",
+  receiptTitle: "Reminder draft run accepted",
+  receiptDescription:
+    "Durable intake accepted a dry-run draft request. Follow the authoritative run for the recommended UTC time and scheduled_reminder_draft artifact; acceptance is not proof of scheduling or delivery.",
+  approvalQueueLink: false,
+});
+
 const SUPPORTED_PRESENTATIONS = [
   SOCIAL_PRESENTATION,
   BLOG_PRESENTATION,
   EMAIL_PRESENTATION,
+  COMMUNITY_PRESENTATION,
 ] as const;
 
 interface PreparedScenario {

@@ -34,6 +34,7 @@ const MAX_UI_ORDER = 10_000;
 // and explicitly review the rare delimiter-safe nested repeat used by catalog v1.
 const REVIEWED_SAFE_NESTED_REPEAT_PATTERNS = new Set([
   "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+  "^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*$",
 ]);
 
 const COMMON_KEYS = new Set([

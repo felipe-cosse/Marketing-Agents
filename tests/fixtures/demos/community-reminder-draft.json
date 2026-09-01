@@ -1,0 +1,13 @@
+{
+  "event_id": "event.community-live-session.2026-09-17",
+  "event_name": "Marketing operators live session",
+  "signup_event_id": "signup.community-demo-0001",
+  "admitted_source": "fixture.community-signup",
+  "signup_at": "2026-09-01T16:30:00Z",
+  "session_local_start": "2026-09-17T09:00:00",
+  "session_timezone": "America/Los_Angeles",
+  "reminder_offset_minutes": 1440,
+  "attendee_display_name": "Demo Attendee",
+  "channel_label": "email",
+  "event_details": "A live session on governed marketing automation and approval-safe workflows."
+}

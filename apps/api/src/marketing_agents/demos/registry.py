@@ -21,6 +21,13 @@ from .blog_content_review import (
     BLOG_CONTENT_REVIEW_SCENARIO,
     BLOG_CONTENT_REVIEW_SCENARIO_ID,
 )
+from .community_reminder_draft import (
+    COMMUNITY_REMINDER_DRAFT_SCENARIO,
+    COMMUNITY_REMINDER_DRAFT_SCENARIO_ID,
+    CommunityReminderTimeError,
+    calculate_community_reminder_times,
+    validate_community_reminder_temporal_order,
+)
 from .contracts import DemoScenarioDefinition, DemoScenarioInputError, DemoScenarioRegistryError
 from .email_signup_onboarding import (
     EMAIL_SIGNUP_ONBOARDING_SCENARIO,
@@ -101,6 +108,7 @@ def build_demo_scenario_registry() -> DemoScenarioRegistry:
     return DemoScenarioRegistry(
         (
             BLOG_CONTENT_REVIEW_SCENARIO,
+            COMMUNITY_REMINDER_DRAFT_SCENARIO,
             EMAIL_SIGNUP_ONBOARDING_SCENARIO,
             SOCIAL_CONTENT_DRAFT_SCENARIO,
         )
@@ -173,6 +181,8 @@ def _validate_scenario_input(
                 normalized_payload["source_urls"] = normalized
     elif scenario.id == BLOG_CONTENT_REVIEW_SCENARIO_ID:
         _normalize_blog_input(normalized_payload)
+    elif scenario.id == COMMUNITY_REMINDER_DRAFT_SCENARIO_ID:
+        _normalize_community_reminder_input(normalized_payload)
     elif scenario.id == EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID:
         _normalize_email_signup_input(normalized_payload)
     try:
@@ -281,6 +291,34 @@ def _normalize_email_signup_input(payload: dict[str, Any]) -> None:
                 "Email consent cannot be captured after signup",
                 pointer="/consent/captured_at",
             )
+
+
+def _normalize_community_reminder_input(payload: dict[str, Any]) -> None:
+    signup_at = payload.get("signup_at")
+    if type(signup_at) is str:
+        payload["signup_at"] = _canonical_utc_timestamp(signup_at, pointer="/signup_at")
+
+    local_start = payload.get("session_local_start")
+    timezone = payload.get("session_timezone")
+    reminder_offset = payload.get("reminder_offset_minutes")
+    if type(local_start) is str and type(timezone) is str and type(reminder_offset) is int:
+        try:
+            _, recommended_send_at_utc = calculate_community_reminder_times(
+                local_start,
+                timezone,
+                reminder_offset,
+            )
+            if type(payload.get("signup_at")) is str:
+                validate_community_reminder_temporal_order(
+                    payload["signup_at"],
+                    recommended_send_at_utc,
+                )
+        except CommunityReminderTimeError as exc:
+            raise DemoScenarioInputError(
+                "demo_scenario_invalid",
+                str(exc),
+                pointer=exc.pointer,
+            ) from None
 
 
 def _canonical_utc_timestamp(value: str, *, pointer: str) -> str:
