@@ -33,6 +33,10 @@ from .email_signup_onboarding import (
     EMAIL_SIGNUP_ONBOARDING_SCENARIO,
     EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
 )
+from .partnership_application_review import (
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID,
+)
 from .social_content_draft import SOCIAL_CONTENT_DRAFT_SCENARIO, SOCIAL_CONTENT_DRAFT_SCENARIO_ID
 
 _RFC3339_TIMESTAMP = re.compile(
@@ -110,6 +114,7 @@ def build_demo_scenario_registry() -> DemoScenarioRegistry:
             BLOG_CONTENT_REVIEW_SCENARIO,
             COMMUNITY_REMINDER_DRAFT_SCENARIO,
             EMAIL_SIGNUP_ONBOARDING_SCENARIO,
+            PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
             SOCIAL_CONTENT_DRAFT_SCENARIO,
         )
     )
@@ -185,6 +190,8 @@ def _validate_scenario_input(
         _normalize_community_reminder_input(normalized_payload)
     elif scenario.id == EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID:
         _normalize_email_signup_input(normalized_payload)
+    elif scenario.id == PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID:
+        _normalize_partnership_application_input(normalized_payload)
     try:
         compiled = compile_json_schema(
             scenario.input_schema,
@@ -319,6 +326,181 @@ def _normalize_community_reminder_input(payload: dict[str, Any]) -> None:
                 str(exc),
                 pointer=exc.pointer,
             ) from None
+
+
+def _normalize_partnership_application_input(payload: dict[str, Any]) -> None:
+    organization = payload.get("organization_metadata")
+    if type(organization) is dict:
+        website_reference = organization.get("website_reference")
+        if type(website_reference) is str:
+            try:
+                organization["website_reference"] = validate_reference_url(website_reference).value
+            except UrlPolicyError as exc:
+                raise DemoScenarioInputError(
+                    "demo_scenario_invalid",
+                    str(exc),
+                    pointer="/organization_metadata/website_reference",
+                ) from None
+        _normalize_text_field(organization, "organization_name")
+        _normalize_text_field(organization, "organization_summary")
+
+    capabilities = payload.get("declared_capabilities")
+    _sort_unique_object_records(
+        capabilities,
+        key="capability_id",
+        pointer="/declared_capabilities",
+    )
+    if type(capabilities) is list:
+        for capability in capabilities:
+            if type(capability) is dict:
+                _normalize_text_field(capability, "label")
+
+    declared_regions = payload.get("declared_regions")
+    _sort_unique_strings(declared_regions, pointer="/declared_regions")
+
+    criteria = payload.get("program_criteria")
+    _sort_unique_object_records(
+        criteria,
+        key="criterion_id",
+        pointer="/program_criteria",
+    )
+    criterion_ids: set[str] = set()
+    if type(criteria) is list:
+        for criterion in criteria:
+            if type(criterion) is dict:
+                criterion_id = criterion.get("criterion_id")
+                if type(criterion_id) is str:
+                    criterion_ids.add(criterion_id)
+                _normalize_text_field(criterion, "description")
+
+    evidence_records = payload.get("evidence_records")
+    _sort_unique_object_records(
+        evidence_records,
+        key="evidence_id",
+        pointer="/evidence_records",
+    )
+    if type(evidence_records) is list:
+        for evidence_index, evidence in enumerate(evidence_records):
+            if type(evidence) is not dict:
+                continue
+            _normalize_text_field(evidence, "summary")
+            references = evidence.get("supports_criterion_ids")
+            _sort_unique_strings(
+                references,
+                pointer=f"/evidence_records/{evidence_index}/supports_criterion_ids",
+            )
+            if type(references) is list:
+                for reference_index, criterion_id in enumerate(references):
+                    if type(criterion_id) is str and criterion_id not in criterion_ids:
+                        raise DemoScenarioInputError(
+                            "demo_scenario_invalid",
+                            "evidence criterion reference is not declared",
+                            pointer=(
+                                f"/evidence_records/{evidence_index}/"
+                                f"supports_criterion_ids/{reference_index}"
+                            ),
+                        )
+            _sort_unique_strings(
+                evidence.get("risk_flags"),
+                pointer=f"/evidence_records/{evidence_index}/risk_flags",
+            )
+
+    constraints = payload.get("program_constraints")
+    if type(constraints) is dict:
+        for field_name in (
+            "eligible_regions",
+            "required_capability_ids",
+            "disqualifying_risk_flags",
+        ):
+            _sort_unique_strings(
+                constraints.get(field_name),
+                pointer=f"/program_constraints/{field_name}",
+            )
+
+    indicators = payload.get("missing_information_indicators")
+    _sort_unique_object_records(
+        indicators,
+        key="indicator_id",
+        pointer="/missing_information_indicators",
+    )
+    if type(indicators) is list:
+        for indicator_index, indicator in enumerate(indicators):
+            if type(indicator) is not dict:
+                continue
+            indicator_id = indicator.get("indicator_id")
+            if type(indicator_id) is str and indicator_id.startswith("system."):
+                raise DemoScenarioInputError(
+                    "demo_scenario_invalid",
+                    "missing-information indicator IDs cannot use the reserved system namespace",
+                    pointer=f"/missing_information_indicators/{indicator_index}/indicator_id",
+                )
+            _normalize_text_field(indicator, "description")
+            references = indicator.get("related_criterion_ids")
+            _sort_unique_strings(
+                references,
+                pointer=(
+                    f"/missing_information_indicators/{indicator_index}/related_criterion_ids"
+                ),
+            )
+            if type(references) is list:
+                for reference_index, criterion_id in enumerate(references):
+                    if type(criterion_id) is str and criterion_id not in criterion_ids:
+                        raise DemoScenarioInputError(
+                            "demo_scenario_invalid",
+                            "missing-information criterion reference is not declared",
+                            pointer=(
+                                f"/missing_information_indicators/{indicator_index}/"
+                                f"related_criterion_ids/{reference_index}"
+                            ),
+                        )
+
+
+def _normalize_text_field(record: dict[str, Any], field_name: str) -> None:
+    value = record.get(field_name)
+    if type(value) is str:
+        record[field_name] = " ".join(value.split())
+
+
+def _sort_unique_object_records(value: object, *, key: str, pointer: str) -> None:
+    if type(value) is not list:
+        return
+    seen: set[str] = set()
+    sortable = True
+    for index, record in enumerate(value):
+        if type(record) is not dict or type(record.get(key)) is not str:
+            sortable = False
+            continue
+        normalized = record[key].casefold()
+        if normalized in seen:
+            raise DemoScenarioInputError(
+                "demo_scenario_invalid",
+                f"{key.replace('_', ' ')} values must be unique",
+                pointer=f"{pointer}/{index}/{key}",
+            )
+        seen.add(normalized)
+    if sortable:
+        value.sort(key=lambda item: item[key].casefold())
+
+
+def _sort_unique_strings(value: object, *, pointer: str) -> None:
+    if type(value) is not list:
+        return
+    seen: set[str] = set()
+    sortable = True
+    for index, item in enumerate(value):
+        if type(item) is not str:
+            sortable = False
+            continue
+        normalized = item.casefold()
+        if normalized in seen:
+            raise DemoScenarioInputError(
+                "demo_scenario_invalid",
+                "values must be unique after case folding",
+                pointer=f"{pointer}/{index}",
+            )
+        seen.add(normalized)
+    if sortable:
+        value.sort(key=str.casefold)
 
 
 def _canonical_utc_timestamp(value: str, *, pointer: str) -> str:

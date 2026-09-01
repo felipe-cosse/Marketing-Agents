@@ -29,6 +29,7 @@ from marketing_agents.demos import (
     COMMUNITY_REMINDER_DRAFT_SCENARIO_ID,
     DEMO_SCENARIOS,
     EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID,
     SOCIAL_CONTENT_DRAFT_SCENARIO_ID,
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
@@ -154,6 +155,7 @@ async def test_demo_02_discovery_is_exact_safe_and_private() -> None:
         BLOG_CONTENT_REVIEW_SCENARIO_ID,
         COMMUNITY_REMINDER_DRAFT_SCENARIO_ID,
         EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
+        PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID,
         SOCIAL_CONTENT_DRAFT_SCENARIO_ID,
     ]
     assert items[0] == {

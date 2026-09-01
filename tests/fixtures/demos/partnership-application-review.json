@@ -1,0 +1,84 @@
+{
+  "applicant_id": "applicant.partnership-demo-0001",
+  "organization_metadata": {
+    "organization_name": "Northstar Systems Demo",
+    "organization_type": "systems_integrator",
+    "organization_summary": "Synthetic implementation partner specializing in governed automation.",
+    "website_reference": "https://example.com/partners/northstar-systems"
+  },
+  "declared_capabilities": [
+    {
+      "capability_id": "implementation.governance",
+      "label": "AI governance implementation"
+    },
+    {
+      "capability_id": "integration.delivery",
+      "label": "Integration delivery"
+    }
+  ],
+  "declared_regions": [
+    "europe",
+    "north_america"
+  ],
+  "evidence_records": [
+    {
+      "evidence_id": "evidence.partner-demo-001",
+      "evidence_type": "case_study",
+      "summary": "Synthetic case study documents a governed deployment.",
+      "supports_criterion_ids": [
+        "criterion.governed-delivery"
+      ],
+      "risk_flags": []
+    },
+    {
+      "evidence_id": "evidence.partner-demo-002",
+      "evidence_type": "certification",
+      "summary": "Synthetic training record documents integration delivery readiness.",
+      "supports_criterion_ids": [
+        "criterion.integration-readiness"
+      ],
+      "risk_flags": []
+    }
+  ],
+  "program_criteria": [
+    {
+      "criterion_id": "criterion.governed-delivery",
+      "description": "Evidence of governed delivery.",
+      "required": true
+    },
+    {
+      "criterion_id": "criterion.integration-readiness",
+      "description": "Evidence of integration delivery readiness.",
+      "required": true
+    },
+    {
+      "criterion_id": "criterion.security-attestation",
+      "description": "Current security attestation.",
+      "required": true
+    }
+  ],
+  "program_constraints": {
+    "eligible_regions": [
+      "europe",
+      "north_america"
+    ],
+    "required_capability_ids": [
+      "implementation.governance",
+      "integration.delivery"
+    ],
+    "minimum_evidence_records": 3,
+    "disqualifying_risk_flags": [
+      "compliance_gap",
+      "security_gap"
+    ]
+  },
+  "missing_information_indicators": [
+    {
+      "indicator_id": "missing.security-attestation",
+      "description": "A current security attestation was not supplied.",
+      "related_criterion_ids": [
+        "criterion.security-attestation"
+      ]
+    }
+  ]
+}

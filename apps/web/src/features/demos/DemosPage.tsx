@@ -9,6 +9,9 @@ import {
   COMMUNITY_REMINDER_INSTANCE_ID,
   COMMUNITY_REMINDER_SCENARIO_ID,
   COMMUNITY_REMINDER_TEMPLATE_ID,
+  PARTNERSHIP_REVIEW_INSTANCE_ID,
+  PARTNERSHIP_REVIEW_SCENARIO_ID,
+  PARTNERSHIP_REVIEW_TEMPLATE_ID,
   createDemoScenarioRun,
   EMAIL_NEWSLETTER_INSTANCE_ID,
   EMAIL_NEWSLETTER_TEMPLATE_ID,
@@ -367,12 +370,333 @@ const COMMUNITY_REMINDER_PRESET = {
     "A live session on governed marketing automation and approval-safe workflows.",
 } as const satisfies DemoJsonObject;
 
+const STABLE_ID = "^[a-z0-9][a-z0-9._-]{0,79}$";
+const RISK_FLAGS = [
+  "compliance_gap",
+  "delivery_capacity_gap",
+  "security_gap",
+  "unverified_claim",
+] as const;
+// Exported for exact-contract regression fixtures alongside the page component.
+// eslint-disable-next-line react-refresh/only-export-components
+export const PARTNERSHIP_REVIEW_INPUT_SCHEMA = {
+  $schema: DRAFT_2020_12,
+  $id: "schema.demo.partnerships.application-review.input.v1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "applicant_id",
+    "organization_metadata",
+    "declared_capabilities",
+    "declared_regions",
+    "evidence_records",
+    "program_criteria",
+    "program_constraints",
+    "missing_information_indicators",
+  ],
+  properties: {
+    applicant_id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 120,
+      pattern: "^[a-z0-9][a-z0-9._-]{0,119}$",
+      "x-sensitive": true,
+    },
+    organization_metadata: {
+      type: "object",
+      additionalProperties: false,
+      "x-sensitive": true,
+      required: [
+        "organization_name",
+        "organization_type",
+        "organization_summary",
+        "website_reference",
+      ],
+      properties: {
+        organization_name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 160,
+        },
+        organization_type: {
+          type: "string",
+          enum: [
+            "systems_integrator",
+            "consultancy",
+            "technology_provider",
+            "training_provider",
+            "other",
+          ],
+        },
+        organization_summary: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2000,
+        },
+        website_reference: {
+          type: "string",
+          format: "uri",
+          minLength: 1,
+          maxLength: 2048,
+        },
+      },
+    },
+    declared_capabilities: {
+      type: "array",
+      minItems: 1,
+      maxItems: 16,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["capability_id", "label"],
+        properties: {
+          capability_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+          label: { type: "string", minLength: 1, maxLength: 160 },
+        },
+      },
+    },
+    declared_regions: {
+      type: "array",
+      minItems: 1,
+      maxItems: 16,
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: 80,
+        pattern: STABLE_ID,
+      },
+    },
+    evidence_records: {
+      type: "array",
+      maxItems: 24,
+      "x-sensitive": true,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "evidence_id",
+          "evidence_type",
+          "summary",
+          "supports_criterion_ids",
+          "risk_flags",
+        ],
+        properties: {
+          evidence_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+          evidence_type: {
+            type: "string",
+            enum: [
+              "case_study",
+              "certification",
+              "customer_reference",
+              "program_history",
+              "security_attestation",
+              "other",
+            ],
+          },
+          summary: {
+            type: "string",
+            minLength: 1,
+            maxLength: 2000,
+          },
+          supports_criterion_ids: {
+            type: "array",
+            maxItems: 24,
+            items: {
+              type: "string",
+              minLength: 1,
+              maxLength: 80,
+              pattern: STABLE_ID,
+            },
+          },
+          risk_flags: {
+            type: "array",
+            maxItems: 4,
+            items: { type: "string", enum: RISK_FLAGS },
+          },
+        },
+      },
+    },
+    program_criteria: {
+      type: "array",
+      minItems: 1,
+      maxItems: 24,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["criterion_id", "description", "required"],
+        properties: {
+          criterion_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+          description: { type: "string", minLength: 1, maxLength: 500 },
+          required: { type: "boolean" },
+        },
+      },
+    },
+    program_constraints: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "eligible_regions",
+        "required_capability_ids",
+        "minimum_evidence_records",
+        "disqualifying_risk_flags",
+      ],
+      properties: {
+        eligible_regions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 16,
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+        },
+        required_capability_ids: {
+          type: "array",
+          maxItems: 16,
+          items: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+        },
+        minimum_evidence_records: { type: "integer", minimum: 0, maximum: 24 },
+        disqualifying_risk_flags: {
+          type: "array",
+          maxItems: 4,
+          items: { type: "string", enum: RISK_FLAGS },
+        },
+      },
+    },
+    missing_information_indicators: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["indicator_id", "description", "related_criterion_ids"],
+        properties: {
+          indicator_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            pattern: STABLE_ID,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: 500,
+          },
+          related_criterion_ids: {
+            type: "array",
+            maxItems: 24,
+            items: {
+              type: "string",
+              minLength: 1,
+              maxLength: 80,
+              pattern: STABLE_ID,
+            },
+          },
+        },
+      },
+    },
+  },
+} as const satisfies DemoJsonObject;
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const PARTNERSHIP_REVIEW_PRESET = {
+  applicant_id: "applicant.partnership-demo-0001",
+  organization_metadata: {
+    organization_name: "Northstar Systems Demo",
+    organization_type: "systems_integrator",
+    organization_summary:
+      "Synthetic implementation partner specializing in governed automation.",
+    website_reference: "https://example.com/partners/northstar-systems",
+  },
+  declared_capabilities: [
+    {
+      capability_id: "implementation.governance",
+      label: "AI governance implementation",
+    },
+    { capability_id: "integration.delivery", label: "Integration delivery" },
+  ],
+  declared_regions: ["europe", "north_america"],
+  evidence_records: [
+    {
+      evidence_id: "evidence.partner-demo-001",
+      evidence_type: "case_study",
+      summary: "Synthetic case study documents a governed deployment.",
+      supports_criterion_ids: ["criterion.governed-delivery"],
+      risk_flags: [],
+    },
+    {
+      evidence_id: "evidence.partner-demo-002",
+      evidence_type: "certification",
+      summary:
+        "Synthetic training record documents integration delivery readiness.",
+      supports_criterion_ids: ["criterion.integration-readiness"],
+      risk_flags: [],
+    },
+  ],
+  program_criteria: [
+    {
+      criterion_id: "criterion.governed-delivery",
+      description: "Evidence of governed delivery.",
+      required: true,
+    },
+    {
+      criterion_id: "criterion.integration-readiness",
+      description: "Evidence of integration delivery readiness.",
+      required: true,
+    },
+    {
+      criterion_id: "criterion.security-attestation",
+      description: "Current security attestation.",
+      required: true,
+    },
+  ],
+  program_constraints: {
+    eligible_regions: ["europe", "north_america"],
+    required_capability_ids: [
+      "implementation.governance",
+      "integration.delivery",
+    ],
+    minimum_evidence_records: 3,
+    disqualifying_risk_flags: ["compliance_gap", "security_gap"],
+  },
+  missing_information_indicators: [
+    {
+      indicator_id: "missing.security-attestation",
+      description: "A current security attestation was not supplied.",
+      related_criterion_ids: ["criterion.security-attestation"],
+    },
+  ],
+} as const satisfies DemoJsonObject;
+
 interface ScenarioPresentation {
   readonly scenarioId:
     | typeof SOCIAL_DRAFT_SCENARIO_ID
     | typeof BLOG_CONTENT_REVIEW_SCENARIO_ID
     | typeof EMAIL_SIGNUP_SCENARIO_ID
-    | typeof COMMUNITY_REMINDER_SCENARIO_ID;
+    | typeof COMMUNITY_REMINDER_SCENARIO_ID
+    | typeof PARTNERSHIP_REVIEW_SCENARIO_ID;
   readonly effect: DemoScenario["effect"];
   readonly primaryInstanceId: string;
   readonly selectedAgents: readonly {
@@ -617,11 +941,65 @@ const COMMUNITY_PRESENTATION: ScenarioPresentation = Object.freeze({
   approvalQueueLink: false,
 });
 
+const PARTNERSHIP_PRESENTATION: ScenarioPresentation = Object.freeze({
+  scenarioId: PARTNERSHIP_REVIEW_SCENARIO_ID,
+  effect: "read_only",
+  primaryInstanceId: PARTNERSHIP_REVIEW_INSTANCE_ID,
+  selectedAgents: [
+    {
+      templateId: PARTNERSHIP_REVIEW_TEMPLATE_ID,
+      instanceId: PARTNERSHIP_REVIEW_INSTANCE_ID,
+      templateLabel: "Selected Partnerships template",
+      instanceLabel: "Selected Partnerships instance",
+    },
+  ],
+  expected: {
+    statePath: DIRECT_COMPLETION_STATE_PATH,
+    modelCalls: 1,
+    connectorCalls: 0,
+    externalActions: 0,
+    approvals: 0,
+    externalWrites: 0,
+  },
+  receiptExecutionMode: "dry_run",
+  displayName: "Partnership application review",
+  description:
+    "Create a deterministic advisory recommendation from supplied partner application evidence without external research, applicant notification, record mutation, or an automated decision.",
+  inputSchema: PARTNERSHIP_REVIEW_INPUT_SCHEMA,
+  preset: PARTNERSHIP_REVIEW_PRESET,
+  safeSubmitVerb: "Create advisory review",
+  eyebrow: "DEMO-05 · Partnerships workflow",
+  pageTitle: "Partner application to advisory review",
+  pageDescription:
+    "Assess only the supplied application, criteria, and evidence, then create an evidence-linked recommendation for human review.",
+  modeTitle: "Deterministic mock mode",
+  modeDetail: "Advisory only · no automated decision",
+  modeTone: "safe",
+  formId: "demo-partnership-review-form",
+  formLabel: "Partnership application review preset",
+  formModeTitle: "Read-only advisory review",
+  formModeDescription:
+    "The fixed model evaluates supplied evidence only. It cannot research the applicant, change a partner record, notify anyone, or accept or reject an application.",
+  guardrailBadges: [
+    "Read-only",
+    "Advisory only",
+    "No automated decision",
+    "No external research or notification",
+  ],
+  boundaryNote:
+    "Accept, reject, and needs_information are recommendation labels only. A human remains responsible for every consequential partnership decision.",
+  receiptTitle: "Advisory review run accepted",
+  receiptDescription:
+    "Durable intake accepted a dry-run advisory review. Follow the authoritative run and artifact for its recommendation, rationale, uncertainty, risks, missing information, and follow-up questions; acceptance is not an applicant decision.",
+  approvalQueueLink: false,
+});
+
 const SUPPORTED_PRESENTATIONS = [
   SOCIAL_PRESENTATION,
   BLOG_PRESENTATION,
   EMAIL_PRESENTATION,
   COMMUNITY_PRESENTATION,
+  PARTNERSHIP_PRESENTATION,
 ] as const;
 
 interface PreparedScenario {

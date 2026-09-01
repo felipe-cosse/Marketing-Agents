@@ -15,6 +15,7 @@ from .composition import (
     CommunityReminderDraftReadAdapter,
     DeterministicDemoReadAdapter,
     EmailSignupOnboardingReadAdapter,
+    PartnershipApplicationReviewReadAdapter,
     SocialContentDraftReadAdapter,
     build_blog_content_review_deterministic_provider,
     build_blog_content_review_read_adapter,
@@ -24,6 +25,8 @@ from .composition import (
     build_demo_read_adapter,
     build_email_signup_onboarding_deterministic_provider,
     build_email_signup_onboarding_read_adapter,
+    build_partnership_application_review_deterministic_provider,
+    build_partnership_application_review_read_adapter,
     build_social_content_draft_deterministic_provider,
     build_social_content_draft_read_adapter,
 )
@@ -38,6 +41,11 @@ from .email_signup_onboarding import (
     EMAIL_SIGNUP_ONBOARDING_RENDERER,
     EMAIL_SIGNUP_ONBOARDING_SCENARIO,
     EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID,
+)
+from .partnership_application_review import (
+    PARTNERSHIP_APPLICATION_REVIEW_RENDERER,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO,
+    PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID,
 )
 from .registry import (
     DEMO_SCENARIOS,
@@ -62,6 +70,9 @@ __all__ = [
     "EMAIL_SIGNUP_ONBOARDING_RENDERER",
     "EMAIL_SIGNUP_ONBOARDING_SCENARIO",
     "EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID",
+    "PARTNERSHIP_APPLICATION_REVIEW_RENDERER",
+    "PARTNERSHIP_APPLICATION_REVIEW_SCENARIO",
+    "PARTNERSHIP_APPLICATION_REVIEW_SCENARIO_ID",
     "SOCIAL_CONTENT_DRAFT_RENDERER",
     "SOCIAL_CONTENT_DRAFT_SCENARIO_ID",
     "BlogContentReviewReadAdapter",
@@ -78,6 +89,7 @@ __all__ = [
     "DemoSelectedAgent",
     "DeterministicDemoReadAdapter",
     "EmailSignupOnboardingReadAdapter",
+    "PartnershipApplicationReviewReadAdapter",
     "SocialContentDraftReadAdapter",
     "build_blog_content_review_deterministic_provider",
     "build_blog_content_review_read_adapter",
@@ -88,6 +100,8 @@ __all__ = [
     "build_demo_scenario_registry",
     "build_email_signup_onboarding_deterministic_provider",
     "build_email_signup_onboarding_read_adapter",
+    "build_partnership_application_review_deterministic_provider",
+    "build_partnership_application_review_read_adapter",
     "build_social_content_draft_deterministic_provider",
     "build_social_content_draft_read_adapter",
     "resolve_demo_input",
