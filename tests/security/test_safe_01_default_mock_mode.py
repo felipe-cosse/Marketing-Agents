@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
-from marketing_agents.adapters.registry import AdapterRegistryError, build_local_adapter_registry
 from marketing_agents.config import Settings
+from marketing_agents.infrastructure.adapters.safe_profile import (
+    AdapterRegistryError,
+    build_local_adapter_registry,
+)
 
 
 def test_safe_01_default_session_is_explicitly_dry_run_and_mock_only() -> None:

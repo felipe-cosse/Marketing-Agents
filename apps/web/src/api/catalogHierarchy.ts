@@ -1,6 +1,6 @@
 import { getJson } from "./client";
-import { normalizeHierarchy } from "../features/org-chart/normalizeHierarchy";
-import type { NormalizedHierarchy } from "../features/org-chart/model";
+import { normalizeHierarchy } from "./normalizeCatalogHierarchy";
+import type { NormalizedHierarchy } from "../contracts/catalogHierarchy";
 
 export const CATALOG_HIERARCHY_QUERY_KEY = ["catalog", "hierarchy"] as const;
 

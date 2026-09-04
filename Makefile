@@ -11,6 +11,7 @@ HEAD ?= HEAD
 .PHONY: test-demo-06-backend
 .PHONY: web-test-orch-01-e2e web-test-orch-01-unit web-test-orch-01-witness
 .PHONY: web-test-arch-02-build web-test-arch-02-e2e web-test-arch-02-unit web-test-arch-02-witness
+.PHONY: test-arch-08-backend verify-architecture web-test-arch-08-unit
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -88,9 +89,18 @@ verify-catalog-release:
 verify-ci-order:
 	$(UV) run python scripts/verify_ci_order.py
 
+verify-architecture:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_architecture_boundaries.py
+
 test-network:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run python -m unittest tests.network.test_safe_11_network_isolation
 	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs
+
+test-arch-08-backend:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q \
+		tests/unit/architecture/test_arch_08_repository_boundaries.py \
+		tests/security/test_safe_01_default_mock_mode.py \
+		tests/integration/api/test_api_01_health_readiness.py
 
 web-bootstrap:
 	corepack pnpm install --frozen-lockfile
@@ -177,6 +187,9 @@ web-test-arch-02-witness:
 web-test-arch-02-e2e:
 	node apps/web/scripts/run-arch-02-e2e.mjs
 
+web-test-arch-08-unit:
+	node apps/web/scripts/run-arch-08-unit.mjs
+
 web-test-web-02-unit:
 	node apps/web/scripts/run-web-02-unit.mjs
 
@@ -236,8 +249,8 @@ verify-history:
 verify-requirement:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_requirement_evidence.py branch --id "$(REQUIREMENT)" --base "$(BASE)" --head "$(HEAD)" --run --witness
 
-verify-governance: format-check verify-source test-source test-tooling verify-history
+verify-governance: format-check verify-source test-source test-tooling verify-architecture verify-history
 
 verify-backend: format-check lint typecheck test-backend
 
-verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-arch-02-unit web-test-arch-02-witness web-test-arch-02-build web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
+verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-arch-02-unit web-test-arch-02-witness web-test-arch-02-build web-test-arch-08-unit web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build

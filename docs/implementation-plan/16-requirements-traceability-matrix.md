@@ -49,7 +49,7 @@ Allowed status values:
 | ARCH-05 | Framework-independent orchestration core. | 03, 05 | Domain/application layers | Import-boundary tests | verified |
 | ARCH-06 | `LLMProvider`, default deterministic mock, opt-in real provider. | 10 | Provider port/registry | Provider contracts/settings tests | verified |
 | ARCH-07 | Typed connector interfaces/mocks for all eight families. | 10 | Connector ports/mocks | Connector contract matrix | verified |
-| ARCH-08 | Domain/runtime/adapters/API/UI/tests visibly separated. | 01, 17 | Monorepo layout | Architecture test/review | planned |
+| ARCH-08 | Domain/runtime/adapters/API/UI/tests visibly separated. | 01, 17 | Monorepo layout | Architecture test/review | verified |
 | ORCH-01 | Visible root remains Marketing Agents; orchestrator is not instance 44. | 00, 12 | Hierarchy/control-plane badge | Count/UI assertions | verified |
 | ORCH-02 | Validate incoming work. | 05, 07 | Intake/planner | Schema/intake tests | verified |
 | ORCH-03 | Construct explicit dependency graph. | 03, 05 | Workflow/DAG models | Graph/unit/runtime tests | verified |
