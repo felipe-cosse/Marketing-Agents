@@ -15,7 +15,6 @@ from sqlalchemy import CheckConstraint, UniqueConstraint, inspect, text
 from sqlalchemy.engine import URL, Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from marketing_agents.adapters.registry import build_local_adapter_registry
 from marketing_agents.application.ports.readiness import (
     CatalogReadinessMetadata,
     ReadinessCheck,
@@ -26,6 +25,9 @@ from marketing_agents.application.ports.readiness import (
 )
 from marketing_agents.infrastructure.adapters.connectors.registry import (
     build_connector_registry,
+)
+from marketing_agents.infrastructure.adapters.safe_profile import (
+    build_local_adapter_registry,
 )
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog

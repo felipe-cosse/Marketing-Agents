@@ -1,0 +1,166 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-08",
+  "matrix_statement_sha256": "82c6626b98634e4b75ed9a3af4e7ec8843a32f73d4932f741bf1104a27a9c745",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "architecture-boundaries.json",
+      "apps/api/src/marketing_agents/adapters/__init__.py",
+      "apps/api/src/marketing_agents/adapters/registry.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/safe_profile.py",
+      "apps/api/src/marketing_agents/infrastructure/readiness.py",
+      "apps/web/config/arch08FrontendBoundaries.test.ts",
+      "apps/web/scripts/run-arch-08-unit.mjs",
+      "apps/web/src/api/catalogHierarchy.ts",
+      "apps/web/src/api/normalizeCatalogHierarchy.ts",
+      "apps/web/src/contracts/catalogHierarchy.ts",
+      "apps/web/src/features/org-chart/model.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.ts",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/ARCH-08.json",
+      "docs/verification/requirements/ARCH-08.md",
+      "scripts/verify_architecture_boundaries.py",
+      "tests/security/test_safe_01_default_mock_mode.py",
+      "tests/unit/architecture/test_arch_08_repository_boundaries.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["architecture-boundaries.json"]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/adapters/__init__.py",
+          "apps/api/src/marketing_agents/adapters/registry.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/safe_profile.py",
+          "apps/api/src/marketing_agents/infrastructure/readiness.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/api/catalogHierarchy.ts",
+          "apps/web/src/api/normalizeCatalogHierarchy.ts",
+          "apps/web/src/contracts/catalogHierarchy.ts",
+          "apps/web/src/features/org-chart/model.ts",
+          "apps/web/src/features/org-chart/normalizeHierarchy.ts"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "scripts/verify_architecture_boundaries.py",
+          "tests/security/test_safe_01_default_mock_mode.py",
+          "tests/unit/architecture/test_arch_08_repository_boundaries.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/config/arch08FrontendBoundaries.test.ts",
+          "apps/web/scripts/run-arch-08-unit.mjs"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "backend-layers-and-adapters-separated",
+      "type": "contract",
+      "statement": "The backend exposes distinct domain, application/runtime, infrastructure adapter, API, worker, demo, security, and test homes; the duplicate top-level adapter package is absent, the safe-profile registry is owned by infrastructure/adapters, and internal plus third-party dependency ownership remains fail-closed under the declared policy.",
+      "test_refs": [
+        "tests/unit/architecture/test_arch_08_repository_boundaries.py::test_arch_08_current_repository_satisfies_boundary_policy"
+      ]
+    },
+    {
+      "id": "frontend-contracts-and-api-separated",
+      "type": "contract",
+      "statement": "Catalog hierarchy DTO ownership resides in src/contracts, response normalization and transport reside in src/api, and org-chart model/normalizer modules are inward-only compatibility re-exports; API modules do not depend outward on feature modules and UI modules do not own transport paths or direct fetch calls.",
+      "test_refs": [
+        "apps/web/config/arch08FrontendBoundaries.test.ts::ARCH-08 keeps production UI, API, contracts, and tests directionally separated"
+      ]
+    },
+    {
+      "id": "forbidden-dependency-directions-rejected",
+      "type": "negative_control",
+      "statement": "The dependency-free repository checker and focused negative fixtures reject missing layer homes, the legacy adapter home, forbidden Python layer/API-ORM/test imports, unapproved third-party frameworks or SDKs, impure frontend contracts, API-to-feature imports, production-to-test imports, and direct UI fetch or API-path ownership; new unlisted edges fail closed.",
+      "test_refs": [
+        "tests/unit/architecture/test_arch_08_repository_boundaries.py::test_arch_08_rejects_forbidden_boundary_fixtures",
+        "apps/web/config/arch08FrontendBoundaries.test.ts::ARCH-08 rejects"
+      ]
+    },
+    {
+      "id": "boundary-gates-remain-always-on",
+      "type": "contract",
+      "statement": "The dependency-free repository checker remains a prerequisite of the governance CI path and the TypeScript architecture suite remains a prerequisite of the web CI path, so later requirement branches continuously re-evaluate both layer contracts.",
+      "test_refs": [
+        "tests/unit/architecture/test_arch_08_repository_boundaries.py::test_arch_08_boundary_gates_remain_on_both_ci_verification_paths"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-08-stdlib-boundary-contract",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_architecture_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "backend-layers-and-adapters-separated",
+        "frontend-contracts-and-api-separated",
+        "forbidden-dependency-directions-rejected"
+      ]
+    },
+    {
+      "id": "arch-08-python-negative-controls",
+      "runner": "argv",
+      "argv": ["make", "test-arch-08-backend"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "backend-layers-and-adapters-separated",
+        "forbidden-dependency-directions-rejected",
+        "boundary-gates-remain-always-on"
+      ]
+    },
+    {
+      "id": "arch-08-frontend-boundaries",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-08-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "frontend-contracts-and-api-separated",
+        "forbidden-dependency-directions-rejected"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/adapters/__init__.py",
+      "apps/api/src/marketing_agents/adapters/registry.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/safe_profile.py",
+      "apps/api/src/marketing_agents/infrastructure/readiness.py",
+      "apps/web/src/api/catalogHierarchy.ts",
+      "apps/web/src/api/normalizeCatalogHierarchy.ts",
+      "apps/web/src/contracts/catalogHierarchy.ts",
+      "apps/web/src/features/org-chart/model.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.ts"
+    ],
+    "gate_id": "arch-08-stdlib-boundary-contract"
+  },
+  "limitations": [
+    "The boundary gates perform static path/import/source analysis, including quoted literal dynamic imports. They do not prove runtime side effects, computed dynamic import or reflection behavior, dependency-injection composition, or deployed topology.",
+    "Existing intentional composition roots and cross-layer seams are enumerated narrowly in architecture-boundaries.json. ARCH-08 rejects new unlisted edges but does not refactor demo execution, catalog query composition, or other already reviewed composition wiring.",
+    "The frontend catalog contract is the normalized UI-facing hierarchy contract, with compatibility re-exports preserving existing consumers. ARCH-08 does not claim a completed generated OpenAPI client or elimination of every manually normalized frontend DTO.",
+    "The TypeScript/Vitest boundary test uses the installed pinned frontend toolchain; the Python checker remains dependency-free and is the causal witness. Neither gate is a browser or end-to-end behavior claim.",
+    "verify-architecture is wired into the existing verify-governance CI path and the focused frontend gate into verify-web. The final make verify and verify-clean aggregates remain DEL-07 and DEL-05 responsibilities."
+  ]
+}

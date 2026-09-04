@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "required_layer_homes": [
+    "apps/api/src/marketing_agents/domain",
+    "apps/api/src/marketing_agents/application/orchestration",
+    "apps/api/src/marketing_agents/application/services",
+    "apps/api/src/marketing_agents/application/ports",
+    "apps/api/src/marketing_agents/infrastructure/adapters",
+    "apps/api/src/marketing_agents/api/routes",
+    "apps/api/src/marketing_agents/api/schemas",
+    "apps/api/src/marketing_agents/workers",
+    "apps/api/src/marketing_agents/demos",
+    "apps/api/src/marketing_agents/security",
+    "apps/web/src/api",
+    "apps/web/src/app",
+    "apps/web/src/contracts",
+    "apps/web/src/features",
+    "apps/web/src/styles",
+    "apps/web/src/test",
+    "tests/unit",
+    "tests/integration",
+    "tests/contract",
+    "tests/acceptance",
+    "tests/catalog",
+    "tests/security",
+    "tests/network"
+  ],
+  "forbidden_python_roots": [
+    "apps/api/src/marketing_agents/adapters"
+  ],
+  "python": {
+    "source_root": "apps/api/src/marketing_agents",
+    "package": "marketing_agents",
+    "allowed_internal_layers": {
+      "<root>": ["domain", "infrastructure", "security"],
+      "domain": ["domain"],
+      "application": ["application", "domain", "security"],
+      "security": ["domain", "security"],
+      "infrastructure": ["application", "config", "domain", "infrastructure", "security"],
+      "api": ["api", "application", "config", "demos", "domain", "security"],
+      "demos": ["application", "demos", "domain", "infrastructure", "security"],
+      "workers": ["application", "config", "demos", "domain", "infrastructure", "security", "workers"]
+    },
+    "approved_external_roots": {
+      "<root>": ["pydantic", "pydantic_settings"],
+      "domain": ["pydantic"],
+      "application": ["jsonschema", "pydantic", "referencing"],
+      "security": ["pydantic"],
+      "infrastructure": ["croniter", "jsonschema", "pydantic", "sqlalchemy", "yaml"],
+      "api": ["fastapi", "pydantic", "starlette"],
+      "demos": ["pydantic"],
+      "workers": []
+    },
+    "import_exceptions": [
+      {
+        "source": "domain/approval.py",
+        "allowed_prefixes": ["marketing_agents.security.redaction"]
+      },
+      {
+        "source": "infrastructure/manual_work.py",
+        "allowed_prefixes": ["marketing_agents.demos"]
+      },
+      {
+        "source": "api/app.py",
+        "allowed_prefixes": [
+          "marketing_agents.infrastructure.adapters.identity",
+          "marketing_agents.infrastructure.readiness"
+        ]
+      },
+      {
+        "source": "api/catalog_queries.py",
+        "allowed_prefixes": [
+          "marketing_agents.infrastructure.catalog",
+          "marketing_agents.infrastructure.instance_configuration_constraints"
+        ]
+      }
+    ],
+    "api_orm_forbidden_prefixes": [
+      "alembic",
+      "sqlalchemy",
+      "sqlmodel",
+      "marketing_agents.infrastructure.db"
+    ],
+    "production_test_forbidden_prefixes": ["tests"],
+    "pure_contract_globs": [
+      "application/ports/*.py",
+      "demos/contracts.py"
+    ],
+    "pure_contract_forbidden_prefixes": [
+      "alembic",
+      "fastapi",
+      "sqlalchemy",
+      "sqlmodel",
+      "starlette",
+      "uvicorn",
+      "marketing_agents.api",
+      "marketing_agents.demos",
+      "marketing_agents.infrastructure",
+      "marketing_agents.workers"
+    ]
+  },
+  "frontend": {
+    "source_root": "apps/web/src",
+    "api_root": "apps/web/src/api",
+    "contract_root": "apps/web/src/contracts",
+    "entrypoint": "apps/web/src/main.tsx",
+    "test_roots": [
+      "apps/web/src/test",
+      "apps/web/config",
+      "apps/web/e2e"
+    ],
+    "test_name_markers": [".test.", "TestFixture.", "TestFixtures."],
+    "api_allowed_import_roots": [
+      "apps/web/src/api",
+      "apps/web/src/contracts"
+    ]
+  }
+}
