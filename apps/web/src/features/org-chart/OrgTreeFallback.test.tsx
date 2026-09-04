@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import { DEFAULT_ORG_CHART_FILTERS } from "./filters";
+import {
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
+} from "./model";
 import { normalizeHierarchy } from "./normalizeHierarchy";
 import { OrgTreeFallback } from "./OrgTreeFallback";
 import { projectHierarchy } from "./projectHierarchy";
@@ -45,6 +49,44 @@ function item(nodeId: string): HTMLButtonElement {
 }
 
 describe("WEB-07 semantic organization tree", () => {
+  it("ORCH-01 marks the control plane on the source root without adding a tree item or card", () => {
+    renderTree({ autoExpandMatches: true });
+
+    const root = item(MARKETING_AGENTS_ROOT.id);
+    expect(root).toHaveTextContent(MARKETING_AGENTS_ROOT.displayName);
+    expect(root).toHaveAttribute(
+      "data-hierarchy-root-id",
+      MARKETING_AGENTS_ROOT.id,
+    );
+    const controlPlane = root.querySelector(
+      `[data-node-kind="control-plane"][data-control-plane-id="${MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}"]`,
+    );
+    expect(controlPlane).toHaveTextContent(
+      MARKETING_ORCHESTRATOR_CONTROL_PLANE.displayName,
+    );
+    expect(controlPlane).toHaveTextContent(
+      MARKETING_ORCHESTRATOR_CONTROL_PLANE.badgeLabel,
+    );
+    expect(controlPlane).toHaveAttribute("data-counts-as-instance", "false");
+    expect(root).toHaveAccessibleName(
+      /Marketing Agents.*Marketing Orchestrator.*not included in the deployed-agent inventory/u,
+    );
+    expect(screen.getAllByRole("treeitem")).toHaveLength(61);
+    expect(
+      document.querySelectorAll('[data-node-kind="instance"]'),
+    ).toHaveLength(43);
+    expect(
+      document.querySelector(
+        `[role="treeitem"][data-node-id="${MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}"]`,
+      ),
+    ).toBeNull();
+    expect(
+      document.querySelector(
+        `[data-node-kind="instance"][data-instance-id="${MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}"]`,
+      ),
+    ).toBeNull();
+  });
+
   it("WEB-07 exposes exact source-ordered ARIA metadata with one roving tab stop", () => {
     renderTree();
 

@@ -1,0 +1,130 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ORCH-01",
+  "matrix_statement_sha256": "b322ee35352707a6972bc29b3825eeb1f180e86f21449e93175b65cbc02d819d",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/e2e/web-01-org-chart.spec.ts",
+      "apps/web/scripts/run-orch-01-e2e.mjs",
+      "apps/web/scripts/run-orch-01-unit.mjs",
+      "apps/web/scripts/run-orch-01-witness.mjs",
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/model.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.test.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.ts",
+      "apps/web/src/features/org-chart/treeModel.ts",
+      "apps/web/src/styles/org-chart.css",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/ORCH-01.json",
+      "docs/verification/requirements/ORCH-01.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/HierarchyStage.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+          "apps/web/src/features/org-chart/model.ts",
+          "apps/web/src/features/org-chart/normalizeHierarchy.ts",
+          "apps/web/src/features/org-chart/treeModel.ts",
+          "apps/web/src/styles/org-chart.css"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/e2e/web-01-org-chart.spec.ts",
+          "apps/web/scripts/run-orch-01-witness.mjs",
+          "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+          "apps/web/src/features/org-chart/normalizeHierarchy.test.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "canonical-visible-root-control-plane",
+      "type": "contract",
+      "statement": "Graph and semantic-tree views share immutable canonical metadata for the sole visible Marketing Agents root and its attached Marketing Orchestrator control-plane marker, which is explicitly labeled as excluded from the deployed-agent inventory.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::ORCH-01 keeps the named control plane outside the 43 source agent cards",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::ORCH-01 marks the control plane on the source root without adding a tree item or card",
+        "apps/web/e2e/web-01-org-chart.spec.ts::ORCH-01 keeps one visible root and excludes the control plane from all 43 source instances",
+        "apps/web/scripts/run-orch-01-witness.mjs::ORCH-01 dependency-free witness"
+      ]
+    },
+    {
+      "id": "reserved-identities-excluded-from-source-nodes",
+      "type": "negative_control",
+      "statement": "Hierarchy normalization rejects the canonical root and control-plane identities on every source department, function, or instance node; graph and fully expanded semantic-tree views retain exactly 43 source instances and never create an orchestrator agent card or tree item.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/normalizeHierarchy.test.ts::ORCH-01 rejects reserved root and control-plane identities across source nodes",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::ORCH-01 keeps the named control plane outside the 43 source agent cards",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::ORCH-01 marks the control plane on the source root without adding a tree item or card",
+        "apps/web/e2e/web-01-org-chart.spec.ts::ORCH-01 keeps one visible root and excludes the control plane from all 43 source instances",
+        "apps/web/scripts/run-orch-01-witness.mjs::ORCH-01 dependency-free witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "orch-01-component-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-orch-01-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "canonical-visible-root-control-plane",
+        "reserved-identities-excluded-from-source-nodes"
+      ]
+    },
+    {
+      "id": "orch-01-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-orch-01-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "canonical-visible-root-control-plane",
+        "reserved-identities-excluded-from-source-nodes"
+      ]
+    },
+    {
+      "id": "orch-01-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-orch-01-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "canonical-visible-root-control-plane",
+        "reserved-identities-excluded-from-source-nodes"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/model.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.ts",
+      "apps/web/src/features/org-chart/treeModel.ts",
+      "apps/web/src/styles/org-chart.css"
+    ],
+    "gate_id": "orch-01-dependency-free-witness"
+  },
+  "limitations": [
+    "The control-plane marker is static identity metadata, not a liveness, readiness, worker-health, or process-count indicator.",
+    "ORCH-01 owns frontend hierarchy identity and reserved-ID rejection. Exact source catalog and API inventory remain independently owned by CAT-01 and API-02; orchestration behavior remains owned by ORCH-02 through ORCH-09.",
+    "The browser gate uses Playwright-managed Chromium and loopback FastAPI/Vite services. It does not claim browser-engine, physical-device, operating-system screen-reader, or deployed reverse-proxy parity."
+  ]
+}

@@ -3,6 +3,8 @@ import {
   EXPECTED_DEPARTMENT_INSTANCE_COUNTS,
   EXPECTED_FUNCTION_COUNTS,
   EXPECTED_FUNCTION_INSTANCE_COUNTS,
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
   type AgentDepartment,
   type AgentFunction,
   type AgentInstance,
@@ -17,6 +19,10 @@ const CATALOG_HASH_PATTERN = /^catalog-sha256-v1:[a-f0-9]{64}$/u;
 const TRIGGER_TYPES = new Set<TriggerType>(["manual", "webhook", "schedule"]);
 const EFFECTS = new Set<CapabilityEffect>(["read", "write"]);
 const OPERATIONS = new Set<OperationClassification>(["read_only", "mutating"]);
+const RESERVED_UI_NODE_IDS = new Set<string>([
+  MARKETING_AGENTS_ROOT.id,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE.id,
+]);
 
 export class HierarchyContractError extends Error {
   constructor(message: string) {
@@ -44,6 +50,16 @@ function asString(value: unknown, label: string): string {
     throw new HierarchyContractError(`${label} must be a non-empty string`);
   }
   return value;
+}
+
+function asSourceNodeId(value: unknown, label: string): string {
+  const id = asString(value, label);
+  if (RESERVED_UI_NODE_IDS.has(id)) {
+    throw new HierarchyContractError(
+      `${label} must not use the reserved UI identity ${JSON.stringify(id)}`,
+    );
+  }
+  return id;
 }
 
 function asBoolean(value: unknown, label: string): boolean {
@@ -122,6 +138,7 @@ function parseCapability(value: unknown, label: string): CapabilitySummary {
 
 function parseInstance(value: unknown, label: string): AgentInstance {
   const record = asRecord(value, label);
+  const id = asSourceNodeId(record.id, `${label}.id`);
   const triggerTypes = asArray(
     record.triggerTypes,
     `${label}.triggerTypes`,
@@ -145,7 +162,7 @@ function parseInstance(value: unknown, label: string): AgentInstance {
   );
 
   return {
-    id: asString(record.id, `${label}.id`),
+    id,
     templateId: asString(record.templateId, `${label}.templateId`),
     displayName: asString(record.displayName, `${label}.displayName`),
     purpose: asString(record.purpose, `${label}.purpose`),
@@ -178,7 +195,7 @@ function parseFunction(value: unknown, label: string): AgentFunction {
     `${label}.instances`,
   );
   return {
-    id: asString(record.id, `${label}.id`),
+    id: asSourceNodeId(record.id, `${label}.id`),
     displayName: asString(record.displayName, `${label}.displayName`),
     displayOrder: asPositiveInteger(
       record.displayOrder,
@@ -201,7 +218,7 @@ function parseDepartment(value: unknown, label: string): AgentDepartment {
     (agentFunction) => agentFunction.instances,
   );
   return {
-    id: asString(record.id, `${label}.id`),
+    id: asSourceNodeId(record.id, `${label}.id`),
     displayName: asString(record.displayName, `${label}.displayName`),
     displayOrder: asPositiveInteger(
       record.displayOrder,

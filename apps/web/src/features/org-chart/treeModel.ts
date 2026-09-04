@@ -1,7 +1,12 @@
-import type { AgentDepartment, AgentFunction, AgentInstance } from "./model";
+import {
+  MARKETING_AGENTS_ROOT,
+  type AgentDepartment,
+  type AgentFunction,
+  type AgentInstance,
+} from "./model";
 import type { ProjectedHierarchy } from "./projectHierarchy";
 
-export const ORG_TREE_ROOT_ID = "root" as const;
+export const ORG_TREE_ROOT_ID = MARKETING_AGENTS_ROOT.id;
 
 export type OrgTreeNodeKind = "root" | "department" | "function" | "instance";
 
@@ -78,7 +83,7 @@ export function buildOrgTreeModel(hierarchy: ProjectedHierarchy): OrgTreeModel {
   append({
     id: ORG_TREE_ROOT_ID,
     kind: "root",
-    label: "Marketing Agents",
+    label: MARKETING_AGENTS_ROOT.displayName,
     parentId: null,
     level: 1,
     posInSet: 1,

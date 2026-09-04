@@ -4,6 +4,10 @@ import { useCallback, useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
+import {
+  MARKETING_AGENTS_ROOT,
+  MARKETING_ORCHESTRATOR_CONTROL_PLANE,
+} from "./model";
 import { normalizeHierarchy } from "./normalizeHierarchy";
 import { OrgChartCanvas } from "./OrgChartCanvas";
 
@@ -120,10 +124,32 @@ describe("WEB-01 interactive org chart canvas", () => {
     expect(cards[0]).toHaveAttribute("tabindex", "-1");
   });
 
-  it("never exposes the control-plane root as an agent card", () => {
+  it("ORCH-01 keeps the named control plane outside the 43 source agent cards", () => {
     const { container } = render(<CanvasHarness />);
+    const root = container.querySelector(
+      `[data-node-kind="root"][data-hierarchy-root-id="${MARKETING_AGENTS_ROOT.id}"]`,
+    );
+    expect(root).toHaveTextContent(MARKETING_AGENTS_ROOT.displayName);
+    const controlPlane = root?.querySelector(
+      `[data-node-kind="control-plane"][data-control-plane-id="${MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}"]`,
+    );
+    expect(controlPlane).toHaveTextContent(
+      MARKETING_ORCHESTRATOR_CONTROL_PLANE.displayName,
+    );
+    expect(controlPlane).toHaveTextContent(
+      MARKETING_ORCHESTRATOR_CONTROL_PLANE.badgeLabel,
+    );
+    expect(controlPlane).toHaveAttribute("data-counts-as-instance", "false");
+    expect(controlPlane).toHaveAccessibleName(
+      /Marketing Orchestrator, implementation control plane, not included in the deployed-agent inventory/u,
+    );
     expect(
-      container.querySelector('[data-instance-id="marketing-orchestrator"]'),
+      container.querySelectorAll('[data-node-kind="instance"]'),
+    ).toHaveLength(43);
+    expect(
+      container.querySelector(
+        `[data-node-kind="instance"][data-instance-id="${MARKETING_ORCHESTRATOR_CONTROL_PLANE.id}"]`,
+      ),
     ).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(46);
   });
