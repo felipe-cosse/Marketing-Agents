@@ -211,6 +211,8 @@ function HierarchyStageComponent({
                       <AgentCard
                         key={instance.id}
                         instance={instance}
+                        departmentLabel={department.displayName}
+                        functionLabel={agentFunction.displayName}
                         placement={{
                           ...placement,
                           x: placement.x - functionLayout.x,

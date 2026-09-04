@@ -127,6 +127,37 @@ describe("WEB-07 semantic organization tree", () => {
     expect(item("root")).toHaveAttribute("tabindex", "0");
   });
 
+  it("ARCH-02 identifies Tree view as the sole complete hierarchy navigation model", () => {
+    renderTree();
+    const tree = screen.getByRole("tree", {
+      name: "Marketing Agents organization tree",
+    });
+
+    expect(tree).toHaveAttribute("data-hierarchy-semantics", "tree-authority");
+    expect(tree).toHaveAttribute(
+      "aria-describedby",
+      "org-tree-structure-summary org-tree-keyboard-help",
+    );
+    expect(tree).toHaveAccessibleDescription(
+      /Tree view is the complete level-by-level hierarchy navigation model for 5 visible departments, 12 visible functions, and 43 visible deployed agents.*Use Up and Down to move/u,
+    );
+    expect(screen.queryByTestId("org-chart-viewport")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("treeitem")).toHaveLength(18);
+  });
+
+  it("ARCH-02 exposes a described empty Tree representation without an empty ARIA tree", () => {
+    renderTree({ projectedQuery: "no matching source agent" });
+
+    expect(screen.queryByRole("tree")).not.toBeInTheDocument();
+    const empty = screen.getByRole("region", {
+      name: "Marketing Agents organization tree empty state",
+    });
+    expect(empty).toHaveAttribute("data-hierarchy-semantics", "tree-empty");
+    expect(empty).toHaveAccessibleDescription(
+      /Tree view has no matching hierarchy nodes: 0 visible departments, 0 visible functions, and 0 visible deployed agents.*Adjust or clear filters/u,
+    );
+  });
+
   it("WEB-07 expands branches, preserves duplicate ordinals, and selects each instance independently", async () => {
     const user = userEvent.setup();
     const { onSelectionChange } = renderTree();

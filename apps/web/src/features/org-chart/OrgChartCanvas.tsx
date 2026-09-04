@@ -1,6 +1,7 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 
 import { CanvasControls } from "./CanvasControls";
+import { describeGraphHierarchy } from "./hierarchyAccessibility";
 import { HierarchyStage } from "./HierarchyStage";
 import { layoutHierarchy } from "./layout";
 import type { ProjectedHierarchy } from "./projectHierarchy";
@@ -77,6 +78,9 @@ export function OrgChartCanvas({
           onFit={fit}
         />
       </div>
+      <p id="org-chart-structure-summary" className="sr-only">
+        {describeGraphHierarchy(hierarchy)}
+      </p>
       <p id="chart-keyboard-help" className="sr-only">
         Drag the chart to pan. Use arrow keys to pan, plus or minus to zoom, and
         zero to fit the complete hierarchy.
@@ -89,7 +93,8 @@ export function OrgChartCanvas({
         data-viewport-x={transform.translateX}
         data-viewport-y={transform.translateY}
         data-viewport-zoom={transform.zoom}
-        aria-describedby="chart-keyboard-help"
+        data-hierarchy-semantics="visual"
+        aria-describedby="org-chart-structure-summary chart-keyboard-help"
         aria-label="Marketing Agents interactive organization chart"
         role="region"
         tabIndex={0}

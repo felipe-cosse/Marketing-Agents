@@ -7,6 +7,8 @@ import { presentPurpose } from "./presentation";
 
 interface AgentCardProps {
   readonly instance: AgentInstance;
+  readonly departmentLabel: string;
+  readonly functionLabel: string;
   readonly placement: InstanceLayout;
   readonly selected: boolean;
   readonly onSelect: (instanceId: string) => void;
@@ -17,6 +19,8 @@ interface AgentCardProps {
 
 export function AgentCard({
   instance,
+  departmentLabel,
+  functionLabel,
   placement,
   selected,
   onSelect,
@@ -26,6 +30,7 @@ export function AgentCard({
 }: AgentCardProps): React.JSX.Element {
   const duplicated = instance.deploymentCount > 1;
   const purpose = presentPurpose(instance.purpose);
+  const hierarchyDescriptionId = `agent-card-hierarchy-${encodeURIComponent(instance.id)}`;
   const accessibleOrdinal = duplicated
     ? `, Instance ${String(instance.sourceOrdinal)} of ${String(instance.deploymentCount)}`
     : "";
@@ -38,6 +43,7 @@ export function AgentCard({
       type="button"
       className="agent-card"
       aria-label={accessibleName}
+      aria-describedby={hierarchyDescriptionId}
       aria-controls={selected ? "agent-inspector" : undefined}
       aria-expanded={selected}
       aria-pressed={selected}
@@ -71,6 +77,10 @@ export function AgentCard({
       }}
       title={`${instance.displayName}\n${purpose}\n${instance.id}`}
     >
+      <span id={hierarchyDescriptionId} className="sr-only">
+        Department: {departmentLabel}. Function: {functionLabel}. Hierarchy
+        level 4.
+      </span>
       <span className="agent-card__topline">
         <span className="agent-card__icon" aria-hidden="true">
           {instance.operationClassification === "read_only" ? (

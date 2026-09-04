@@ -4,12 +4,14 @@ import { useCallback, useState } from "react";
 import { describe, expect, it } from "vitest";
 
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
+import { DEFAULT_ORG_CHART_FILTERS } from "./filters";
 import {
   MARKETING_AGENTS_ROOT,
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
 } from "./model";
 import { normalizeHierarchy } from "./normalizeHierarchy";
 import { OrgChartCanvas } from "./OrgChartCanvas";
+import { projectHierarchy } from "./projectHierarchy";
 
 const hierarchy = normalizeHierarchy(makeHierarchyPayload());
 
@@ -122,6 +124,55 @@ describe("WEB-01 interactive org chart canvas", () => {
     expect(cards[1]).toHaveFocus();
     expect(cards[1]).toHaveAttribute("tabindex", "0");
     expect(cards[0]).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("ARCH-02 exposes a projection-aware graph region without claiming tree semantics", () => {
+    const { container } = render(<CanvasHarness />);
+    const viewport = screen.getByRole("region", {
+      name: "Marketing Agents interactive organization chart",
+    });
+
+    expect(viewport).toHaveAttribute("data-hierarchy-semantics", "visual");
+    expect(viewport).toHaveAttribute(
+      "aria-describedby",
+      "org-chart-structure-summary chart-keyboard-help",
+    );
+    expect(viewport).toHaveAccessibleDescription(
+      /Graph view shows 5 visible departments, 12 visible functions, and 43 visible deployed agents.*For complete level-by-level hierarchy navigation, use Tree view.*Drag the chart to pan/u,
+    );
+    expect(screen.queryByRole("tree")).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(0);
+
+    const firstCard = container.querySelector<HTMLButtonElement>(
+      '[data-instance-id="inst.social-media.new-content.agent-1.01"]',
+    );
+    expect(firstCard).toHaveAccessibleDescription(
+      "Department: Social media. Function: New content. Hierarchy level 4.",
+    );
+  });
+
+  it("ARCH-02 describes an empty graph without inventing headings or agent controls", () => {
+    const projection = projectHierarchy(hierarchy, {
+      ...DEFAULT_ORG_CHART_FILTERS,
+      q: "no matching source agent",
+    });
+    const { container } = render(
+      <OrgChartCanvas
+        hierarchy={projection.hierarchy}
+        selectedInstanceId={null}
+        onSelectionChange={() => undefined}
+      />,
+    );
+    const viewport = screen.getByRole("region", {
+      name: "Marketing Agents interactive organization chart",
+    });
+
+    expect(viewport).toHaveAccessibleDescription(
+      /Graph view shows 0 visible departments, 0 visible functions, and 0 visible deployed agents.*No department headings, function headings, or agent controls are present/u,
+    );
+    expect(container.querySelector('[data-node-kind="department"]')).toBeNull();
+    expect(container.querySelector('[data-node-kind="function"]')).toBeNull();
+    expect(container.querySelector('[data-node-kind="instance"]')).toBeNull();
   });
 
   it("ORCH-01 keeps the named control plane outside the 43 source agent cards", () => {
