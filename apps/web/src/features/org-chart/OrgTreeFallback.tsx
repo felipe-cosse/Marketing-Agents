@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { AgentsIcon, ReadIcon, WriteIcon } from "./icons";
+import { describeTreeHierarchy } from "./hierarchyAccessibility";
 import {
   MARKETING_AGENTS_ROOT,
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
@@ -292,11 +293,17 @@ export function OrgTreeFallback({
       data-testid="org-tree-surface"
     >
       <div className="chart-toolbar">{toolbar}</div>
+      <p id="org-tree-structure-summary" className="sr-only">
+        {describeTreeHierarchy(hierarchy)}
+      </p>
       {hierarchy.departments.length === 0 ? (
         <div
           className="org-tree-empty catalog-empty-state"
           role="region"
+          aria-label="Marketing Agents organization tree empty state"
+          aria-describedby="org-tree-structure-summary"
           aria-live="polite"
+          data-hierarchy-semantics="tree-empty"
         >
           <strong>{emptyTitle}</strong>
           <p>{emptyMessage}</p>
@@ -317,7 +324,8 @@ export function OrgTreeFallback({
             className="org-tree"
             role="tree"
             aria-label="Marketing Agents organization tree"
-            aria-describedby="org-tree-keyboard-help"
+            aria-describedby="org-tree-structure-summary org-tree-keyboard-help"
+            data-hierarchy-semantics="tree-authority"
           >
             {visibleNodes.map((node) => {
               const expanded = node.expandable && expandedIds.has(node.id);

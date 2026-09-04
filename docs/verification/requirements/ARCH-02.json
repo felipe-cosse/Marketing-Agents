@@ -1,0 +1,169 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "ARCH-02",
+  "matrix_statement_sha256": "a8eac73452c58f5500a1495acd9192acb296131d2724408e36d62729c3188dc5",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/web/config/arch02FrontendArchitecture.test.ts",
+      "apps/web/e2e/arch-02-frontend-architecture.spec.ts",
+      "apps/web/scripts/run-arch-02-build.mjs",
+      "apps/web/scripts/run-arch-02-e2e.mjs",
+      "apps/web/scripts/run-arch-02-unit.mjs",
+      "apps/web/scripts/run-arch-02-witness.mjs",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/src/features/org-chart/AgentCard.test.tsx",
+      "apps/web/src/features/org-chart/AgentCard.tsx",
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/hierarchyAccessibility.test.ts",
+      "apps/web/src/features/org-chart/hierarchyAccessibility.ts",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/ARCH-02.json",
+      "docs/verification/requirements/ARCH-02.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/AgentCard.tsx",
+          "apps/web/src/features/org-chart/HierarchyStage.tsx",
+          "apps/web/src/features/org-chart/OrgChartCanvas.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+          "apps/web/src/features/org-chart/hierarchyAccessibility.ts"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/config/arch02FrontendArchitecture.test.ts",
+          "apps/web/e2e/arch-02-frontend-architecture.spec.ts",
+          "apps/web/scripts/run-arch-02-witness.mjs",
+          "apps/web/scripts/run-web-e2e.mjs",
+          "apps/web/src/features/org-chart/AgentCard.test.tsx",
+          "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+          "apps/web/src/features/org-chart/hierarchyAccessibility.test.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "locked-react-typescript-vite-runtime",
+      "type": "contract",
+      "statement": "The pinned Node 24 frontend resolves React 19.2.8, React DOM 19.2.8, TypeScript 6.0.3, Vite 8.2.2, and Vite React plugin 6.1.1 from the committed manifest and lock importer; strict React JSX type checking and a production Vite build execute through repository-local binaries.",
+      "test_refs": [
+        "apps/web/config/arch02FrontendArchitecture.test.ts::ARCH-02 frontend architecture",
+        "apps/web/scripts/run-arch-02-build.mjs::ARCH-02 build evidence",
+        "apps/web/scripts/run-arch-02-witness.mjs::ARCH-02 dependency-free witness"
+      ]
+    },
+    {
+      "id": "accessible-projection-and-agent-lineage",
+      "type": "contract",
+      "statement": "The named keyboard-operable graph describes the current projected department, function, and deployed-agent counts, directs assistive users to Tree view for complete hierarchy navigation, and gives every focused agent card stable department, function, and level-four context without claiming ARIA tree semantics.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/hierarchyAccessibility.test.ts::ARCH-02 hierarchy accessibility summaries",
+        "apps/web/src/features/org-chart/AgentCard.test.tsx::ARCH-02 exposes stable graph hierarchy context without changing the accessible name",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::ARCH-02 exposes a projection-aware graph region without claiming tree semantics",
+        "apps/web/e2e/arch-02-frontend-architecture.spec.ts::ARCH-02 mounts one accessible graph or tree in the production frontend",
+        "apps/web/scripts/run-arch-02-witness.mjs::ARCH-02 dependency-free witness"
+      ]
+    },
+    {
+      "id": "single-semantic-tree-authority",
+      "type": "journey",
+      "statement": "For a non-empty projection, the production React application mounts one named graph region or one named semantic ARIA tree at a time. Tree view identifies itself as the complete level-by-level navigation model, retains tree items and keyboard help, and both focused Chromium states produce no serious or critical Axe violations.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::ARCH-02 identifies Tree view as the sole complete hierarchy navigation model",
+        "apps/web/e2e/arch-02-frontend-architecture.spec.ts::ARCH-02 mounts one accessible graph or tree in the production frontend"
+      ]
+    },
+    {
+      "id": "described-empty-hierarchy-state",
+      "type": "contract",
+      "statement": "When filtering leaves no hierarchy nodes, Graph view truthfully reports that no headings or agent controls are present, while Tree view mounts a named region tied to the zero-count summary instead of exposing an empty ARIA tree.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/hierarchyAccessibility.test.ts::ARCH-02 describes the empty graph and Tree states without inventing rendered structure",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx::ARCH-02 describes an empty graph without inventing headings or agent controls",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx::ARCH-02 exposes a described empty Tree representation without an empty ARIA tree",
+        "apps/web/scripts/run-arch-02-witness.mjs::ARCH-02 dependency-free witness"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "arch-02-production-build",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-02-build.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["locked-react-typescript-vite-runtime"]
+    },
+    {
+      "id": "arch-02-component-contract",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-02-unit.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "locked-react-typescript-vite-runtime",
+        "accessible-projection-and-agent-lineage",
+        "single-semantic-tree-authority",
+        "described-empty-hierarchy-state"
+      ]
+    },
+    {
+      "id": "arch-02-dependency-free-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-02-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "locked-react-typescript-vite-runtime",
+        "accessible-projection-and-agent-lineage",
+        "single-semantic-tree-authority",
+        "described-empty-hierarchy-state"
+      ]
+    },
+    {
+      "id": "arch-02-real-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-02-e2e.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 360,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "accessible-projection-and-agent-lineage",
+        "single-semantic-tree-authority"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/features/org-chart/AgentCard.tsx",
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/hierarchyAccessibility.ts"
+    ],
+    "gate_id": "arch-02-dependency-free-witness"
+  },
+  "limitations": [
+    "The desktop graph is a named operable region with semantic grouping and named controls; the explicit ARIA tree remains the hierarchy-navigation authority. ARCH-02 does not claim that the graph itself implements the ARIA tree pattern.",
+    "Projection summaries report the currently visible hierarchy after filtering, not the immutable full-catalog inventory when a filter is active.",
+    "The dependency-free witness source-binds the production stack and hierarchy-accessibility consumers. It does not infer computed roles, accessible names, keyboard focus, or Axe results from source text; the focused unit and browser gates own those behaviors.",
+    "The browser gate uses Playwright-managed Chromium and Axe only on the graph and tree states it exercises. It does not claim other browser engines, operating-system screen-reader parity, physical-device input, or complete accessibility conformance.",
+    "Installed-package and production-build evidence proves the committed checkout and local frozen installation, not future package support, registry availability, vulnerability status, or dependency freshness.",
+    "WEB-01 remains authority for exact hierarchy inventory and layout, WEB-07 for the complete responsive tree keyboard model, WEB-08 for broad accessibility acceptance, and WEB-09 for visual fidelity and neutral branding."
+  ]
+}

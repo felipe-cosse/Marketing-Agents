@@ -10,6 +10,7 @@ HEAD ?= HEAD
 .PHONY: test-demo-05-backend web-test-demo-05-e2e web-test-demo-05-unit
 .PHONY: test-demo-06-backend
 .PHONY: web-test-orch-01-e2e web-test-orch-01-unit web-test-orch-01-witness
+.PHONY: web-test-arch-02-build web-test-arch-02-e2e web-test-arch-02-unit web-test-arch-02-witness
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -164,6 +165,18 @@ web-test-orch-01-witness:
 web-test-orch-01-e2e:
 	node apps/web/scripts/run-orch-01-e2e.mjs
 
+web-test-arch-02-build:
+	node apps/web/scripts/run-arch-02-build.mjs
+
+web-test-arch-02-unit:
+	node apps/web/scripts/run-arch-02-unit.mjs
+
+web-test-arch-02-witness:
+	node apps/web/scripts/run-arch-02-witness.mjs
+
+web-test-arch-02-e2e:
+	node apps/web/scripts/run-arch-02-e2e.mjs
+
 web-test-web-02-unit:
 	node apps/web/scripts/run-web-02-unit.mjs
 
@@ -227,4 +240,4 @@ verify-governance: format-check verify-source test-source test-tooling verify-hi
 
 verify-backend: format-check lint typecheck test-backend
 
-verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
+verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-arch-02-unit web-test-arch-02-witness web-test-arch-02-build web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
