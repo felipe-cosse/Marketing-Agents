@@ -74,14 +74,12 @@ from marketing_agents.domain.runtime_policy import RunRuntimePolicy
 from marketing_agents.domain.schema_hash import canonical_schema_hash
 from marketing_agents.domain.step_lifecycle import NoStepTransitionContext, StepLifecycleCommand
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
+from marketing_agents.infrastructure.adapters.connectors.composition import (
+    build_durable_connector_bundle,
+)
 from marketing_agents.infrastructure.adapters.connectors.dispatch import (
     RegistryConnectorWriteGateway,
 )
-from marketing_agents.infrastructure.adapters.connectors.mock.durable import (
-    DurableMockReceiptLedger,
-)
-from marketing_agents.infrastructure.adapters.connectors.mock.families import MockConnectorBundle
-from marketing_agents.infrastructure.adapters.connectors.registry import build_connector_registry
 from marketing_agents.infrastructure.catalog.models import AgentTemplateRecord, CompiledCatalog
 from marketing_agents.security.redaction import SecretValue
 
@@ -238,7 +236,12 @@ class EmailSignupRunService:
         self._instances = {item.id: item for item in catalog.instances}
         self._capabilities = {item.id: item for item in catalog.tool_capabilities}
         self._policies = {item.id: item for item in catalog.approval_policies}
-        self._connector_registry = build_connector_registry(catalog)
+        self._connector_bundle = build_durable_connector_bundle(
+            catalog,
+            unit_of_work_factory=dependencies.unit_of_work_factory,
+            clock=dependencies.clock,
+        )
+        self._connector_registry = self._connector_bundle.registry
 
     async def prepare(
         self,
@@ -628,13 +631,9 @@ class EmailSignupRunService:
             action.connector_binding_id: action.delivery_contract.binding_configuration_revision
             for action in actions
         }
-        ledger = DurableMockReceiptLedger(
-            self._dependencies.unit_of_work_factory,
-            self._dependencies.clock,
-        )
         gateway = RegistryConnectorWriteGateway(
             self._connector_registry,
-            MockConnectorBundle.create(self._connector_registry, ledger),
+            self._connector_bundle,
             binding_configuration_revisions=revisions,
         )
         dispatcher = ExternalActionDispatcher(

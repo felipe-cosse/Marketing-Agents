@@ -297,7 +297,8 @@ class MockConnectorBundle:
         registry: ConnectorOperationRegistry,
         ledger: MockReceiptLedger | None = None,
     ) -> MockConnectorBundle:
-        ledger = ledger or InMemoryMockReceiptLedger()
+        if ledger is None:
+            ledger = InMemoryMockReceiptLedger()
         return cls(
             registry=registry,
             ledger=ledger,
@@ -313,9 +314,16 @@ class MockConnectorBundle:
 
 
 def build_connector_bundle(
-    settings: ConnectorModeSettings, catalog: CompiledCatalog
+    settings: ConnectorModeSettings,
+    catalog: CompiledCatalog,
+    *,
+    ledger: MockReceiptLedger | None = None,
 ) -> MockConnectorBundle:
-    """Compose only the configured mock bundle; real selections never fall back."""
+    """Compose exact mocks; without an injected ledger this is process-local only.
+
+    Dispatcher runtimes use ``build_durable_connector_bundle`` so write receipts
+    survive reconstruction. The process-local default remains for isolated tests.
+    """
 
     if settings.connector_mode != "mock":
         raise ConnectorBundleConfigurationError(
@@ -325,4 +333,4 @@ def build_connector_bundle(
         raise ConnectorBundleConfigurationError(
             "mock connectors cannot be composed with external-network or real-mode opt-ins"
         )
-    return MockConnectorBundle.create(build_connector_registry(catalog))
+    return MockConnectorBundle.create(build_connector_registry(catalog), ledger)

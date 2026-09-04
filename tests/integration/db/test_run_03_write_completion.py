@@ -1,4 +1,4 @@
-"""RUN-03 atomic WRITE completion and post-cancellation outcome witnesses."""
+"""RUN-03 atomic WRITE completion and DEL-03 lease-safe durable receipt recovery."""
 
 from __future__ import annotations
 
@@ -410,11 +410,29 @@ async def test_run_03_completion_audit_fault_rolls_back_action_and_step_then_rec
         clock.current = rolled_back_action.call_deadline_at
         recovery_delegate, recovery_ledger = _gateway(runtime, clock)
         recovery_gateway = CountingGateway(recovery_delegate)
-        recovered = await ExternalActionDispatcher(
+        recovery_dispatcher = ExternalActionDispatcher(
             dependencies,
             recovery_gateway,
             WriteAuthorizationGuard(),
-        ).recover_stale(
+        )
+        assert rolled_back_action.lease is not None
+        assert clock.now() < rolled_back_action.lease.expires_at
+        assert (
+            await recovery_dispatcher.recover_stale(
+                lease_owner="worker.run-03.audit-rollback.recovery",
+                limit=1,
+            )
+            == ()
+        )
+        assert recovery_gateway.calls == 0
+        assert recovery_ledger.side_effect_count == 0
+
+        # A call deadline alone does not revoke the original worker's live lease.
+        clock.current = max(
+            rolled_back_action.call_deadline_at,
+            rolled_back_action.lease.expires_at,
+        )
+        recovered = await recovery_dispatcher.recover_stale(
             lease_owner="worker.run-03.audit-rollback.recovery",
             limit=1,
         )

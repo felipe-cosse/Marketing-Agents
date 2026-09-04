@@ -60,9 +60,16 @@ class ConnectorBundleConfigurationError(ValueError):
 
 
 class ConnectorModeSettings(Protocol):
-    connector_mode: str
-    allow_external_network: bool
-    real_connector_opt_in: bool
+    """Read-only mode projection used by both mutable and frozen settings."""
+
+    @property
+    def connector_mode(self) -> str: ...
+
+    @property
+    def allow_external_network(self) -> bool: ...
+
+    @property
+    def real_connector_opt_in(self) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
