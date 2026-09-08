@@ -60,6 +60,8 @@ test-del-04-regression:
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
+	node apps/web/scripts/require-pinned-node.mjs
+	corepack pnpm install --frozen-lockfile
 
 format:
 	$(UV) run ruff format apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
@@ -316,3 +318,74 @@ verify-governance: format-check verify-source test-source test-tooling verify-ar
 verify-backend: format-check lint typecheck test-backend
 
 verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-arch-02-unit web-test-arch-02-witness web-test-arch-02-build web-test-arch-08-unit web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
+
+# DEL-05 canonical operations. Docker requires only Docker/Compose and Make;
+# Python/Node acquisition is needed only for the secondary native workflow.
+.PHONY: help up down logs dev backup-local restore-local verify-clean test-del-05-runtime test-del-05-backup test-del-05-tooling verify-del-05-offline-backend verify-del-05-offline-web
+LOCAL_MODE ?= compose
+LOCAL_PROJECT ?= marketing-agents-local
+LOCAL_IMAGE ?= $(LOCAL_PROJECT)-backend:local
+LOCAL_STATE ?= $(CURDIR)/data/native
+REF ?= HEAD
+
+help:
+	@echo 'make up                  Build and start safe local Compose stack (127.0.0.1:8080)'
+	@echo 'make down / logs         Stop (preserve paired volumes) / read scoped service logs'
+	@echo 'make bootstrap / dev     Frozen native dependencies / supervised local development'
+	@echo 'make backup-local DESTINATION=<new-path>  Protected paired backup (secret-bearing)'
+	@echo 'make restore-local BACKUP=<path> LOCAL_PROJECT=<new-project> LOCAL_IMAGE=<existing-image>'
+	@echo 'make verify-clean REF=HEAD  Verify committed tracked source in isolated Docker storage'
+	@echo 'Use LOCAL_MODE=native and DESTINATION=<new-path> for native backup/restore.'
+
+up:
+	sh scripts/compose.sh up
+
+down:
+	sh scripts/compose.sh down
+
+logs:
+	sh scripts/compose.sh logs
+
+dev:
+	.venv/bin/python scripts/dev.py --state-dir "$(LOCAL_STATE)"
+
+backup-local:
+	.venv/bin/python scripts/local_backup.py backup --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --destination "$(DESTINATION)" $(if $(filter native,$(LOCAL_MODE)),--database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)",)
+
+restore-local:
+	.venv/bin/python scripts/local_backup.py restore --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --image "$(LOCAL_IMAGE)" --backup "$(BACKUP)" $(if $(DESTINATION),--destination "$(DESTINATION)",)
+
+verify-clean:
+	sh scripts/verify_clean_state.sh --ref "$(REF)"
+
+test-del-05-runtime:
+	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q tests/integration/runtime
+
+test-del-05-backup:
+	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q tests/integration/db/test_del_05_backup.py
+
+.PHONY: test-del-05-compose-backup
+test-del-05-compose-backup:
+	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_del_05_backup.py --build
+
+test-del-05-tooling:
+	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q tests/tooling/test_del_05_*.py
+
+# These targets operate in a git archive export, not a checkout. Git provenance
+# and no-generated-drift checks belong to the outer clean-state verifier.
+verify-del-05-offline-backend:
+	python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
+	python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
+	python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
+	python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
+	python -m mypy apps/api/src/marketing_agents
+	python scripts/verify_architecture_boundaries.py
+	python -m marketing_agents.workers.catalog_cli validate --root catalog/v1
+	python -m pytest -q
+
+verify-del-05-offline-web:
+	cd apps/web && node_modules/.bin/prettier --check .
+	cd apps/web && node_modules/.bin/eslint . --max-warnings=0
+	cd apps/web && node_modules/.bin/tsc -b --pretty false
+	cd apps/web && node_modules/.bin/vitest run
+	cd apps/web && node_modules/.bin/vite build

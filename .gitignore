@@ -10,6 +10,7 @@ secrets/
 
 # Local state
 data/
+backups/
 *.db
 *.db-*
 *.sqlite

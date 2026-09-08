@@ -15,10 +15,12 @@ from typing import Any
 
 import pytest
 from marketing_agents.infrastructure.db.local_installation import migrate_local_database
-from marketing_agents.infrastructure.db.migrations import expected_tables
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION
 from marketing_agents.security.digest_key import DigestKey, digest_key_fingerprint
 from sqlalchemy import event
 from sqlalchemy.engine import URL, Engine
+
+from tests.integration.db.test_del_04_migrations import ALL_TABLES
 
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG_ROOT = ROOT / "catalog" / "v1"
@@ -100,7 +102,7 @@ def _files(directory: Path) -> dict[str, str]:
 
 def _fresh_installation(directory: Path) -> None:
     _, migrated = _invoke(directory, "migrate")
-    assert migrated == {"ok": True, "revision": "0005"}
+    assert migrated == {"ok": True, "revision": HEAD_REVISION}
     _, seeded = _invoke(directory, "seed")
     assert seeded["ok"] is True
     assert seeded["configuration_inserted"] == 43
@@ -117,9 +119,9 @@ def test_del_04_native_migrate_seed_reseed_check_preserve_key_and_rows(tmp_path:
     assert stat.S_IMODE(key.parent.stat().st_mode) == 0o700
 
     _, migrated = _invoke(tmp_path, "migrate")
-    assert migrated == {"ok": True, "revision": "0005"}
+    assert migrated == {"ok": True, "revision": HEAD_REVISION}
     empty_schema = _rows(database)
-    assert set(empty_schema) == expected_tables("0005") | {"alembic_version"}
+    assert set(empty_schema) == ALL_TABLES | {"alembic_version"}
     identity = empty_schema["local_runtime_identity"]
     assert len(identity) == 1
     assert identity[0][:3] == (
@@ -305,6 +307,6 @@ async def test_del_04_migration_identity_failure_rolls_back_schema_and_reuses_ke
     assert key.is_file()
     key_bytes = key.read_bytes()
     assert _rows(database) == {}
-    assert await migrate_local_database(_database_url(database), key) == "0005"
+    assert await migrate_local_database(_database_url(database), key) == HEAD_REVISION
     assert len(_rows(database)["local_runtime_identity"]) == 1
     assert key.read_bytes() == key_bytes

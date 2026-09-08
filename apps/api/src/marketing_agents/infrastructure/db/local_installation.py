@@ -108,11 +108,25 @@ def _stored_identity(connection: Connection) -> str | None:
     return None
 
 
-async def initialize_local_secret(database_url: str, key_path: Path) -> DigestKey:
+async def initialize_local_secret(
+    database_url: str, key_path: Path, *, defer_database_check: bool = False
+) -> DigestKey:
     """Verify existing DB/key pairing before creating anything; never replace a key."""
     database, key_path = _local_paths(database_url, key_path)
+    if type(defer_database_check) is not bool:
+        raise ValueError("deferred database check flag must be an exact boolean")
     expected = None
     exists = database is not None and database.exists()
+    if defer_database_check:
+        # The read-only Compose initializer owns only key creation/presence.
+        # WAL databases may require sidecars to inspect, which cannot be created
+        # on that mount. The following migration owner MUST verify the complete
+        # pair on its writable mount before any schema/data mutation.
+        if database is None:
+            raise DatabaseMigrationError("local_secret_defer_requires_sqlite")
+        if exists and (not database.is_file() or database.stat().st_uid != os.getuid()):
+            raise DigestKeyError("local database must be a regular file owned by the service user")
+        return load_or_create_digest_key(key_path, persistent_state_exists=exists)
     if database is None or exists:
         if database is not None and not database.is_file():
             raise DigestKeyError("local database must be a regular file")

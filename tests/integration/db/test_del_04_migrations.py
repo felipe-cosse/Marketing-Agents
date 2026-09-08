@@ -16,6 +16,7 @@ from marketing_agents.infrastructure.db import Base, DatabaseRuntime, create_dat
 from marketing_agents.infrastructure.db.migrations import (
     HEAD_REVISION,
     DatabaseMigrationError,
+    expected_tables,
     inspect_migration,
     migration_config,
     upgrade_database,
@@ -81,6 +82,7 @@ REVISION_TABLES = {
         "audit_events",
         "maintenance_runs",
     },
+    "0006": {"run_worker_claims"},
 }
 ALL_TABLES = set().union(*REVISION_TABLES.values())
 SENTINEL_HASH = "catalog-sha256-v1:" + "b" * 64
@@ -144,15 +146,15 @@ async def test_del_04_fresh_upgrade_is_schema_only_and_matches_all_metadata(
     monkeypatch.setattr(Base.metadata, "create_all", forbidden_create_all)
     runtime = _runtime(tmp_path / "fresh.db")
     try:
-        assert await upgrade_database(runtime) == HEAD_REVISION == "0005"
+        assert await upgrade_database(runtime) == HEAD_REVISION == "0006"
         async with runtime.engine.connect() as connection:
             tables = set(await connection.run_sync(lambda sync: inspect(sync).get_table_names()))
-            assert len(ALL_TABLES) == 45
+            assert len(ALL_TABLES) == 46
             assert tables == ALL_TABLES | {"alembic_version"}
             assert set(Base.metadata.tables) == ALL_TABLES
             assert await connection.run_sync(schema_matches_metadata)
             status = await connection.run_sync(inspect_migration)
-            assert status.revision == status.head == "0005"
+            assert status.revision == status.head == HEAD_REVISION
             assert status.current and status.schema_matches
             for table_name in sorted(ALL_TABLES):
                 count = await connection.scalar(
@@ -167,7 +169,14 @@ async def test_del_04_fresh_upgrade_is_schema_only_and_matches_all_metadata(
 
 @pytest.mark.parametrize(
     ("previous", "target"),
-    [(None, "0001"), ("0001", "0002"), ("0002", "0003"), ("0003", "0004"), ("0004", "0005")],
+    [
+        (None, "0001"),
+        ("0001", "0002"),
+        ("0002", "0003"),
+        ("0003", "0004"),
+        ("0004", "0005"),
+        ("0005", "0006"),
+    ],
 )
 @pytest.mark.asyncio
 async def test_del_04_each_revision_upgrades_its_predecessor_and_preserves_data(
@@ -185,6 +194,7 @@ async def test_del_04_each_revision_upgrades_its_predecessor_and_preserves_data(
                 *(tables for revision, tables in REVISION_TABLES.items() if revision <= target)
             )
             actual = set(await connection.run_sync(lambda sync: inspect(sync).get_table_names()))
+            assert expected_tables(target) == expected
             assert actual == expected | {"alembic_version"}
             assert (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
@@ -220,7 +230,7 @@ async def test_del_04_repeated_head_upgrade_performs_no_schema_or_data_write(
         before = await _snapshot(runtime)
         event.listen(runtime.engine.sync_engine, "before_cursor_execute", capture)
         try:
-            assert await upgrade_database(runtime) == "0005"
+            assert await upgrade_database(runtime) == HEAD_REVISION
         finally:
             event.remove(runtime.engine.sync_engine, "before_cursor_execute", capture)
         assert statements and set(statements) <= {"SELECT", "PRAGMA", "BEGIN"}
@@ -230,7 +240,8 @@ async def test_del_04_repeated_head_upgrade_performs_no_schema_or_data_write(
 
 
 @pytest.mark.parametrize(
-    ("previous", "fault_table"), [(None, "catalog_releases"), ("0001", "runs")]
+    ("previous", "fault_table"),
+    [(None, "catalog_releases"), ("0001", "runs"), ("0005", "run_worker_claims")],
 )
 @pytest.mark.asyncio
 async def test_del_04_ddl_failure_rolls_back_schema_version_and_existing_data(
@@ -267,7 +278,7 @@ async def test_del_04_ddl_failure_rolls_back_schema_version_and_existing_data(
         assert injected
         assert await _snapshot(runtime) == before
         # The same durable database remains recoverable after the fault is removed.
-        assert await upgrade_database(runtime) == "0005"
+        assert await upgrade_database(runtime) == HEAD_REVISION
     finally:
         await runtime.dispose()
 
@@ -279,6 +290,7 @@ async def test_del_04_ddl_failure_rolls_back_schema_version_and_existing_data(
         ("unknown_head", "migration_revision_unknown"),
         ("multiple_heads", "migration_multiple_heads"),
         ("downgrade", "migration_downgrade_unsupported"),
+        ("previous_head_downgrade", "migration_downgrade_unsupported"),
         ("missing_index", "migration_schema_drift"),
         ("extra_column", "migration_schema_drift"),
     ],
@@ -307,7 +319,8 @@ async def test_del_04_unsafe_upgrade_states_are_rejected_without_mutation(
                     await connection.execute(text(mutations[case]))
         before = await _snapshot(runtime)
         with pytest.raises(DatabaseMigrationError) as caught:
-            await upgrade_database(runtime, "0004" if case == "downgrade" else "head")
+            target = {"downgrade": "0004", "previous_head_downgrade": "0005"}.get(case, "head")
+            await upgrade_database(runtime, target)
         assert caught.value.code == code
         assert await _snapshot(runtime) == before
         if case == "unversioned":
@@ -320,8 +333,10 @@ async def test_del_04_unsafe_upgrade_states_are_rejected_without_mutation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ("0004", "0005"))
 async def test_del_04_direct_alembic_destructive_downgrade_fails_before_any_change(
     tmp_path: Path,
+    target: str,
 ) -> None:
     runtime = _runtime(tmp_path / "no-downgrade.db")
     try:
@@ -332,7 +347,7 @@ async def test_del_04_direct_alembic_destructive_downgrade_fails_before_any_chan
         def downgrade(connection: Connection) -> None:
             config = migration_config()
             config.attributes["connection"] = connection
-            command.downgrade(config, "0004")
+            command.downgrade(config, target)
 
         with pytest.raises(RuntimeError, match="Destructive downgrades are unsupported"):
             async with runtime.engine.begin() as connection:

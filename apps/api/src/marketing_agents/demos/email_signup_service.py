@@ -278,6 +278,7 @@ class EmailSignupRunService:
         run_id: str,
         *,
         correlation_id: str,
+        worker_id: str = "worker.deterministic-demo",
     ) -> EmailSignupRunSnapshot:
         require_id(run_id, "Email demo Run ID")
         require_id(correlation_id, "Email demo correlation ID")
@@ -300,12 +301,17 @@ class EmailSignupRunService:
             disposition=WorkRunReceiptDisposition.REPLAYED,
             mode=WorkMode.MOCK_EXECUTION,
         )
+        await self._prepare_boundary(
+            receipt,
+            audit_context=AuditContext.worker(worker_id, correlation_id=correlation_id),
+        )
         await self._resume_execution(
             receipt,
             audit_context=AuditContext.worker(
-                "worker.deterministic-demo",
+                worker_id,
                 correlation_id=correlation_id,
             ),
+            worker_id=worker_id,
         )
         return await self._snapshot(receipt)
 
@@ -583,6 +589,7 @@ class EmailSignupRunService:
         receipt: ManualDryRunResult,
         *,
         audit_context: AuditContext,
+        worker_id: str = "worker.deterministic-demo",
     ) -> None:
         async with self._dependencies.unit_of_work() as unit_of_work:
             run = await unit_of_work.runs.get(receipt.run.id)
@@ -647,7 +654,7 @@ class EmailSignupRunService:
             if action.state is ExternalActionState.DISPATCHING:
                 await dispatcher.recover_action(
                     action.id,
-                    lease_owner="worker.deterministic-demo-recovery",
+                    lease_owner=worker_id,
                 )
         async with self._dependencies.unit_of_work() as unit_of_work:
             run = await unit_of_work.runs.get(receipt.run.id)
@@ -706,7 +713,7 @@ class EmailSignupRunService:
         for action in sorted(actions, key=lambda item: step_order[item.step_id]):
             result = await dispatcher.dispatch_once(
                 action.id,
-                lease_owner="worker.deterministic-demo",
+                lease_owner=worker_id,
             )
             if result.disposition not in {
                 DispatchDisposition.SUCCEEDED,

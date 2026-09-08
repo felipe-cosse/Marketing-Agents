@@ -309,6 +309,7 @@ def _check_python(root: Path, policy: Mapping[str, Any]) -> list[BoundaryViolati
                 top_level != package
                 and top_level not in sys.stdlib_module_names
                 and top_level not in approved_external[layer]
+                and not _exception_allows(relative, imported, exceptions)
             ):
                 violations.append(
                     BoundaryViolation(

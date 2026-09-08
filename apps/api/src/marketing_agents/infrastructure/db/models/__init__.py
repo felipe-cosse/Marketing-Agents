@@ -38,6 +38,7 @@ from .execution_control import (
 from .instance_configuration import AgentInstanceConfigurationRecord
 from .maintenance import MaintenanceRunRecord
 from .run import RunRecord, RunStateTransitionRecord
+from .run_claim import RunWorkerClaimRecord
 from .schedule import ScheduleOccurrenceRecord, ScheduleRecord
 from .step import (
     RunPlanRecord,
@@ -89,6 +90,7 @@ __all__ = [
     "RunStepDependencyRecord",
     "RunStepRecord",
     "RunStepStateTransitionRecord",
+    "RunWorkerClaimRecord",
     "ScheduleOccurrenceRecord",
     "ScheduleRecord",
     "ToolCapabilityRecord",

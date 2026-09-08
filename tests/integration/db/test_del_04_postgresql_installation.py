@@ -21,8 +21,8 @@ from marketing_agents.infrastructure.db.local_installation import (
     verify_local_installation,
 )
 from marketing_agents.infrastructure.db.migrations import (
+    HEAD_REVISION,
     DatabaseMigrationError,
-    expected_tables,
     upgrade_database,
 )
 from marketing_agents.infrastructure.readiness import LocalReadinessProbe
@@ -32,6 +32,7 @@ from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from tests.integration.db.test_del_04_migrations import ALL_TABLES
 from tests.support.postgresql_runtime import pg_database_url as pg_database_url
 
 CATALOG_ROOT = Path(__file__).resolve().parents[3] / "catalog" / "v1"
@@ -118,16 +119,16 @@ async def test_del_04_postgresql_native_installation_is_paired_ready_and_read_on
     assert await _snapshot(pg_database_url) == {}
     with pytest.raises(DatabaseMigrationError, match="local_installation_not_migrated"):
         await verify_local_installation(pg_database_url, key_path)
-    assert await migrate_local_database(pg_database_url, key_path) == "0005"
+    assert await migrate_local_database(pg_database_url, key_path) == HEAD_REVISION
     empty = await _snapshot(pg_database_url)
-    assert set(empty) == expected_tables("0005") | {"alembic_version"}
+    assert set(empty) == ALL_TABLES | {"alembic_version"}
     assert len(empty["local_runtime_identity"]) == 1
     assert digest_key_fingerprint(key) in empty["local_runtime_identity"][0]
     assert empty["agent_instance_configs"] == ()
     await _seed(pg_database_url, catalog)
     before = await _snapshot(pg_database_url)
     files = _files(tmp_path)
-    assert await migrate_local_database(pg_database_url, key_path) == "0005"
+    assert await migrate_local_database(pg_database_url, key_path) == HEAD_REVISION
 
     statements: list[str] = []
     capture = _capture_reads(statements)
