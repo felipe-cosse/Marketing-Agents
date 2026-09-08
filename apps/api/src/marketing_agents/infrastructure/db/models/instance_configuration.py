@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, CheckConstraint, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from marketing_agents.infrastructure.db.base import Base
@@ -43,7 +43,9 @@ class AgentInstanceConfigurationRecord(Base):
         ),
     )
 
-    instance_id: Mapped[str] = mapped_column(String(240), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(240), ForeignKey("agent_instances.id", ondelete="RESTRICT"), primary_key=True
+    )
     enabled: Mapped[bool] = mapped_column(
         Boolean(create_constraint=True, name="bool_agent_instance_configs_enabled"),
         nullable=False,

@@ -15,6 +15,20 @@ from .approval import (
 )
 from .artifact import ArtifactParentRecord, ArtifactRecord
 from .audit import AuditEventRecord, AuditFeedSequenceRecord
+from .campaign_brief import CampaignBriefRecord
+from .catalog import (
+    AgentInstanceRecord,
+    AgentTemplateCapabilityRecord,
+    AgentTemplateRecord,
+    AgentTemplateTriggerKindRecord,
+    ApprovalPolicyRecord,
+    CatalogCurrentReleaseRecord,
+    CatalogReleaseRecord,
+    DepartmentRecord,
+    FunctionTeamRecord,
+    ToolCapabilityRecord,
+)
+from .deployment import LocalRuntimeIdentityRecord, TriggerDefinitionRecord
 from .execution_control import (
     ExecutionAttemptRecord,
     ExecutionOperationPolicyRecord,
@@ -22,6 +36,7 @@ from .execution_control import (
     RunExecutionControlRecord,
 )
 from .instance_configuration import AgentInstanceConfigurationRecord
+from .maintenance import MaintenanceRunRecord
 from .run import RunRecord, RunStateTransitionRecord
 from .schedule import ScheduleOccurrenceRecord, ScheduleRecord
 from .step import (
@@ -37,7 +52,12 @@ from .work import WorkItemRecord
 
 __all__ = [
     "AgentInstanceConfigurationRecord",
+    "AgentInstanceRecord",
+    "AgentTemplateCapabilityRecord",
+    "AgentTemplateRecord",
+    "AgentTemplateTriggerKindRecord",
     "ApprovalDecisionRecord",
+    "ApprovalPolicyRecord",
     "ApprovalRequestRecord",
     "ApprovalUseRecord",
     "ArtifactParentRecord",
@@ -47,11 +67,18 @@ __all__ = [
     "AuthorizationSetHeadRecord",
     "AuthorizationSetMemberRecord",
     "AuthorizationSetRecord",
+    "CampaignBriefRecord",
+    "CatalogCurrentReleaseRecord",
+    "CatalogReleaseRecord",
     "ConnectorActionReceiptRecord",
+    "DepartmentRecord",
     "ExecutionAttemptRecord",
     "ExecutionOperationPolicyRecord",
     "ExternalActionDispatchAttemptRecord",
     "ExternalActionRecord",
+    "FunctionTeamRecord",
+    "LocalRuntimeIdentityRecord",
+    "MaintenanceRunRecord",
     "RateLimitWindowRecord",
     "RunExecutionControlRecord",
     "RunPlanRecord",
@@ -64,6 +91,8 @@ __all__ = [
     "RunStepStateTransitionRecord",
     "ScheduleOccurrenceRecord",
     "ScheduleRecord",
+    "ToolCapabilityRecord",
+    "TriggerDefinitionRecord",
     "WebhookReceiptDeliveryRecord",
     "WebhookReceiptRecord",
     "WorkItemRecord",

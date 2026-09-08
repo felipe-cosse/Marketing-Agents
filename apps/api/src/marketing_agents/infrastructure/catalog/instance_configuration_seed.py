@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from marketing_agents.application.ports.instance_configuration import (
     InstanceConfigurationConstraints,
+    InstanceConfigurationRepository,
     InstanceConfigurationUnitOfWorkFactory,
 )
 from marketing_agents.application.ports.recurrence import (
@@ -238,84 +239,14 @@ async def seed_instance_configurations(
     unit_of_work_factory: InstanceConfigurationUnitOfWorkFactory,
     recurrence: RecurrenceCalculator,
 ) -> InstanceConfigurationSeedResult:
-    """Insert missing defaults atomically while preserving every existing local override."""
+    """Insert defaults atomically; callers must first persist the catalog parent rows."""
 
     defaults = catalog_instance_configuration_defaults(catalog, recurrence)
-    expected_by_id = {configuration.instance_id: configuration for configuration in defaults}
-    constraint_provider = CompiledCatalogInstanceConfigurationConstraintProvider(catalog)
     try:
         async with unit_of_work_factory() as unit_of_work:
-            existing = await unit_of_work.configurations.list_all()
-            if type(existing) is not tuple or any(
-                type(configuration) is not InstanceConfiguration for configuration in existing
-            ):
-                raise InstanceConfigurationSeedError(
-                    "seed_repository_invalid",
-                    "configuration repository returned an invalid snapshot",
-                )
-            existing_by_id = {
-                configuration.instance_id: configuration for configuration in existing
-            }
-            if len(existing_by_id) != len(existing) or not set(existing_by_id).issubset(
-                expected_by_id
-            ):
-                raise InstanceConfigurationSeedError(
-                    "seed_instance_identity_mismatch",
-                    "persisted configuration contains an identity outside the compiled catalog",
-                )
-            for configuration in existing:
-                constraints = await constraint_provider.get(configuration.instance_id)
-                if constraints is None:
-                    raise InstanceConfigurationSeedError(
-                        "seed_instance_identity_mismatch",
-                        "persisted configuration identity is absent from the compiled catalog",
-                    )
-                _validate_against_constraints(
-                    catalog,
-                    configuration,
-                    constraints,
-                    recurrence,
-                )
-
-            inserted = 0
-            for configuration in defaults:
-                if configuration.instance_id in existing_by_id:
-                    continue
-                was_inserted = await unit_of_work.configurations.insert_missing(configuration)
-                if type(was_inserted) is not bool:
-                    raise InstanceConfigurationSeedError(
-                        "seed_repository_invalid",
-                        "configuration repository returned an invalid insert result",
-                    )
-                inserted += int(was_inserted)
-
-            verified = await unit_of_work.configurations.list_all()
-            if type(verified) is not tuple or any(
-                type(configuration) is not InstanceConfiguration for configuration in verified
-            ):
-                raise InstanceConfigurationSeedError(
-                    "seed_repository_invalid",
-                    "configuration repository returned an invalid verification snapshot",
-                )
-            verified_ids = tuple(configuration.instance_id for configuration in verified)
-            if verified_ids != tuple(sorted(expected_by_id)):
-                raise InstanceConfigurationSeedError(
-                    "seed_projection_incomplete",
-                    "configuration seed did not produce the exact compiled instance projection",
-                )
-            for configuration in verified:
-                constraints = await constraint_provider.get(configuration.instance_id)
-                if constraints is None:
-                    raise InstanceConfigurationSeedError(
-                        "seed_instance_identity_mismatch",
-                        "verified configuration identity is absent from the compiled catalog",
-                    )
-                _validate_against_constraints(
-                    catalog,
-                    configuration,
-                    constraints,
-                    recurrence,
-                )
+            result = await seed_instance_configurations_in_repository(
+                catalog, unit_of_work.configurations, recurrence, defaults=defaults
+            )
             await unit_of_work.commit()
     except InstanceConfigurationSeedError:
         raise
@@ -325,6 +256,94 @@ async def seed_instance_configurations(
             "instance configuration seed transaction failed",
         ) from exc
 
+    return result
+
+
+async def seed_instance_configurations_in_repository(
+    catalog: CompiledCatalog,
+    repository: InstanceConfigurationRepository,
+    recurrence: RecurrenceCalculator,
+    *,
+    defaults: tuple[InstanceConfiguration, ...] | None = None,
+    check: bool = False,
+) -> InstanceConfigurationSeedResult:
+    """Reuse a caller-owned transaction, never committing or overwriting operator state.
+
+    Full catalog seeding passes defaults prepared before its transaction. The narrow
+    public wrapper remains useful after catalog identities have already been seeded.
+    """
+
+    if defaults is None:
+        defaults = catalog_instance_configuration_defaults(catalog, recurrence)
+    if (
+        type(defaults) is not tuple
+        or any(type(configuration) is not InstanceConfiguration for configuration in defaults)
+        or tuple(configuration.instance_id for configuration in defaults)
+        != tuple(sorted(instance.id for instance in catalog.instances))
+    ):
+        raise InstanceConfigurationSeedError(
+            "seed_instance_identity_mismatch",
+            "prepared defaults do not match the exact compiled instance identities",
+        )
+    expected_by_id = {configuration.instance_id: configuration for configuration in defaults}
+    constraint_provider = CompiledCatalogInstanceConfigurationConstraintProvider(catalog)
+
+    async def validated_snapshot() -> tuple[InstanceConfiguration, ...]:
+        configurations = await repository.list_all()
+        if type(configurations) is not tuple or any(
+            type(configuration) is not InstanceConfiguration for configuration in configurations
+        ):
+            raise InstanceConfigurationSeedError(
+                "seed_repository_invalid", "configuration repository returned an invalid snapshot"
+            )
+        identities = tuple(configuration.instance_id for configuration in configurations)
+        if len(identities) != len(set(identities)) or not set(identities).issubset(expected_by_id):
+            raise InstanceConfigurationSeedError(
+                "seed_instance_identity_mismatch",
+                "persisted configuration contains an identity outside the compiled catalog",
+            )
+        for configuration in configurations:
+            constraints = await constraint_provider.get(configuration.instance_id)
+            if constraints is None:
+                raise InstanceConfigurationSeedError(
+                    "seed_instance_identity_mismatch",
+                    "persisted configuration identity is absent from the compiled catalog",
+                )
+            _validate_against_constraints(catalog, configuration, constraints, recurrence)
+        return configurations
+
+    existing = await validated_snapshot()
+    existing_ids = {configuration.instance_id for configuration in existing}
+    if check and existing_ids != set(expected_by_id):
+        raise InstanceConfigurationSeedError(
+            "seed_projection_drift", "configuration projection does not contain every instance"
+        )
+    inserted = 0
+    for configuration in defaults:
+        if configuration.instance_id in existing_ids:
+            continue
+        was_inserted = await repository.insert_missing(configuration)
+        if type(was_inserted) is not bool:
+            raise InstanceConfigurationSeedError(
+                "seed_repository_invalid",
+                "configuration repository returned an invalid insert result",
+            )
+        inserted += int(was_inserted)
+    verified = await validated_snapshot()
+    verified_by_id = {configuration.instance_id: configuration for configuration in verified}
+    if any(
+        verified_by_id.get(configuration.instance_id) != configuration for configuration in existing
+    ):
+        raise InstanceConfigurationSeedError(
+            "seed_configuration_changed", "configuration seed changed an existing local override"
+        )
+    if tuple(configuration.instance_id for configuration in verified) != tuple(
+        sorted(expected_by_id)
+    ):
+        raise InstanceConfigurationSeedError(
+            "seed_projection_incomplete",
+            "configuration seed did not produce the exact compiled instance projection",
+        )
     return InstanceConfigurationSeedResult(
         inserted=inserted,
         preserved=len(defaults) - inserted,

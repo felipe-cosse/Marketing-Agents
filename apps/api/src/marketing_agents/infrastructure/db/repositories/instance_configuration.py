@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -26,6 +26,7 @@ from marketing_agents.domain.instance_configuration import (
     InstanceTriggerBinding,
 )
 from marketing_agents.domain.validation import require_id
+from marketing_agents.infrastructure.db.models.deployment import TriggerDefinitionRecord
 from marketing_agents.infrastructure.db.models.instance_configuration import (
     AgentInstanceConfigurationRecord,
 )
@@ -277,6 +278,59 @@ class SQLAlchemyInstanceConfigurationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def _trigger_rows(configuration: InstanceConfiguration) -> tuple[TriggerDefinitionRecord, ...]:
+        return tuple(
+            TriggerDefinitionRecord(
+                id="trigger."
+                + hashlib.sha256(
+                    canonical_json_bytes([configuration.instance_id, binding.kind.value])
+                ).hexdigest(),
+                instance_id=configuration.instance_id,
+                kind=binding.kind.value,
+                enabled=binding.enabled,
+                configuration_json=_canonical_text(_trigger_material(binding), "trigger binding"),
+                version=configuration.configuration_revision,
+            )
+            for binding in configuration.trigger_bindings
+        )
+
+    async def _verify_triggers(self, configurations: tuple[InstanceConfiguration, ...]) -> None:
+        if not configurations:
+            return
+        expected = {
+            row.id: (row.instance_id, row.kind, row.enabled, row.configuration_json, row.version)
+            for configuration in configurations
+            for row in self._trigger_rows(configuration)
+        }
+        records = await self._session.scalars(
+            select(TriggerDefinitionRecord)
+            .where(
+                TriggerDefinitionRecord.instance_id.in_(
+                    tuple(configuration.instance_id for configuration in configurations)
+                )
+            )
+            .execution_options(populate_existing=True)
+        )
+        actual = {
+            row.id: (row.instance_id, row.kind, row.enabled, row.configuration_json, row.version)
+            for row in records
+        }
+        if actual != expected:
+            raise InstanceConfigurationPersistenceError(
+                "instance_configuration_tampered",
+                "persisted trigger projection differs from its versioned configuration",
+            )
+
+    async def _replace_triggers(self, configuration: InstanceConfiguration) -> None:
+        await self._session.execute(
+            delete(TriggerDefinitionRecord).where(
+                TriggerDefinitionRecord.instance_id == configuration.instance_id
+            )
+        )
+        self._session.add_all(self._trigger_rows(configuration))
+        await self._session.flush()
+
     async def get(self, instance_id: str) -> InstanceConfiguration | None:
         require_id(instance_id, "instance configuration ID")
         statement = (
@@ -285,7 +339,11 @@ class SQLAlchemyInstanceConfigurationRepository:
             .execution_options(populate_existing=True)
         )
         record = (await self._session.execute(statement)).scalar_one_or_none()
-        return None if record is None else _to_domain(record)
+        if record is None:
+            return None
+        configuration = _to_domain(record)
+        await self._verify_triggers((configuration,))
+        return configuration
 
     async def get_for_update(self, instance_id: str) -> InstanceConfiguration | None:
         require_id(instance_id, "instance configuration ID")
@@ -295,7 +353,11 @@ class SQLAlchemyInstanceConfigurationRepository:
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        return None if record is None else _to_domain(record)
+        if record is None:
+            return None
+        configuration = _to_domain(record)
+        await self._verify_triggers((configuration,))
+        return configuration
 
     async def list_all(self) -> tuple[InstanceConfiguration, ...]:
         statement = (
@@ -304,7 +366,9 @@ class SQLAlchemyInstanceConfigurationRepository:
             .execution_options(populate_existing=True)
         )
         records = (await self._session.execute(statement)).scalars()
-        return tuple(_to_domain(record) for record in records)
+        configurations = tuple(_to_domain(record) for record in records)
+        await self._verify_triggers(configurations)
+        return configurations
 
     async def insert_missing(self, configuration: InstanceConfiguration) -> bool:
         record = _to_record(configuration)
@@ -312,6 +376,7 @@ class SQLAlchemyInstanceConfigurationRepository:
             async with self._session.begin_nested():
                 self._session.add(record)
                 await self._session.flush()
+                await self._replace_triggers(configuration)
         except IntegrityError as exc:
             existing = await self.get(configuration.instance_id)
             if existing is None:
@@ -363,7 +428,10 @@ class SQLAlchemyInstanceConfigurationRepository:
             if _is_sqlite_busy(self._session, exc):
                 return False
             raise
-        return updated_id == previous.instance_id
+        if updated_id != previous.instance_id:
+            return False
+        await self._replace_triggers(replacement)
+        return True
 
 
 class InstanceConfigurationSQLAlchemyUnitOfWork:

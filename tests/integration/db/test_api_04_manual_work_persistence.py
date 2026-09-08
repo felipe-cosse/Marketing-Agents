@@ -62,6 +62,7 @@ from marketing_agents.security.redaction import SecretValue
 from sqlalchemy import func, select
 
 from tests.support.api import browser_request
+from tests.support.catalog_persistence import seed_catalog_parents
 from tests.support.identity import StaticIdentityProvider, human_principal
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -188,6 +189,7 @@ async def _runtime(
 
 
 async def _seed(runtime: DatabaseRuntime, catalog: CompiledCatalog) -> None:
+    await seed_catalog_parents(runtime, catalog)
     result = await seed_instance_configurations(
         catalog,
         InstanceConfigurationSQLAlchemyUnitOfWorkFactory(runtime.session_factory),
