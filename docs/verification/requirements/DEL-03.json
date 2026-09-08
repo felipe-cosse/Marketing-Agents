@@ -1,0 +1,114 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-03",
+  "matrix_statement_sha256": "5945c4c9c76912e78c7a7af0b5e6c3e4006372b9d515fce663a2427e675b44b7",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/composition.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/registry.py",
+      "apps/api/src/marketing_agents/demos/email_signup_service.py",
+      "tests/contract/test_del_03_durable_mock_composition.py",
+      "tests/integration/db/test_run_03_write_completion.py",
+      "docs/verification/requirements/DEL-03.json",
+      "docs/verification/requirements/DEL-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/infrastructure/adapters/connectors/composition.py"]
+      },
+      {
+        "kind": "implementation",
+        "one_of": ["apps/api/src/marketing_agents/demos/email_signup_service.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": ["tests/contract/test_del_03_durable_mock_composition.py"]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "configured-durable-offline-composition",
+      "type": "contract",
+      "statement": "Runtime connector composition uses immutable offline defaults, explicitly injects a database-backed receipt ledger into all write families, validates the complete 20-operation catalog registry, and rejects real/network selections or registry corruption before any database transaction.",
+      "test_refs": [
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_defaults_are_immutable_offline_and_runtime_bundle_is_durable",
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_runtime_factory_rejects_unregistered_or_network_configuration",
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_runtime_factory_rechecks_complete_catalog_registry"
+      ]
+    },
+    {
+      "id": "schema-bound-deterministic-model-and-families",
+      "type": "contract",
+      "statement": "The existing exact-keyed deterministic model and all eight typed connector families produce stable business results, independently validate schemas and bounds, preserve untrusted provenance, and reject unregistered, disabled, or unauthorized operations without real-provider fallback.",
+      "test_refs": [
+        "Makefile::test-del-03-contracts",
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_reads_remain_deterministic_across_runtime_bundle_reconstruction"
+      ]
+    },
+    {
+      "id": "durable-replay-and-crash-boundaries",
+      "type": "negative_control",
+      "statement": "Reconstructing the configured bundle and database engine returns the original write receipt without a new effect. Audit-fault and lost-response recovery reconcile durable receipts only after the lease and call-deadline bounds, preserving one physical mock effect and exact dispatcher authorization.",
+      "test_refs": [
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_configured_write_receipt_replays_after_engine_and_bundle_restart",
+        "tests/integration/db/test_run_03_write_completion.py::test_run_03_completion_audit_fault_rolls_back_action_and_step_then_recovers_receipt",
+        "Makefile::test-del-03-contracts"
+      ]
+    },
+    {
+      "id": "five-demos-use-safe-mocks",
+      "type": "journey",
+      "statement": "All five demo acceptance paths retain deterministic replay-safe outputs under socket denial. Email uses the shared durable connector factory, makes no mock write before all approvals, and recovers a post-receipt crash without duplicating the newsletter or CRM effect.",
+      "test_refs": [
+        "Makefile::test-del-03-demos"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-03-runtime-composition",
+      "runner": "argv",
+      "argv": ["uv", "run", "pytest", "-q", "-x", "--disable-socket", "--allow-unix-socket", "tests/contract/test_del_03_durable_mock_composition.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": ["configured-durable-offline-composition", "schema-bound-deterministic-model-and-families", "durable-replay-and-crash-boundaries"]
+    },
+    {
+      "id": "del-03-adapter-and-crash-contracts",
+      "runner": "argv",
+      "argv": ["make", "test-del-03-contracts"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": ["configured-durable-offline-composition", "schema-bound-deterministic-model-and-families", "durable-replay-and-crash-boundaries"]
+    },
+    {
+      "id": "del-03-five-demo-acceptance",
+      "runner": "argv",
+      "argv": ["make", "test-del-03-demos"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": ["five-demos-use-safe-mocks"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py"],
+    "gate_id": "del-03-runtime-composition"
+  },
+  "limitations": [
+    "The process-local low-level connector builder remains for isolated tests and is rejected by the dispatcher gateway. Runtime writes must use the durable factory with the same persistent receipt database across reconstruction.",
+    "Only the five registered demo renderer/schema pairs are supported. Unknown pairs fail closed; no real provider or connector SDK, credentials, live network calls, or production side effects are included.",
+    "Failure injection uses trusted test renderers and gateway/UoW wrappers; no user-selectable production fault-profile setting is added.",
+    "File-backed SQLite tests create initial metadata directly and reopen it without schema creation for restart checks. Migration, seeding, process bootstrap, and PostgreSQL execution remain outside DEL-03.",
+    "Durable mock idempotency is not a claim of universal exactly-once delivery for future external providers. Connection witness retains the new factory/tests while restoring its configured ledger-injection seam to the base."
+  ]
+}

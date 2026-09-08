@@ -12,6 +12,7 @@ HEAD ?= HEAD
 .PHONY: web-test-orch-01-e2e web-test-orch-01-unit web-test-orch-01-witness
 .PHONY: web-test-arch-02-build web-test-arch-02-e2e web-test-arch-02-unit web-test-arch-02-witness
 .PHONY: test-arch-08-backend verify-architecture web-test-arch-08-unit
+.PHONY: test-del-03-contracts test-del-03-demos
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12
@@ -79,6 +80,23 @@ test-demo-05-backend:
 test-demo-06-backend:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
 		tests/acceptance/test_email_signup_demo.py
+
+test-del-03-contracts:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/contract/test_del_03_durable_mock_composition.py \
+		tests/contract/test_arch_06_llm_provider.py \
+		tests/contract/test_arch_07_connector_contract_matrix.py \
+		tests/integration/db/test_run_05_external_action_idempotency.py \
+		tests/integration/db/test_run_03_write_completion.py
+
+test-del-03-demos:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/acceptance/test_social_demo.py \
+		tests/acceptance/test_blog_seo_demo.py \
+		tests/acceptance/test_email_signup_demo.py \
+		tests/acceptance/test_email_signup_demo_contract.py \
+		tests/acceptance/test_community_reminder_demo.py \
+		tests/acceptance/test_partnerships_demo.py
 
 catalog-validate:
 	$(UV) run marketing-agents-catalog validate --root catalog/v1
