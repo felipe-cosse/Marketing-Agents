@@ -46,7 +46,7 @@
       "domain": ["pydantic"],
       "application": ["jsonschema", "pydantic", "referencing"],
       "security": ["pydantic"],
-      "infrastructure": ["croniter", "jsonschema", "pydantic", "sqlalchemy", "yaml"],
+      "infrastructure": ["alembic", "croniter", "jsonschema", "pydantic", "sqlalchemy", "yaml"],
       "api": ["fastapi", "pydantic", "starlette"],
       "demos": ["pydantic"],
       "workers": []

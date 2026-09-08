@@ -45,6 +45,7 @@ from marketing_agents.infrastructure.scheduling.cron_recurrence import (
 from marketing_agents.security.digest_key import DigestKey
 from sqlalchemy import func, select, update
 
+from tests.support.catalog_persistence import seed_catalog_parents
 from tests.support.identity import human_principal, service_principal
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -85,6 +86,7 @@ async def _runtime(path: Path) -> DatabaseRuntime:
     runtime = create_database_runtime(f"sqlite+aiosqlite:///{path}")
     async with runtime.engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    await seed_catalog_parents(runtime, compile_catalog(CATALOG_ROOT))
     return runtime
 
 

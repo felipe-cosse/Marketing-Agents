@@ -1,0 +1,151 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-04",
+  "matrix_statement_sha256": "85a4bf0b5682bbb1a8f2a8e460c6568254188772e8948356dfe511a089b43205",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile", "alembic.ini", "pyproject.toml", "architecture-boundaries.json",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/**",
+      "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
+      "apps/api/src/marketing_agents/infrastructure/db/schema.py",
+      "apps/api/src/marketing_agents/infrastructure/db/local_installation.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/catalog.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/campaign_brief.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/deployment.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/maintenance.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/seed.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/instance_configuration_seed.py",
+      "apps/api/src/marketing_agents/infrastructure/readiness.py",
+      "apps/api/src/marketing_agents/workers/database_cli.py",
+      "apps/api/src/marketing_agents/workers/local_secret_init.py",
+      "tests/integration/db/test_del_04_*.py",
+      "tests/integration/api/test_api_01_health_readiness.py",
+      "tests/integration/db/test_api_03_instance_configuration_persistence.py",
+      "tests/integration/db/test_api_04_manual_work_persistence.py",
+      "tests/integration/db/test_api_05_webhook_intake.py",
+      "tests/integration/db/test_api_05_webhook_receipts.py",
+      "tests/support/catalog_persistence.py",
+      "tests/support/postgresql_runtime.py",
+      "scripts/verify_del_04_trigger_projection.py",
+      "tests/acceptance/test_social_demo.py",
+      "tests/acceptance/test_blog_seo_demo.py",
+      "tests/acceptance/test_email_signup_demo.py",
+      "docs/verification/requirements/DEL-04.json",
+      "docs/verification/requirements/DEL-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "implementation", "one_of": ["apps/api/src/marketing_agents/infrastructure/db/migrations.py"]},
+      {"kind": "implementation", "one_of": ["apps/api/src/marketing_agents/infrastructure/catalog/seed.py"]},
+      {"kind": "test", "one_of": ["tests/integration/db/test_del_04_migrations.py"]},
+      {"kind": "test", "one_of": ["tests/integration/db/test_del_04_catalog_seed.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "frozen-atomic-schema-upgrades",
+      "type": "contract",
+      "statement": "Five frozen schema-only revisions create exactly 45 mapped tables, upgrade each predecessor while preserving historical rows, and reject unknown or unversioned schema, downgrade, and head drift; injected DDL failure rolls back schema and version together.",
+      "test_refs": [
+        "tests/integration/db/test_del_04_migrations.py::test_del_04_fresh_upgrade_is_schema_only_and_matches_all_metadata",
+        "tests/integration/db/test_del_04_migrations.py::test_del_04_each_revision_upgrades_its_predecessor_and_preserves_data",
+        "tests/integration/db/test_del_04_migrations.py::test_del_04_ddl_failure_rolls_back_schema_version_and_existing_data"
+      ]
+    },
+    {
+      "id": "exact-repeatable-catalog-seed",
+      "type": "contract",
+      "statement": "One serialized transaction persists and exactly verifies catalog identities, relationships, release snapshots, and insert-only configuration defaults. Reseed preserves local overrides and historical work/run/plan snapshots; drift checks cannot write or create missing databases, and invalid identities, conflicting releases, and injected insertion faults fail atomically.",
+      "test_refs": [
+        "tests/integration/db/test_del_04_catalog_seed.py::test_del_04_seed_exact_projection_restart_and_repeat",
+        "tests/integration/db/test_del_04_catalog_seed.py::test_del_04_new_release_preserves_history_and_can_swap_display_order",
+        "tests/integration/db/test_del_04_catalog_seed.py::test_del_04_check_owns_no_create_connection_when_file_disappears_after_preflight",
+        "tests/integration/db/test_del_04_catalog_seed.py::test_del_04_seed_rolls_back_all_catalog_and_config_rows_after_fault"
+      ]
+    },
+    {
+      "id": "transactional-trigger-projection",
+      "type": "negative_control",
+      "statement": "Versioned configuration updates maintain normalized trigger rows in the same transaction and require real seeded instance parents. Stale updates and injected failures preserve both projections, while every configuration read rejects trigger projection tampering.",
+      "test_refs": [
+        "tests/integration/db/test_del_04_trigger_projection.py::test_del_04_trigger_projection_tracks_replacement_removal_and_restart",
+        "tests/integration/db/test_del_04_trigger_projection.py::test_del_04_transaction_failure_rolls_back_configuration_and_trigger_replacement",
+        "tests/integration/db/test_del_04_trigger_projection.py::test_del_04_all_configuration_reads_reject_trigger_projection_tampering"
+      ]
+    },
+    {
+      "id": "paired-native-commands-and-readiness",
+      "type": "journey",
+      "statement": "Native migrate, seed, and no-write check use one shared no-overwrite key initializer, atomically bind schema to a non-secret key identity, and refuse unsafe or unpaired persistent state. Readiness verifies the deployed schema, seed, and key pairing without repair or missing-file creation.",
+      "test_refs": [
+        "tests/integration/db/test_del_04_database_cli.py::test_del_04_native_migrate_seed_reseed_check_preserve_key_and_rows",
+        "tests/integration/db/test_del_04_database_cli.py::test_del_04_commands_reject_unsafe_or_unpaired_key_without_writes",
+        "tests/integration/db/test_del_04_readiness.py::test_del_04_migrated_seeded_readiness_is_ready_and_read_only"
+      ]
+    },
+    {
+      "id": "postgresql-runtime-portability",
+      "type": "journey",
+      "statement": "An explicitly enabled private PostgreSQL runtime verifies fresh and incremental upgrades, exact reflected schema including rewritten expressions and owned sequence defaults, rollback after partial DDL or seed writes, concurrent repeatable seed, override preservation, native CLI key pairing, and read-only readiness. Material constraint/index/default drift is rejected. Fixtures create only their own socket-only clusters and never select an existing database.",
+      "test_refs": [
+        "tests/integration/db/test_del_04_postgresql.py::test_del_04_postgresql_fresh_and_incremental_upgrades",
+        "tests/integration/db/test_del_04_postgresql.py::test_del_04_postgresql_partial_failure_rolls_back",
+        "tests/integration/db/test_del_04_postgresql.py::test_del_04_postgresql_seed_concurrency_preserves_overrides_and_checks_read_only",
+        "tests/integration/db/test_del_04_postgresql.py::test_del_04_postgresql_rejects_material_schema_drift",
+        "tests/integration/db/test_del_04_postgresql_installation.py::test_del_04_postgresql_native_installation_is_paired_ready_and_read_only",
+        "tests/integration/db/test_del_04_postgresql_fixture.py",
+        "tests/integration/db/test_del_04_postgresql_cli.py"
+      ]
+    },
+    {
+      "id": "existing-api-and-demo-invariants-preserved",
+      "type": "journey",
+      "statement": "Existing configuration, manual work, webhook receipt/intake, readiness, and three affected demo acceptance paths retain their assertions with real catalog parent fixtures and the enforced catalog-instance FK.",
+      "test_refs": ["Makefile::test-del-04-regression"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-04-trigger-causal-contract",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_del_04_trigger_projection.py"],
+      "cwd": ".", "timeout_seconds": 120, "network_requirement": "deny",
+      "covers": ["transactional-trigger-projection"]
+    },
+    {
+      "id": "del-04-migration-seed-native-contracts",
+      "runner": "argv", "argv": ["make", "test-del-04-persistence"],
+      "cwd": ".", "timeout_seconds": 600, "network_requirement": "deny",
+      "covers": ["frozen-atomic-schema-upgrades", "exact-repeatable-catalog-seed", "transactional-trigger-projection", "paired-native-commands-and-readiness"]
+    },
+    {
+      "id": "del-04-postgresql-runtime-contracts",
+      "runner": "argv", "argv": ["make", "test-del-04-postgresql"],
+      "cwd": ".", "timeout_seconds": 300, "network_requirement": "deny",
+      "covers": ["postgresql-runtime-portability"]
+    },
+    {
+      "id": "del-04-existing-api-and-demo-regressions",
+      "runner": "argv", "argv": ["make", "test-del-04-regression"],
+      "cwd": ".", "timeout_seconds": 300, "network_requirement": "deny",
+      "covers": ["existing-api-and-demo-invariants-preserved"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py"],
+    "gate_id": "del-04-trigger-causal-contract"
+  },
+  "limitations": [
+    "The optional PostgreSQL gate needs sufficient host shared-memory capacity and native-server permissions. This macOS validation used an explicitly approved temporary kern.sysv.shmall increase from 1024 to 16384, restored to 1024 afterward. The application and test fixture do not modify kernel settings.",
+    "SQLite file-backed behavior and PostgreSQL 14.17 local Unix-socket migration/seed/native-command/readiness behavior are verified. The opt-in PostgreSQL gate requires the optional driver and local server binaries; hosted services, network/TLS authentication, other server versions, and full cross-dialect application concurrency are not qualified here.",
+    "Destructive downgrade and automatic adoption/stamping of unversioned databases are unsupported. Recover a matching database/key backup into a separate installation instead.",
+    "Schema-only library upgrades leave application tables empty; native migration additionally records the local key identity. Complete deployment readiness requires a paired key and exact seed.",
+    "Container/process bootstrap, service supervision, automated backup/restore, and maintenance execution remain later delivery work. Brief and maintenance models provide storage, not new public workflows.",
+    "PostgreSQL expression comparison uses EXPLAIN VERBOSE without ANALYZE and LIMIT 0, not row execution. Database administrators and schema functions remain trusted: immutable functions can be evaluated by the planner. Historical snapshot integrity and restrictive relationships do not prevent administrator tampering or provide encryption at rest. Database and key access remain sensitive."
+  ]
+}

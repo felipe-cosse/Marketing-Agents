@@ -346,6 +346,8 @@ async def test_api_01_file_backed_sqlite_probe_is_read_only_and_restart_stable(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "readiness.db"
+    # Metadata creation is intentionally unversioned and unseeded; matching tables
+    # alone must never be accepted as a migrated, operational database.
     await _create_worker_schema(database_path)
     settings = Settings(
         _env_file=None,
@@ -361,6 +363,7 @@ async def test_api_01_file_backed_sqlite_probe_is_read_only_and_restart_stable(
     after_files = tuple(sorted(path.name for path in tmp_path.iterdir()))
     first_checks = _check_by_name(first)
     assert first == second
+    assert not first.ready
     assert before_hash == after_hash
     assert before_files == after_files == ("readiness.db",)
     assert first_checks[ReadinessCheckName.DATABASE].status is ReadinessCheckStatus.READY

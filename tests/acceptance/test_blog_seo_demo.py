@@ -67,6 +67,7 @@ from marketing_agents.security.redaction import SecretValue
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.catalog_persistence import seed_catalog_parents
 from tests.support.identity import human_principal
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -137,6 +138,7 @@ async def _runtime(path: Path) -> DatabaseRuntime:
 async def _service(path: Path) -> tuple[DatabaseRuntime, DemoRunService, list[LLMRequest]]:
     catalog = compile_catalog(CATALOG_ROOT)
     runtime = await _runtime(path)
+    await seed_catalog_parents(runtime, catalog)
     await seed_instance_configurations(
         catalog,
         InstanceConfigurationSQLAlchemyUnitOfWorkFactory(runtime.session_factory),

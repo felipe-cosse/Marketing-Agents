@@ -4,6 +4,7 @@ UV_CACHE_DIR ?= .cache/uv
 export UV_CACHE_DIR
 BASE ?= main
 HEAD ?= HEAD
+.DEFAULT_GOAL := bootstrap
 
 .PHONY: bootstrap catalog-validate format format-check lint typecheck test test-backend test-catalog-compiler test-catalog-release test-demo-01-backend test-demo-02-backend test-demo-03-backend test-network test-source test-tooling web-bootstrap web-build web-format web-format-check web-lint web-test web-test-coverage web-test-demo-01-e2e web-test-demo-01-unit web-test-demo-02-e2e web-test-demo-02-unit web-test-demo-03-e2e web-test-demo-03-unit web-test-e2e web-test-web-01-unit web-test-web-01-witness web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-typecheck verify-backend verify-catalog-release verify-ci-order verify-source verify-history verify-requirement verify-governance verify-web
 .PHONY: test-demo-04-backend web-test-demo-04-e2e web-test-demo-04-unit
@@ -13,6 +14,49 @@ HEAD ?= HEAD
 .PHONY: web-test-arch-02-build web-test-arch-02-e2e web-test-arch-02-unit web-test-arch-02-witness
 .PHONY: test-arch-08-backend verify-architecture web-test-arch-08-unit
 .PHONY: test-del-03-contracts test-del-03-demos
+.PHONY: init-local-secret migrate seed seed-check test-del-04-persistence test-del-04-postgresql test-del-04-regression
+
+DATABASE_URL ?= sqlite+aiosqlite:///./data/marketing_agents.db
+MARKETING_AGENTS_DIGEST_KEY_PATH ?= data/digest.key
+CATALOG_ROOT ?= catalog/v1
+
+init-local-secret:
+	$(UV) run marketing-agents-local-secret --database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)"
+
+migrate: init-local-secret
+	$(UV) run marketing-agents-db migrate --database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)"
+
+seed:
+	$(UV) run marketing-agents-db seed --database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)" --root "$(CATALOG_ROOT)"
+
+seed-check:
+	$(UV) run marketing-agents-db seed --check --database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)" --root "$(CATALOG_ROOT)"
+
+test-del-04-persistence:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/integration/db/test_del_04_migrations.py \
+		tests/integration/db/test_del_04_catalog_seed.py \
+		tests/integration/db/test_del_04_readiness.py \
+		tests/integration/db/test_del_04_trigger_projection.py \
+		tests/integration/db/test_del_04_postgresql_fixture.py \
+		tests/integration/db/test_del_04_database_cli.py
+
+test-del-04-postgresql:
+	MARKETING_AGENTS_TEST_POSTGRES=1 PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen --extra postgresql pytest -q --disable-socket --allow-unix-socket \
+		tests/integration/db/test_del_04_postgresql.py \
+		tests/integration/db/test_del_04_postgresql_installation.py \
+		tests/integration/db/test_del_04_postgresql_cli.py
+
+test-del-04-regression:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q --disable-socket --allow-unix-socket \
+		tests/integration/api/test_api_01_health_readiness.py \
+		tests/integration/db/test_api_03_instance_configuration_persistence.py \
+		tests/integration/db/test_api_04_manual_work_persistence.py \
+		tests/integration/db/test_api_05_webhook_intake.py \
+		tests/integration/db/test_api_05_webhook_receipts.py \
+		tests/acceptance/test_social_demo.py \
+		tests/acceptance/test_blog_seo_demo.py \
+		tests/acceptance/test_email_signup_demo.py
 
 bootstrap:
 	$(UV) sync --frozen --python 3.12

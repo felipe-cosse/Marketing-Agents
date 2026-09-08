@@ -1,19 +1,18 @@
-"""Read-only local readiness probes with no provider or connector invocation."""
+"""Read-only SQLite/PostgreSQL readiness with no provider or connector invocation."""
 
 from __future__ import annotations
 
 import asyncio
 import os
-import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from stat import S_IWGRP, S_IWOTH, S_IWUSR
 from typing import Any, Protocol
+from urllib.parse import quote
 
-from sqlalchemy import CheckConstraint, UniqueConstraint, inspect, text
+from sqlalchemy import event, select, text
 from sqlalchemy.engine import URL, Connection
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from marketing_agents.application.ports.readiness import (
     CatalogReadinessMetadata,
@@ -31,8 +30,15 @@ from marketing_agents.infrastructure.adapters.safe_profile import (
 )
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
-from marketing_agents.infrastructure.db import Base
+from marketing_agents.infrastructure.catalog.seed import seed_catalog
+from marketing_agents.infrastructure.db.local_installation import _local_paths
+from marketing_agents.infrastructure.db.migrations import inspect_migration
+from marketing_agents.infrastructure.db.models.deployment import LocalRuntimeIdentityRecord
+from marketing_agents.infrastructure.db.schema import schema_matches_metadata
+from marketing_agents.infrastructure.db.session import DatabaseRuntime
 from marketing_agents.infrastructure.db.url import parse_database_url
+from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
+from marketing_agents.security.digest_key import load_or_create_digest_key
 
 
 class ReadinessSettings(Protocol):
@@ -95,145 +101,10 @@ def _sqlite_preflight(url: URL) -> ReadinessCode | None:
     return None
 
 
-def _normalized_sql(value: object | None) -> str | None:
-    if value is None:
-        return None
-    rendered = re.sub(r"\s+", "", str(value).casefold())
-    return rendered.translate(str.maketrans("", "", '"`[]'))
-
-
-def _normalized_default(value: object | None) -> str | None:
-    rendered = _normalized_sql(value)
-    if rendered is None:
-        return None
-    while len(rendered) >= 2 and (
-        (rendered.startswith("(") and rendered.endswith(")"))
-        or (rendered.startswith("'") and rendered.endswith("'"))
-    ):
-        rendered = rendered[1:-1]
-    return rendered
-
-
-def _mapped_constraints_are_compatible(
-    connection: Connection,
-    table_name: str,
-) -> bool:
-    inspector = inspect(connection)
-    table = Base.metadata.tables[table_name]
-
-    expected_unique = {
-        tuple(constraint.columns.keys())
-        for constraint in table.constraints
-        if isinstance(constraint, UniqueConstraint)
-    }
-    actual_unique = {
-        tuple(str(column) for column in constraint.get("column_names", ()))
-        for constraint in inspector.get_unique_constraints(table_name)
-    }
-    if expected_unique != actual_unique:
-        return False
-
-    expected_foreign_keys = {
-        (
-            tuple(constraint.column_keys),
-            tuple(element.target_fullname for element in constraint.elements),
-            constraint.ondelete,
-            constraint.onupdate,
-        )
-        for constraint in table.foreign_key_constraints
-    }
-    actual_foreign_keys = {
-        (
-            tuple(str(column) for column in constraint.get("constrained_columns", ())),
-            tuple(
-                f"{constraint.get('referred_table')}.{column}"
-                for column in constraint.get("referred_columns", ())
-            ),
-            constraint.get("options", {}).get("ondelete"),
-            constraint.get("options", {}).get("onupdate"),
-        )
-        for constraint in inspector.get_foreign_keys(table_name)
-    }
-    if expected_foreign_keys != actual_foreign_keys:
-        return False
-
-    expected_checks = {
-        str(constraint.name): (
-            None
-            if getattr(constraint, "_type_bound", False)
-            else _normalized_sql(constraint.sqltext)
-        )
-        for constraint in table.constraints
-        if isinstance(constraint, CheckConstraint)
-    }
-    actual_checks = {
-        str(constraint.get("name")): _normalized_sql(constraint.get("sqltext"))
-        for constraint in inspector.get_check_constraints(table_name)
-    }
-    if set(expected_checks) != set(actual_checks) or any(
-        expected_sql is not None and actual_checks[name] != expected_sql
-        for name, expected_sql in expected_checks.items()
-    ):
-        return False
-
-    expected_indexes = {
-        (tuple(index.columns.keys()), bool(index.unique)) for index in table.indexes
-    }
-    actual_indexes = {
-        (
-            tuple(str(column) for column in index.get("column_names", ())),
-            bool(index.get("unique", False)),
-        )
-        for index in inspector.get_indexes(table_name)
-        if not index.get("duplicates_constraint")
-    }
-    return expected_indexes == actual_indexes
-
-
 def _mapped_worker_schema_is_compatible(connection: Connection) -> bool:
-    inspector = inspect(connection)
-    actual_tables = set(inspector.get_table_names())
-    expected_tables = set(Base.metadata.tables)
-    if not expected_tables or not expected_tables.issubset(actual_tables):
-        return False
-    for table_name, table in Base.metadata.tables.items():
-        inspected_columns = inspector.get_columns(table_name)
-        actual_columns: dict[str, Mapping[str, Any]] = {
-            str(column["name"]): column for column in inspected_columns
-        }
-        if set(actual_columns) != set(table.columns.keys()):
-            return False
-        for expected in table.columns:
-            actual = actual_columns[expected.name]
-            actual_type = actual.get("type")
-            expected_type = expected.type
-            if getattr(actual_type, "_type_affinity", None) is not getattr(
-                expected_type, "_type_affinity", None
-            ):
-                return False
-            for attribute in ("length", "precision", "scale"):
-                expected_value = getattr(expected_type, attribute, None)
-                if (
-                    expected_value is not None
-                    and getattr(actual_type, attribute, None) != expected_value
-                ):
-                    return False
-            if bool(actual.get("primary_key", False)) != bool(expected.primary_key):
-                return False
-            if bool(actual.get("nullable", True)) != bool(expected.nullable):
-                return False
-            expected_default = (
-                None
-                if expected.server_default is None
-                else _normalized_default(
-                    getattr(expected.server_default, "arg", expected.server_default)
-                )
-            )
-            if _normalized_default(actual.get("default")) != expected_default:
-                return False
-        if not _mapped_constraints_are_compatible(connection, table_name):
-            return False
-    return True
+    """Compatibility name for the original worker-schema probe."""
+
+    return schema_matches_metadata(connection)
 
 
 def _compile_catalog(
@@ -315,61 +186,135 @@ def _adapter_checks(
     return provider, connector
 
 
+def _read_only_engine(url: URL) -> AsyncEngine:
+    if url.drivername == "sqlite+aiosqlite" and url.database not in {
+        ":memory:",
+        "file::memory:",
+    }:
+        # mode=rw never creates an absent database. query_only below prevents
+        # data/schema writes but permits normal WAL housekeeping on close;
+        # mode=ro can leave newly created WAL/SHM sidecars behind instead.
+        database = quote(str(Path(str(url.database)).resolve()), safe="/")
+        url = url.set(database=f"file:{database}", query={"mode": "rw", "uri": "true"})
+    if url.drivername == "postgresql+asyncpg":
+        return create_async_engine(
+            url,
+            pool_pre_ping=True,
+            connect_args={"server_settings": {"default_transaction_read_only": "on"}},
+        )
+    engine = create_async_engine(url, pool_pre_ping=True)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def query_only(dbapi_connection: Any, connection_record: Any) -> None:
+        del connection_record
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA query_only=ON")
+        finally:
+            cursor.close()
+
+    return engine
+
+
+def _verify_present_key(database_url: str, key_path: Path, fingerprint: str) -> None:
+    # The key remains private and local even when the paired database is PostgreSQL.
+    _, normalized_key = _local_paths(database_url, key_path)
+    # Existing-state mode is intentionally non-creating even when the key is absent.
+    load_or_create_digest_key(
+        normalized_key, persistent_state_exists=True, expected_fingerprint=fingerprint
+    )
+
+
 class LocalReadinessProbe:
     """Recompute local facts without migrating, seeding, repairing, or calling adapters."""
 
     def __init__(self, settings: ReadinessSettings) -> None:
         self._settings = settings
 
-    async def _database_checks(self) -> tuple[ReadinessCheck, ReadinessCheck]:
+    async def _database_checks(
+        self, catalog: CompiledCatalog | None
+    ) -> tuple[ReadinessCheck, ReadinessCheck, ReadinessCheck, ReadinessCheck]:
+        database = _not_ready(ReadinessCheckName.DATABASE, ReadinessCode.DATABASE_UNAVAILABLE)
+        migration = _not_ready(
+            ReadinessCheckName.MIGRATION, ReadinessCode.MIGRATION_VERIFICATION_UNAVAILABLE
+        )
+        worker_schema = _not_ready(
+            ReadinessCheckName.WORKER_SCHEMA, ReadinessCode.WORKER_SCHEMA_INCOMPATIBLE
+        )
+        seeded_catalog = _not_ready(
+            ReadinessCheckName.CATALOG, ReadinessCode.CATALOG_SEED_VERIFICATION_UNAVAILABLE
+        )
         url = parse_database_url(self._settings.database_url)
         preflight = _sqlite_preflight(url)
         if preflight is not None:
             return (
                 _not_ready(ReadinessCheckName.DATABASE, preflight),
-                _not_ready(
-                    ReadinessCheckName.WORKER_SCHEMA,
-                    ReadinessCode.WORKER_SCHEMA_INCOMPATIBLE,
-                ),
+                migration,
+                worker_schema,
+                seeded_catalog,
             )
 
         engine: AsyncEngine | None = None
         try:
-            engine = create_async_engine(url, pool_pre_ping=True)
+            engine = _read_only_engine(url)
             async with engine.connect() as connection:
                 if (await connection.execute(text("SELECT 1"))).scalar_one() != 1:
                     raise RuntimeError("database probe returned an invalid sentinel")
-                compatible = await connection.run_sync(_mapped_worker_schema_is_compatible)
+                database = _ready(ReadinessCheckName.DATABASE)
+                if await connection.run_sync(_mapped_worker_schema_is_compatible):
+                    worker_schema = _ready(ReadinessCheckName.WORKER_SCHEMA)
+                deployed = await connection.run_sync(inspect_migration)
+                if deployed.current and deployed.schema_matches:
+                    migration = _ready(ReadinessCheckName.MIGRATION)
+                    rows = (
+                        (await connection.execute(select(LocalRuntimeIdentityRecord).limit(2)))
+                        .mappings()
+                        .all()
+                    )
+                    key_path = getattr(self._settings, "marketing_agents_digest_key_path", None)
+                    try:
+                        if (
+                            len(rows) != 1
+                            or rows[0]["singleton_id"] != 1
+                            or rows[0]["format_version"] != 1
+                            or not isinstance(key_path, Path)
+                        ):
+                            raise ValueError("native installation identity is invalid")
+                        await asyncio.to_thread(
+                            _verify_present_key,
+                            self._settings.database_url,
+                            key_path,
+                            str(rows[0]["key_fingerprint"]),
+                        )
+                    except Exception:
+                        database = _not_ready(
+                            ReadinessCheckName.DATABASE, ReadinessCode.DATABASE_UNAVAILABLE
+                        )
+                        return database, migration, worker_schema, seeded_catalog
+            if deployed.current and deployed.schema_matches and catalog is not None:
+                runtime = DatabaseRuntime(
+                    engine=engine,
+                    session_factory=async_sessionmaker(
+                        engine, autoflush=False, expire_on_commit=False
+                    ),
+                )
+                await seed_catalog(catalog, runtime, CroniterRecurrenceCalculator(), check=True)
+                seeded_catalog = _ready(ReadinessCheckName.CATALOG)
         except Exception:
-            return (
-                _not_ready(
-                    ReadinessCheckName.DATABASE,
-                    ReadinessCode.DATABASE_UNAVAILABLE,
-                ),
-                _not_ready(
-                    ReadinessCheckName.WORKER_SCHEMA,
-                    ReadinessCode.WORKER_SCHEMA_INCOMPATIBLE,
-                ),
-            )
+            # Preserve proven connectivity/schema checks; never expose SQL, paths,
+            # configured credentials, catalog payloads, or seed exception details.
+            pass
         finally:
             if engine is not None:
                 await engine.dispose()
-        return (
-            _ready(ReadinessCheckName.DATABASE),
-            _ready(ReadinessCheckName.WORKER_SCHEMA)
-            if compatible
-            else _not_ready(
-                ReadinessCheckName.WORKER_SCHEMA,
-                ReadinessCode.WORKER_SCHEMA_INCOMPATIBLE,
-            ),
-        )
+        return database, migration, worker_schema, seeded_catalog
 
     async def check(self) -> ReadinessReport:
-        database, worker_schema = await self._database_checks()
         catalog, catalog_metadata, catalog_check = await asyncio.to_thread(
             _compile_catalog,
             self._settings.catalog_root,
         )
+        database, migration, worker_schema, seeded_catalog = await self._database_checks(catalog)
         provider_registry, connector_registry = await asyncio.to_thread(
             _adapter_checks,
             self._settings,
@@ -378,11 +323,8 @@ class LocalReadinessProbe:
         return ReadinessReport(
             checks=(
                 database,
-                _not_ready(
-                    ReadinessCheckName.MIGRATION,
-                    ReadinessCode.MIGRATION_VERIFICATION_UNAVAILABLE,
-                ),
-                catalog_check,
+                migration,
+                seeded_catalog if catalog is not None else catalog_check,
                 provider_registry,
                 connector_registry,
                 worker_schema,

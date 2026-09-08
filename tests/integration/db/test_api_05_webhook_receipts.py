@@ -20,6 +20,7 @@ from marketing_agents.domain.webhook import (
     WebhookReceipt,
     WebhookReceiptDelivery,
 )
+from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.db import (
     AgentInstanceConfigurationRecord,
     Base,
@@ -40,6 +41,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.support.catalog_persistence import seed_catalog_parents
+
+CATALOG_ROOT = Path(__file__).resolve().parents[3] / "catalog" / "v1"
 NOW = datetime(2026, 8, 26, 20, tzinfo=UTC)
 SOURCE = "local.events"
 EVENT_ID = "event.api-05.0001"
@@ -76,6 +80,7 @@ async def _runtime(path: Path) -> DatabaseRuntime:
 
 
 async def _seed_instance_rows(runtime: DatabaseRuntime) -> None:
+    await seed_catalog_parents(runtime, compile_catalog(CATALOG_ROOT))
     async with runtime.session_factory() as session, session.begin():
         for instance_id in (*INSTANCE_IDS, TAMPER_INSTANCE_ID):
             session.add(

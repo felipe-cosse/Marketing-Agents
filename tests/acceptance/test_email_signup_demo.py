@@ -66,6 +66,7 @@ from tests.acceptance.test_blog_seo_demo import (
     _record_provider_calls,
     _runtime,
 )
+from tests.support.catalog_persistence import seed_catalog_parents
 from tests.support.identity import human_principal
 
 FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "demos" / "email-signup.json"
@@ -82,6 +83,7 @@ class _MutableClock:
 async def _configured_service(path: Path, *, clock=None):  # type: ignore[no-untyped-def]
     catalog = compile_catalog(CATALOG_ROOT)
     runtime = await _runtime(path)
+    await seed_catalog_parents(runtime, catalog)
     configuration_uow = InstanceConfigurationSQLAlchemyUnitOfWorkFactory(runtime.session_factory)
     await seed_instance_configurations(
         catalog,

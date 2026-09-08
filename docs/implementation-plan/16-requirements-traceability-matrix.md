@@ -138,7 +138,7 @@ Allowed status values:
 | DEL-01 | Working backend/frontend. | 01–15 | `apps/api`, `apps/web` | Clean-state/browser smoke | planned |
 | DEL-02 | Validated 36-template/43-instance catalog. | 02 | `catalog/v1` | Catalog suite | verified |
 | DEL-03 | Deterministic mock model/connectors. | 10 | Adapter mocks | Contract/demo tests | verified |
-| DEL-04 | Migrations and repeatable seed. | 04 | Alembic/seeder | Fresh/reseed tests | planned |
+| DEL-04 | Migrations and repeatable seed. | 04 | Alembic/seeder | Fresh/reseed tests | verified |
 | DEL-05 | One-command local startup; Docker if useful. | 15 | Compose/Makefile | `make verify-clean` | planned |
 | DEL-06 | README, architecture, assumptions, security docs. | 15 | Required docs | Documentation checklist | planned |
 | DEL-07 | Required unit/catalog/API/state/idempotency/approval/adapter/frontend tests. | 14 | Full test tree | `make verify` | planned |

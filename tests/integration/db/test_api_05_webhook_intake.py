@@ -71,6 +71,8 @@ from marketing_agents.infrastructure.webhook_sources import (
 from marketing_agents.security.digest_key import DigestKey
 from sqlalchemy import func, select
 
+from tests.support.catalog_persistence import seed_catalog_parents
+
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG_ROOT = ROOT / "catalog" / "v1"
 NOW = datetime(2026, 8, 26, 21, tzinfo=UTC)
@@ -144,6 +146,7 @@ async def _runtime(
 
 
 async def _seed(runtime: DatabaseRuntime, catalog: CompiledCatalog) -> None:
+    await seed_catalog_parents(runtime, catalog)
     seeded = await seed_instance_configurations(
         catalog,
         InstanceConfigurationSQLAlchemyUnitOfWorkFactory(runtime.session_factory),
