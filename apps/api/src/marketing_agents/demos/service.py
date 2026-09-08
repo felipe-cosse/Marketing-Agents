@@ -327,6 +327,31 @@ class DemoRunService:
                 "demo_run_not_completed", "demo Run is not complete", run_id=current.id
             )
 
+    async def resume_persisted(
+        self, run_id: str, *, worker_id: str, correlation_id: str
+    ) -> DemoRunResult:
+        """Advance an already admitted demo without resubmitting its input."""
+        async with self._dependencies.unit_of_work() as unit_of_work:
+            run = await unit_of_work.runs.get(run_id)
+            work = None if run is None else await unit_of_work.works.get(run.work_item_id)
+        if run is None or work is None:
+            raise DemoRunServiceError("demo_run_unavailable", "demo Run is unavailable")
+        scenario = self._registry.get(work.workflow_id)
+        self._require_supported_contract(scenario)
+        receipt = ManualDryRunResult(
+            event_id=work.event_id,
+            work_item=work,
+            run=run,
+            disposition=WorkRunReceiptDisposition.REPLAYED,
+            mode=work.mode,
+        )
+        await self._drain(
+            receipt,
+            scenario,
+            audit_context=AuditContext.worker(worker_id, correlation_id=correlation_id),
+        )
+        return await self._result(receipt, scenario)
+
     def _build_plan(
         self,
         work: WorkItem,

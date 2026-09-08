@@ -1,0 +1,150 @@
+name: ${COMPOSE_PROJECT_NAME:-marketing-agents-local}
+
+x-backend: &backend
+  image: ${COMPOSE_PROJECT_NAME:-marketing-agents-local}-backend:local
+  build:
+    context: .
+    dockerfile: docker/api.Dockerfile
+    target: runtime
+    args:
+      SOURCE_REVISION: ${MARKETING_AGENTS_SOURCE_REVISION:-uncommitted}
+  user: "10001:10001"
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ["/tmp:size=64m,mode=1777"]
+  environment: &safe-environment
+    APP_ENV: local
+    AUTH_MODE: local
+    LLM_PROVIDER: mock
+    CONNECTOR_MODE: mock
+    ALLOW_EXTERNAL_NETWORK: "false"
+    REAL_LLM_OPT_IN: "false"
+    REAL_CONNECTOR_OPT_IN: "false"
+    DATABASE_URL: sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db
+    MARKETING_AGENTS_DIGEST_KEY_PATH: /var/lib/marketing-agents/secrets/digest.key
+    CATALOG_ROOT: /app/catalog/v1
+    API_HOST: 127.0.0.1
+    API_PORT: "8000"
+    API_TRUSTED_ORIGINS: '["http://127.0.0.1:${MARKETING_AGENTS_WEB_PORT:-8080}","http://localhost:${MARKETING_AGENTS_WEB_PORT:-8080}"]'
+  volumes:
+    - data:/var/lib/marketing-agents/data
+    - local-secrets:/var/lib/marketing-agents/secrets:ro
+  stop_grace_period: 40s
+
+services:
+  local-secret-init:
+    <<: *backend
+    network_mode: none
+    restart: "no"
+    command: [python, -m, marketing_agents.workers.local_secret_init, --database-url, "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db", --key-path, /var/lib/marketing-agents/secrets/digest.key, --defer-database-check]
+    volumes:
+      - data:/var/lib/marketing-agents/data:ro
+      - local-secrets:/var/lib/marketing-agents/secrets
+
+  migrate-seed:
+    <<: *backend
+    network_mode: none
+    restart: "no"
+    depends_on:
+      local-secret-init:
+        condition: service_completed_successfully
+    command: [/bin/sh, /app/scripts/migrate-and-seed.sh]
+
+  web:
+    image: ${COMPOSE_PROJECT_NAME:-marketing-agents-local}-web:local
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      target: runtime
+      args:
+        SOURCE_REVISION: ${MARKETING_AGENTS_SOURCE_REVISION:-uncommitted}
+    user: "101:101"
+    group_add: ["10001"]
+    volumes:
+      - api-socket:/var/run/marketing-agents:ro
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    ports:
+      - target: 8080
+        published: "${MARKETING_AGENTS_WEB_PORT:-8080}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, --timeout=4, "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 6s
+      start_period: 20s
+      retries: 12
+    stop_grace_period: 40s
+
+  api:
+    <<: *backend
+    # Unix ingress preserves local identity without granting the API any IP network.
+    network_mode: none
+    environment:
+      <<: *safe-environment
+      MARKETING_AGENTS_API_SOCKET: /var/run/marketing-agents/api.sock
+    volumes:
+      - data:/var/lib/marketing-agents/data
+      - local-secrets:/var/lib/marketing-agents/secrets:ro
+      - api-socket:/var/run/marketing-agents
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+    command: [python, -m, marketing_agents.workers.serve_api]
+    healthcheck:
+      test: [CMD, python, /app/scripts/health_http.py]
+      interval: 10s
+      timeout: 6s
+      start_period: 20s
+      retries: 12
+
+  run-worker:
+    <<: *backend
+    network_mode: none
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+    command: [python, -m, marketing_agents.workers.run_worker, --worker-id, local.run-worker, --health-file, /tmp/run-worker.health.json]
+    healthcheck:
+      test: [CMD, python, -m, marketing_agents.workers.worker_health, --health-file, /tmp/run-worker.health.json]
+      interval: 10s
+      timeout: 6s
+      start_period: 20s
+      retries: 12
+
+  scheduler-worker:
+    <<: *backend
+    network_mode: none
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+    command: [python, -m, marketing_agents.workers.scheduler_worker, --worker-id, local.scheduler-worker, --health-file, /tmp/scheduler-worker.health.json]
+    healthcheck:
+      test: [CMD, python, -m, marketing_agents.workers.worker_health, --health-file, /tmp/scheduler-worker.health.json]
+      interval: 10s
+      timeout: 6s
+      start_period: 20s
+      retries: 12
+
+volumes:
+  data:
+  local-secrets:
+  # Transient local IPC only; never included in paired database/key backups.
+  api-socket:
+
+networks:
+  default:
+    # Docker Desktop 29 does not publish ports on internal networks, even NAT.
+    # Only the credential-free static web proxy joins this ingress bridge.
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat

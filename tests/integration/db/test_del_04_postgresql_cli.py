@@ -7,10 +7,11 @@ from pathlib import Path
 from stat import S_IMODE
 
 import pytest
-from marketing_agents.infrastructure.db.migrations import expected_tables
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION
 from marketing_agents.security.digest_key import DigestKey, digest_key_fingerprint
 
 from tests.integration.db.test_del_04_database_cli import _files, _invoke, _paths
+from tests.integration.db.test_del_04_migrations import ALL_TABLES
 from tests.integration.db.test_del_04_postgresql_installation import _snapshot
 from tests.support.postgresql_runtime import pg_database_url as pg_database_url
 
@@ -30,9 +31,9 @@ async def test_del_04_postgresql_native_cli_initializes_migrates_seeds_and_check
     assert S_IMODE(key_path.parent.stat().st_mode) == 0o700
 
     _, migrated = _invoke(tmp_path, "migrate", database_url=pg_database_url)
-    assert migrated == {"ok": True, "revision": "0005"}
+    assert migrated == {"ok": True, "revision": HEAD_REVISION}
     empty_schema = await _snapshot(pg_database_url)
-    assert set(empty_schema) == expected_tables("0005") | {"alembic_version"}
+    assert set(empty_schema) == ALL_TABLES | {"alembic_version"}
     assert len(empty_schema["local_runtime_identity"]) == 1
     fingerprint = digest_key_fingerprint(DigestKey(base64.urlsafe_b64decode(key_bytes.strip())))
     assert fingerprint in empty_schema["local_runtime_identity"][0]

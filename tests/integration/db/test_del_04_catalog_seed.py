@@ -23,7 +23,7 @@ from marketing_agents.infrastructure.catalog import seed as seed_module
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 from marketing_agents.infrastructure.catalog.seed import CatalogSeedError, seed_catalog
 from marketing_agents.infrastructure.db import Base, DatabaseRuntime, create_database_runtime
-from marketing_agents.infrastructure.db.migrations import upgrade_database
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION, upgrade_database
 from marketing_agents.infrastructure.db.models.catalog import (
     AgentInstanceRecord,
     AgentTemplateCapabilityRecord,
@@ -74,7 +74,7 @@ def catalog() -> CompiledCatalog:
 async def runtime(tmp_path: Path) -> AsyncIterator[DatabaseRuntime]:
     value = create_database_runtime(f"sqlite+aiosqlite:///{tmp_path / 'seed.db'}")
     try:
-        assert await upgrade_database(value) == "0005"
+        assert await upgrade_database(value) == HEAD_REVISION
         yield value
     finally:
         await value.dispose()

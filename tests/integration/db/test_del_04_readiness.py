@@ -28,7 +28,7 @@ from marketing_agents.infrastructure.db import (
     create_database_runtime,
 )
 from marketing_agents.infrastructure.db.local_installation import migrate_local_database
-from marketing_agents.infrastructure.db.migrations import upgrade_database
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION, upgrade_database
 from marketing_agents.infrastructure.db.schema import _normalized_sql, schema_matches_metadata
 from marketing_agents.infrastructure.readiness import LocalReadinessProbe
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
@@ -60,7 +60,7 @@ async def _seeded_runtime(path: Path, catalog: CompiledCatalog) -> DatabaseRunti
             await migrate_local_database(
                 settings.database_url, settings.marketing_agents_digest_key_path
             )
-            == "0005"
+            == HEAD_REVISION
         )
         await seed_catalog(catalog, runtime, CroniterRecurrenceCalculator())
     except BaseException:
@@ -133,6 +133,7 @@ async def test_del_04_migrated_seeded_readiness_is_ready_and_read_only(
     [
         "DROP TABLE alembic_version",
         "UPDATE alembic_version SET version_num = '0004'",
+        "UPDATE alembic_version SET version_num = '0005'",
         "INSERT INTO alembic_version (version_num) VALUES ('unrecognized-head')",
     ],
 )

@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from marketing_agents.infrastructure.db.schema import schema_matches_metadata
 from marketing_agents.infrastructure.db.session import DatabaseRuntime
 
-HEAD_REVISION = "0005"
+HEAD_REVISION = "0006"
 REVISION_TABLES: dict[str, frozenset[str]] = {
+    "0006": frozenset({"run_worker_claims"}),
     "0001": frozenset(
         {
             "catalog_releases",

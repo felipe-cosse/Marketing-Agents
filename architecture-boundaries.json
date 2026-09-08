@@ -53,6 +53,14 @@
     },
     "import_exceptions": [
       {
+        "source": "workers/runtime/composition.py",
+        "allowed_prefixes": ["marketing_agents.api.app", "fastapi"]
+      },
+      {
+        "source": "workers/serve_api.py",
+        "allowed_prefixes": ["uvicorn"]
+      },
+      {
         "source": "domain/approval.py",
         "allowed_prefixes": ["marketing_agents.security.redaction"]
       },

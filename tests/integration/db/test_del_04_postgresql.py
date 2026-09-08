@@ -11,8 +11,9 @@ from typing import Any
 import pytest
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.seed import CatalogSeedError, seed_catalog
-from marketing_agents.infrastructure.db import Base, create_database_runtime
+from marketing_agents.infrastructure.db import create_database_runtime
 from marketing_agents.infrastructure.db.migrations import (
+    HEAD_REVISION,
     DatabaseMigrationError,
     inspect_migration,
     upgrade_database,
@@ -26,20 +27,31 @@ from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalcula
 from sqlalchemy import event, inspect, text
 
 from tests.integration.db.test_del_04_catalog_seed import EXPECTED_COUNTS, _snapshot
+from tests.integration.db.test_del_04_migrations import ALL_TABLES, REVISION_TABLES
 from tests.support import postgresql_runtime
 
 ROOT = Path(__file__).resolve().parents[3]
 pg_database_url = postgresql_runtime.pg_database_url
 
 
-@pytest.mark.parametrize("previous", [None, "0001", "0002", "0003", "0004"])
+@pytest.mark.parametrize("previous", [None, "0001", "0002", "0003", "0004", "0005"])
 async def test_del_04_postgresql_fresh_and_incremental_upgrades(
     pg_database_url: str, previous: str | None
 ) -> None:
     runtime = create_database_runtime(pg_database_url)
     try:
         if previous is not None:
-            await upgrade_database(runtime, previous)
+            assert await upgrade_database(runtime, previous) == previous
+            async with runtime.engine.connect() as connection:
+                expected = set().union(
+                    *(
+                        tables
+                        for revision, tables in REVISION_TABLES.items()
+                        if revision <= previous
+                    )
+                )
+                tables = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
+                assert set(tables) == expected | {"alembic_version"}
             async with runtime.session_factory() as session, session.begin():
                 session.add(
                     CatalogReleaseRecord(
@@ -49,13 +61,14 @@ async def test_del_04_postgresql_fresh_and_incremental_upgrades(
                         recorded_at=datetime(2026, 9, 8, tzinfo=UTC),
                     )
                 )
-        assert await upgrade_database(runtime) == "0005"
-        assert await upgrade_database(runtime) == "0005"
+        assert await upgrade_database(runtime) == HEAD_REVISION
+        assert await upgrade_database(runtime) == HEAD_REVISION
         async with runtime.engine.connect() as connection:
             status = await connection.run_sync(inspect_migration)
+            assert status.revision == status.head == HEAD_REVISION
             assert status.current and status.schema_matches
             tables = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
-            assert set(tables) == set(Base.metadata.tables) | {"alembic_version"}
+            assert set(tables) == ALL_TABLES | {"alembic_version"}
         snapshot = await _snapshot(runtime)
         if previous is None:
             assert all(not rows for rows in snapshot.values())
@@ -149,7 +162,7 @@ async def test_del_04_postgresql_partial_failure_rolls_back(
         if phase == "migration":
             async with runtime.engine.connect() as connection:
                 assert await connection.run_sync(lambda sync: inspect(sync).get_table_names()) == []
-            assert await upgrade_database(runtime) == "0005"
+            assert await upgrade_database(runtime) == HEAD_REVISION
         else:
             assert all(not rows for rows in (await _snapshot(runtime)).values())
     finally:

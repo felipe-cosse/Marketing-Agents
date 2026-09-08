@@ -18,7 +18,7 @@ from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 from marketing_agents.infrastructure.catalog.seed import seed_catalog
 from marketing_agents.infrastructure.db import DatabaseRuntime, create_database_runtime
-from marketing_agents.infrastructure.db.migrations import upgrade_database
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION, upgrade_database
 from marketing_agents.infrastructure.db.models.deployment import TriggerDefinitionRecord
 from marketing_agents.infrastructure.db.models.instance_configuration import (
     AgentInstanceConfigurationRecord,
@@ -44,7 +44,7 @@ def catalog() -> CompiledCatalog:
 async def runtime(tmp_path: Path, catalog: CompiledCatalog) -> AsyncIterator[DatabaseRuntime]:
     value = create_database_runtime(f"sqlite+aiosqlite:///{tmp_path / 'triggers.db'}")
     try:
-        assert await upgrade_database(value) == "0005"
+        assert await upgrade_database(value) == HEAD_REVISION
         seeded = await seed_catalog(catalog, value, CroniterRecurrenceCalculator())
         assert seeded.configuration_inserted == 43
         yield value

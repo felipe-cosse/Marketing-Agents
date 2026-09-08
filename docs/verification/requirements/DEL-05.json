@@ -1,0 +1,249 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-05",
+  "matrix_statement_sha256": "697969f0afdbe4fdaa3777f94d38e52f6a63b84f9a001cb5014ecd02c2f6f080",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      ".dockerignore",
+      ".gitignore",
+      ".github/workflows/ci.yml",
+      "Makefile",
+      "README.md",
+      "compose.yaml",
+      "docker/**",
+      "architecture-boundaries.json",
+      "scripts/verify_architecture_boundaries.py",
+      "scripts/compose.sh",
+      "scripts/dev.py",
+      "scripts/health_http.py",
+      "scripts/local_backup.py",
+      "scripts/migrate-and-seed.sh",
+      "scripts/verify_clean_state.sh",
+      "scripts/del_05_*.py",
+      "scripts/verify_del_05_*.py",
+      "apps/api/src/marketing_agents/workers/**",
+      "apps/api/src/marketing_agents/infrastructure/runtime/**",
+      "apps/api/src/marketing_agents/infrastructure/db/local_backup.py",
+      "apps/api/src/marketing_agents/infrastructure/db/local_installation.py",
+      "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0006_run_worker_claims.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/run_claim.py",
+      "apps/api/src/marketing_agents/demos/service.py",
+      "apps/api/src/marketing_agents/demos/email_signup_service.py",
+      "apps/web/vite.config.ts",
+      "apps/web/scripts/run-del-05-e2e.mjs",
+      "tests/integration/runtime/test_del_05_*.py",
+      "tests/integration/db/test_del_05_*.py",
+      "tests/integration/db/test_del_04_*.py",
+      "tests/tooling/test_del_05_*.py",
+      "tests/unit/architecture/test_del_05_composition_exceptions.py",
+      "docs/local-operations.md",
+      "docs/verification/requirements/DEL-05.json",
+      "docs/verification/requirements/DEL-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "compose.yaml"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/workers/runtime/run_loop.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/runtime/test_del_05_process_composition.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_del_05_clean_state.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-local-process-composition",
+      "type": "journey",
+      "statement": "The credential-free Compose stack migrates/seeds once, serves one loopback URL through private Unix ingress, and runs distinct bounded workers. Actual API admission advances all five deterministic demos, with Email waiting for both approvals and producing one durable mock receipt per action across process restart.",
+      "test_refs": [
+        "tests/integration/runtime/test_del_05_process_composition.py",
+        "tests/tooling/test_del_05_clean_state_http.py",
+        "Makefile::verify-clean"
+      ]
+    },
+    {
+      "id": "durable-run-claims-and-recovery",
+      "type": "contract",
+      "statement": "Frozen revision0006 adds dedicated owner/token/version-fenced Run claims without rewriting prior migrations. Bounded selection, claim competition, renewal, expiration, stale release, graceful stop, and scheduler admission/restart retain existing lifecycle/approval/idempotency services; unsupported workflows fail honestly.",
+      "test_refs": [
+        "tests/integration/runtime/test_del_05_process_composition.py"
+      ]
+    },
+    {
+      "id": "private-ingress-and-native-lifecycle",
+      "type": "negative_control",
+      "statement": "API and workers have no container IP network; only the static web proxy uses the disclosed ingress bridge. The private Unix listener rejects unsafe or active socket paths and cleans only its own socket. Native supervision checks pinned prerequisites, preserves paired state, and cleans only owned process groups.",
+      "test_refs": [
+        "tests/integration/runtime/test_del_05_unix_transport.py",
+        "tests/tooling/test_del_05_native.py",
+        "tests/tooling/test_del_05_compose_contract.py"
+      ]
+    },
+    {
+      "id": "readonly-volume-initialization",
+      "type": "contract",
+      "statement": "The explicit read-only-volume key initialization stage performs no SQLite query, never creates a replacement key beside an existing database, and preserves strict key/path ownership. The default native/RW migration path still verifies the stored fingerprint before any schema or seed writes.",
+      "test_refs": [
+        "tests/integration/runtime/test_del_05_readonly_initializer.py"
+      ]
+    },
+    {
+      "id": "paired-snapshot-backup-and-new-storage-restore",
+      "type": "negative_control",
+      "statement": "SQLite online backup captures WAL-consistent paired database/key snapshots with protected permissions and checksummed schema/catalog/key metadata. Missing, mismatched, permissive, unsafe, interrupted, or existing destinations fail closed. Compose transport moves only verified bundles into new ownership-scoped data/key volumes; IPC is excluded.",
+      "test_refs": [
+        "tests/integration/db/test_del_05_backup.py",
+        "tests/tooling/test_del_05_backup_transport.py",
+        "Makefile::test-del-05-compose-backup"
+      ]
+    },
+    {
+      "id": "clean-commit-and-resource-boundary",
+      "type": "negative_control",
+      "statement": "Clean verification exports an exact commit, rejects unsafe archive members and environment files, separates registry acquisition from runtime checks, enforces scoped images/networks/mounts/volumes and a local daemon, and validates ownership before cleanup. It verifies actual loopback publication and backend network denial, explicitly disclosing web's outbound-route residual.",
+      "test_refs": [
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_del_05_compose_contract.py",
+        "Makefile::verify-clean"
+      ]
+    },
+    {
+      "id": "deployed-reseed-replay-and-browser",
+      "type": "journey",
+      "statement": "The isolated deployed stack verifies exact catalog counts, zero-write reseeding, all five demos, Email's all-approvals barrier, stable key/action IDs, signed webhook replay, and scheduler occurrence identity across real restart. Prebuilt backend/frontend suites run network-disabled and browser smoke verifies hierarchy, zoom, search, and responsive tree with same-origin request enforcement.",
+      "test_refs": [
+        "tests/tooling/test_del_05_clean_state_fixture.py",
+        "apps/web/scripts/run-del-05-e2e.mjs",
+        "Makefile::verify-clean"
+      ]
+    },
+    {
+      "id": "preceding-schema-and-boundary-contracts-preserved",
+      "type": "contract",
+      "statement": "Existing DEL04 current-head tests extend to revision0006 and 46 mapped tables while retaining independent literal0001-0005 inventories, rollback and preservation checks. Architecture exceptions permit only exact executable composition imports and continue rejecting adjacent-worker, domain, and API ORM leaks.",
+      "test_refs": [
+        "tests/unit/architecture/test_del_05_composition_exceptions.py",
+        "Makefile::test-del-04-persistence"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-05-runtime",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "test-del-05-runtime"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-local-process-composition",
+        "durable-run-claims-and-recovery",
+        "private-ingress-and-native-lifecycle",
+        "readonly-volume-initialization"
+      ]
+    },
+    {
+      "id": "del-05-paired-backups",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "test-del-05-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "deny",
+      "covers": [
+        "paired-snapshot-backup-and-new-storage-restore"
+      ]
+    },
+    {
+      "id": "del-05-tooling-boundaries",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "test-del-05-tooling"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "clean-commit-and-resource-boundary",
+        "private-ingress-and-native-lifecycle",
+        "paired-snapshot-backup-and-new-storage-restore"
+      ]
+    },
+    {
+      "id": "del-05-compose-backup",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "test-del-05-compose-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "paired-snapshot-backup-and-new-storage-restore"
+      ]
+    },
+    {
+      "id": "del-05-clean-deployed-stack",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "verify-clean",
+        "REF=HEAD"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "complete-local-process-composition",
+        "clean-commit-and-resource-boundary",
+        "deployed-reseed-replay-and-browser",
+        "preceding-schema-and-boundary-contracts-preserved"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/demos/service.py",
+      "apps/api/src/marketing_agents/demos/email_signup_service.py"
+    ],
+    "gate_id": "del-05-runtime"
+  },
+  "limitations": [
+    "Acquisition requires public image/package registries unless cached. The clean gate is not globally network-denied: only test containers and backend application processes are OS network-isolated; browser request enforcement is same-origin.",
+    "Docker Desktop29.7.2 discarded published ports on both internal/isolated and internal/NAT networks. Only the static web proxy therefore uses a normal scoped ingress bridge, with a loopback-only port. That container retains an external route; the fixed proxy exposes no external upstream.",
+    "Local fixed identity grants administrative and self-approval authority. This is a single-operator local demo, not public/multi-user production authentication; Docker and filesystem administrators remain trusted.",
+    "Only the five implemented demo workflows execute through this worker composition. Generic scheduled/webhook fixtures prove durable admission/replay, not arbitrary workflow execution. Real adapters, production delivery, TLS/cloud deployment and production backup RPO/RTO are not qualified.",
+    "The optional PostgreSQL live suite is not part of this SQLite delivery gate. Existing PG tests were extended for revision0006 and collected, but this requirement does not claim live PostgreSQL claim/transport qualification.",
+    "Source images and application dependency locks are pinned; OS packages and browser platform dependencies are acquired during the explicit build phase. A content-equivalent application build is asserted, not bit-for-bit reproducibility of public registry OS package metadata.",
+    "The clean verifier leaves reusable build images/cache but deletes only its validated temporary containers, three volumes, network and tracked export. Backup bundles are secret-bearing and excluded from ordinary reports."
+  ]
+}
