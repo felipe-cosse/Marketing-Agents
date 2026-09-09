@@ -436,9 +436,27 @@ test("WEB-03 selection shows complete dynamic and duplicate static detail with c
   await expect(
     inspector.getByRole("heading", { name: "Recent runs" }),
   ).toBeVisible();
+  const recentRuns = inspector.getByRole("region", {
+    name: "Recent runs",
+    exact: true,
+  });
   await expect(
-    inspector.getByText("run.web-03.latest", { exact: true }),
+    recentRuns.getByRole("definition").filter({ hasText: /^Completed$/u }),
   ).toBeVisible();
+  await expect(
+    recentRuns
+      .getByRole("definition")
+      .filter({ hasText: /^run\.web-03\.latest$/u }),
+  ).toBeVisible();
+  const latestRunLink = recentRuns.getByRole("link", {
+    name: "run.web-03.latest",
+    exact: true,
+  });
+  await expect(latestRunLink).toBeVisible();
+  await expect(latestRunLink).toHaveAttribute(
+    "href",
+    "/runs/run.web-03.latest",
+  );
   await expect(firstCard).toHaveAttribute("aria-expanded", "true");
 
   await inspector.locator(".agent-inspector__close").click();
@@ -446,6 +464,11 @@ test("WEB-03 selection shows complete dynamic and duplicate static detail with c
   await expect(firstCard).toBeFocused();
   await firstCard.click();
   await expect(inspector).toBeVisible();
+  await expect(latestRunLink).toBeVisible();
+  await expect(latestRunLink).toHaveAttribute(
+    "href",
+    "/runs/run.web-03.latest",
+  );
   expect(observation.detailConditionalHeaders.slice(0, 2)).toEqual([
     null,
     expect.stringMatching(/^"[a-f0-9]{64}"$/u),

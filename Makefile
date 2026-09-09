@@ -86,7 +86,10 @@ test-source:
 		tests.source.test_exec_02_architecture_decisions
 
 test-tooling:
-	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.tooling.test_verify_requirement_evidence
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest \
+		tests.tooling.test_verify_requirement_evidence \
+		tests.tooling.test_prepare_ci_history \
+		tests.tooling.test_ci_maintenance_history
 
 test-backend:
 	$(UV) run pytest -q
@@ -327,6 +330,7 @@ LOCAL_PROJECT ?= marketing-agents-local
 LOCAL_IMAGE ?= $(LOCAL_PROJECT)-backend:local
 LOCAL_STATE ?= $(CURDIR)/data/native
 REF ?= HEAD
+REPORT ?=
 
 help:
 	@echo 'make up                  Build and start safe local Compose stack (127.0.0.1:8080)'
@@ -356,7 +360,7 @@ restore-local:
 	.venv/bin/python scripts/local_backup.py restore --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --image "$(LOCAL_IMAGE)" --backup "$(BACKUP)" $(if $(DESTINATION),--destination "$(DESTINATION)",)
 
 verify-clean:
-	sh scripts/verify_clean_state.sh --ref "$(REF)"
+	sh scripts/verify_clean_state.sh --ref "$(REF)" $(if $(REPORT),--report "$(REPORT)",)
 
 test-del-05-runtime:
 	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -q tests/integration/runtime
@@ -374,14 +378,14 @@ test-del-05-tooling:
 # These targets operate in a git archive export, not a checkout. Git provenance
 # and no-generated-drift checks belong to the outer clean-state verifier.
 verify-del-05-offline-backend:
-	python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
-	python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
-	python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
-	python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
-	python -m mypy apps/api/src/marketing_agents
-	python scripts/verify_architecture_boundaries.py
-	python -m marketing_agents.workers.catalog_cli validate --root catalog/v1
-	python -m pytest -q
+	python -m scripts.del_05_offline_diagnostics ruff-format-source -- python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
+	python -m scripts.del_05_offline_diagnostics ruff-check-source -- python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
+	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
+	python -m scripts.del_05_offline_diagnostics mypy -- python -m mypy apps/api/src/marketing_agents
+	python -m scripts.del_05_offline_diagnostics architecture -- python scripts/verify_architecture_boundaries.py
+	python -m scripts.del_05_offline_diagnostics catalog -- python -m marketing_agents.workers.catalog_cli validate --root catalog/v1
+	python -m scripts.del_05_offline_diagnostics pytest -- python -m pytest -q -p scripts.del_05_offline_diagnostics
 
 verify-del-05-offline-web:
 	cd apps/web && node_modules/.bin/prettier --check .
