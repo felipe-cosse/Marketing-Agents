@@ -10,6 +10,29 @@
       "subject": "[API-06] Merge immutable approval control API"
     }
   },
+  "maintenance_merge_exceptions": {
+    "merge: CI-MAINT-01 repair retained refs and CI diagnostics": {
+      "base_commit": "992acb0736ec66126497bc0ba83efc13f9bec052",
+      "feature_subject": "ci: repair retained refs and failure diagnostics",
+      "allowed_paths": [
+        ".github/workflows/ci.yml",
+        "Makefile",
+        "apps/web/e2e/web-03-agent-details.spec.ts",
+        "apps/web/e2e/web-05-approvals.spec.ts",
+        "scripts/prepare_ci_history.py",
+        "scripts/verify_requirement_evidence.py",
+        "scripts/del_05_clean_state.py",
+        "scripts/del_05_offline_diagnostics.py",
+        "tests/tooling/test_prepare_ci_history.py",
+        "tests/tooling/test_ci_maintenance_history.py",
+        "tests/tooling/test_del_05_offline_diagnostics.py",
+        "docs/implementation/requirement-branch-workflow.md",
+        "docs/verification/requirement-policy.json",
+        "docs/verification/maintenance/CI-MAINT-01.md"
+      ],
+      "approval": "User explicitly approved on 2026-09-09 a narrowly scoped CI-maintenance exception, browser-test and diagnostic fixes, and publication of the 94 retained requirement branches. This approval permits only this exact-base maintenance merge; it neither completes a requirement nor waives any requirement evidence or branch checks."
+    }
+  },
   "protected_carrier_ids": ["DEL-08", "DEL-09", "EXEC-08"],
   "protected_path_globs": [
     "docs/verification/schema/**",

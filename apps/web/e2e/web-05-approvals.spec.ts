@@ -619,15 +619,18 @@ test("WEB-05 approval queue repeats exact immutable actions and refreshes a cohe
   ).toBeVisible();
   await expect(reviewPanel.getByRole("link", { name: RUN_ID })).toBeVisible();
   await expect(
-    reviewPanel.getByRole("link", { name: "Open authoritative timeline" }),
-  ).toHaveAttribute("href", `/api/v1/runs/${RUN_ID}/timeline`);
+    reviewPanel.getByRole("link", {
+      name: "Open sequence-ordered timeline",
+      exact: true,
+    }),
+  ).toHaveAttribute("href", `/runs/${RUN_ID}#timeline-title`);
   await expect(
     reviewPanel.getByRole("link", {
       name: "action.web-05.email-newsletter",
     }),
   ).toHaveAttribute(
     "href",
-    "/api/v1/external-actions/action.web-05.email-newsletter",
+    `/runs/${RUN_ID}#action-action.web-05.email-newsletter`,
   );
   await expect(
     reviewPanel.getByRole("link", { name: "step.web-05.newsletter" }),

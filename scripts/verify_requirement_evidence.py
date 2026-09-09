@@ -97,6 +97,7 @@ class HistoryResult:
     completed: list[str]
     missing: list[str]
     results: list[RequirementResult]
+    maintenance_merges: list[str] = field(default_factory=list)
 
 
 class GitRepo:
@@ -244,6 +245,72 @@ def legacy_merge_subject_exceptions(policy: dict[str, Any]) -> dict[str, tuple[s
         requirement_ids.add(requirement_id)
         parsed[commit_sha] = (requirement_id, subject)
     return parsed
+
+
+def maintenance_merge_exceptions(policy: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Parse explicit one-off maintenance approvals, never requirement waivers."""
+    raw = policy.get("maintenance_merge_exceptions", {})
+    if not isinstance(raw, dict):
+        raise EvidenceError("policy.maintenance_merge_exceptions: expected object")
+    parsed: dict[str, dict[str, Any]] = {}
+    bases: set[str] = set()
+    for subject, approval in raw.items():
+        label = f"policy.maintenance_merge_exceptions[{subject}]"
+        if (
+            not isinstance(subject, str)
+            or not re.fullmatch(r"merge: CI-MAINT-[0-9]{2} [^\r\n]+", subject)
+            or subject != subject.strip()
+            or len(subject) > 240
+            or MERGE_SUBJECT_RE.match(subject)
+        ):
+            raise EvidenceError(f"{label}: invalid exact maintenance merge subject")
+        if not isinstance(approval, dict):
+            raise EvidenceError(f"{label}: expected object")
+        _expect_keys(approval, {"base_commit", "feature_subject", "allowed_paths", "approval"}, set(), label)
+        base = approval["base_commit"]
+        if not isinstance(base, str) or not GIT_SHA1_RE.fullmatch(base):
+            raise EvidenceError(f"{label}: base must be a full lowercase commit SHA")
+        if base in bases:
+            raise EvidenceError(f"{label}: duplicate approved maintenance base")
+        feature_subject = approval["feature_subject"]
+        if (
+            not isinstance(feature_subject, str)
+            or not re.fullmatch(r"ci: [^\r\n]+", feature_subject)
+            or feature_subject != feature_subject.strip()
+            or len(feature_subject) > 240
+            or FEATURE_SUBJECT_RE.match(feature_subject)
+        ):
+            raise EvidenceError(f"{label}: invalid exact maintenance feature subject")
+        paths = _string_list(approval["allowed_paths"], f"{label}.allowed_paths", minimum=1)
+        for path in paths:
+            if (
+                path.startswith("/")
+                or any(part in {"", ".", "..", ".git"} for part in path.split("/"))
+                or any(character in path for character in "*?[]\\\r\n\t")
+            ):
+                raise EvidenceError(f"{label}: allowed_paths must be exact repository paths")
+        reason = approval["approval"]
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+            raise EvidenceError(f"{label}: approval record is required")
+        bases.add(base)
+        parsed[subject] = approval
+    return parsed
+
+
+def validate_maintenance_merge(repo: GitRepo, commit: Commit, approval: dict[str, Any]) -> None:
+    """Validate the bounded maintenance topology without touching requirement evidence."""
+    if len(commit.parents) != 2 or commit.parents[0] != approval["base_commit"]:
+        raise EvidenceError("maintenance merge must have two parents and its exact approved base")
+    base, feature = commit.parents
+    feature_commit = repo.commit(feature)
+    if feature_commit.parents != (base,) or feature_commit.subject != approval["feature_subject"]:
+        raise EvidenceError("maintenance must contain exactly one directly based approved feature commit")
+    if repo.tree(commit.sha) != repo.tree(feature):
+        raise EvidenceError("maintenance merge tree differs from the feature tree")
+    # Both sides of a rename must be in scope, including a deleted source path.
+    changed = set(filter(None, repo.output("diff", "--no-renames", "--name-only", base, feature).splitlines()))
+    if not changed or not changed <= set(approval["allowed_paths"]):
+        raise EvidenceError("maintenance changes must be nonempty and confined to approved exact paths")
 
 
 def _string_list(value: Any, label: str, *, minimum: int = 0, maximum: int = 64) -> list[str]:
@@ -728,11 +795,23 @@ def validate_history(
     matrix = load_matrix(root, repo, target)
     mainline = repo.first_parent_commits(baseline, target)
     legacy_exceptions = legacy_merge_subject_exceptions(policy)
+    maintenance_exceptions = maintenance_merge_exceptions(policy)
+    used_maintenance_exceptions: set[str] = set()
+    maintenance_commits: list[str] = []
     used_legacy_exceptions: set[str] = set()
     accepted_mainline_merge_shas: set[str] = set()
     seen: set[str] = set()
     topology: list[tuple[str, str, str, str]] = []
     for commit in mainline:
+        maintenance_approval = maintenance_exceptions.get(commit.subject)
+        if maintenance_approval is not None:
+            if commit.subject in used_maintenance_exceptions:
+                raise EvidenceError("duplicate approved maintenance merge")
+            validate_maintenance_merge(repo, commit, maintenance_approval)
+            used_maintenance_exceptions.add(commit.subject)
+            maintenance_commits.append(commit.sha)
+            accepted_mainline_merge_shas.add(commit.sha)
+            continue
         match = MERGE_SUBJECT_RE.match(commit.subject)
         if match:
             requirement_id = match.group(1).upper()
@@ -759,6 +838,17 @@ def validate_history(
             raise EvidenceError(f"{requirement_id}: merge tree differs from the feature tree")
         topology.append((requirement_id, base, feature, commit.sha))
         accepted_mainline_merge_shas.add(commit.sha)
+
+    for subject in set(maintenance_exceptions) - used_maintenance_exceptions:
+        approved_base = maintenance_exceptions[subject]["base_commit"]
+        resolved_base = repo.run("cat-file", "-t", approved_base, check=False)
+        if resolved_base.returncode or resolved_base.stdout.strip() != "commit":
+            raise EvidenceError(f"maintenance approval base must resolve to a commit: {subject}")
+        # A pending approval is valid while inspecting its base or an earlier
+        # first-parent snapshot. It cannot excuse skipping the approved merge.
+        earlier_mainline = repo.output("rev-list", "--first-parent", approved_base).splitlines()
+        if target not in earlier_mainline:
+            raise EvidenceError(f"unused maintenance merge approval after its base: {subject}")
 
     unused_candidates = set(legacy_exceptions) - used_legacy_exceptions
     current_main = repo.resolve("main")
@@ -817,7 +907,7 @@ def validate_history(
     missing = sorted(set(matrix) - set(completed))
     if missing and not allow_incomplete:
         raise EvidenceError(f"missing requirement merges: {', '.join(missing)}")
-    return HistoryResult(len(matrix), completed, missing, results)
+    return HistoryResult(len(matrix), completed, missing, results, maintenance_commits)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -872,6 +962,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"requirements={result.requirement_count} completed={len(result.completed)} "
                 f"missing={len(result.missing)}"
             )
+            if result.maintenance_merges:
+                print(f"approved_maintenance_merges={len(result.maintenance_merges)}")
             if result.missing:
                 print("missing=" + ",".join(result.missing))
         return 0

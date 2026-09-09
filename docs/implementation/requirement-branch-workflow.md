@@ -33,6 +33,37 @@ Documentation/evidence requirements such as acceptance and execution rows still
 receive real branches. Their commits add durable test evidence, verification
 records, or traceability status; empty commits are prohibited.
 
+## GitHub history checks
+
+Retained requirement branches must also be published to GitHub when CI is used;
+publishing only `main` includes the commits but not their branch names. Publish
+only reviewed requirement refs at their existing feature commit tips, without
+force-pushing or moving them. Historical branch pushes can trigger the workflow
+stored at each historical commit, so review the Actions impact before a bulk
+publication.
+
+The governance job uses a full-history checkout and then runs
+`python3 scripts/prepare_ci_history.py`. This copies fetched `origin/req/*` refs
+to the local `req/*` namespace required by `make verify-history`, and creates a
+local `main` from fetched `origin/main` for detached pull-request checkouts.
+It does not check out or move an existing branch, manufacture refs from merge
+parents, or change the requirement evidence verifier. Missing remote branches,
+local/remote conflicts, shallow clones, and non-commit refs fail closed. The
+existing verifier still rejects missing, duplicate, or wrong-tip requirement
+branches and invalid merge/evidence history.
+
+## Approved CI maintenance exception
+
+On 2026-09-09 the user approved one bounded maintenance merge for GitHub CI
+repair, including retained-branch preparation, stale WEB-03/WEB-05 assertions, and
+sanitized failure diagnostics. Its exact base, feature and merge subjects, and
+file allowlist are recorded in `docs/verification/requirement-policy.json`.
+It requires one nonempty feature commit directly on the approved base and a
+two-parent merge with an identical tree. Renamed source paths are checked too.
+The exception is not a requirement, does not change the 124-ID inventory or
+completion counts, and cannot excuse missing branches or requirement evidence.
+All other mainline commits still require the normal requirement protocol.
+
 ## Inventory
 
 The authoritative matrix currently contains 124 IDs:

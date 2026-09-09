@@ -26,6 +26,11 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+if __package__:
+    from scripts.del_05_offline_diagnostics import project_diagnostics
+else:
+    from del_05_offline_diagnostics import project_diagnostics
+
 REQUIRED = (
     "compose.yaml",
     "docker/api.Dockerfile",
@@ -379,31 +384,95 @@ class Verification:
             require(remaining > 0, "cleanup_deadline_exceeded")
             command_timeout = min(command_timeout, remaining)
         try:
-            result = subprocess.run(
-                args,
-                cwd=cwd or self.source or self.repository,
-                env=self.environment,
-                capture_output=True,
-                timeout=command_timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            self.report["commands"].append(
-                {"label": label, "status": "timeout", "timeout": command_timeout}
-            )
-            raise VerificationFailure(f"command_timeout:{label}") from None
-        self.report["commands"].append(
-            {
+            if label == "offline-backend":
+                result = self._offline_command(args, cwd=cwd, timeout=command_timeout)
+            else:
+                result = subprocess.run(
+                    args,
+                    cwd=cwd or self.source or self.repository,
+                    env=self.environment,
+                    capture_output=True,
+                    timeout=command_timeout,
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            entry = {
                 "label": label,
-                "argv": args,
-                "returncode": result.returncode,
-                "seconds": round(time.monotonic() - started, 3),
-                "stdout_sha256": hashlib.sha256(result.stdout).hexdigest(),
-                "stderr_sha256": hashlib.sha256(result.stderr).hexdigest(),
+                "status": "timeout",
+                "timeout": command_timeout,
+                "stdout_sha256": hashlib.sha256(exc.stdout or b"").hexdigest(),
+                "stderr_sha256": hashlib.sha256(exc.stderr or b"").hexdigest(),
             }
-        )
+            if label == "offline-backend":
+                entry["offline_diagnostics"] = project_diagnostics(
+                    exc.stdout, exc.stderr, self.source or self.repository
+                )
+            self.report["commands"].append(entry)
+            raise VerificationFailure(f"command_timeout:{label}") from None
+        except VerificationFailure as exc:
+            if label == "offline-backend":
+                stdout = getattr(exc, "stdout", b"")
+                stderr = getattr(exc, "stderr", b"")
+                self.report["commands"].append(
+                    {
+                        "label": label,
+                        "status": "interrupted",
+                        "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+                        "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+                        "offline_diagnostics": project_diagnostics(
+                            stdout, stderr, self.source or self.repository
+                        ),
+                    }
+                )
+            raise
+        entry = {
+            "label": label,
+            "argv": args,
+            "returncode": result.returncode,
+            "seconds": round(time.monotonic() - started, 3),
+            "stdout_sha256": hashlib.sha256(result.stdout).hexdigest(),
+            "stderr_sha256": hashlib.sha256(result.stderr).hexdigest(),
+        }
+        if label == "offline-backend":
+            entry["offline_diagnostics"] = project_diagnostics(
+                result.stdout, result.stderr, self.source or self.repository
+            )
+        self.report["commands"].append(entry)
         require(not check or result.returncode == 0, f"command_failed:{label}")
         return result
+
+    def _offline_command(
+        self, args: list[str], *, cwd: Path | None, timeout: float
+    ) -> subprocess.CompletedProcess:
+        # Anonymous, private temporary files keep partial evidence available when
+        # the aggregate SIGALRM interrupts subprocess.run. They are never named
+        # in reports or retained as artifacts; only the allowlisted projection
+        # and hashes survive. Existing execution/cleanup deadlines are unchanged.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            try:
+                result = subprocess.run(
+                    args,
+                    cwd=cwd or self.source or self.repository,
+                    env=self.environment,
+                    stdout=stdout,
+                    stderr=stderr,
+                    timeout=timeout,
+                    check=False,
+                )
+            except (subprocess.TimeoutExpired, VerificationFailure) as exc:
+                stdout.seek(0)
+                stderr.seek(0)
+                exc.stdout = getattr(exc, "stdout", None) or stdout.read()
+                exc.stderr = getattr(exc, "stderr", None) or stderr.read()
+                raise
+            stdout.seek(0)
+            stderr.seek(0)
+            return subprocess.CompletedProcess(
+                result.args,
+                result.returncode,
+                result.stdout if result.stdout is not None else stdout.read(),
+                result.stderr if result.stderr is not None else stderr.read(),
+            )
 
     def compose_command(
         self, label: str, *args: str, timeout: int = 300
