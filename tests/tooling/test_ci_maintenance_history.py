@@ -9,6 +9,9 @@ from tests.tooling.test_verify_requirement_evidence import MODULE, SyntheticRepo
 
 MERGE = "merge: CI-MAINT-01 repair retained refs and CI diagnostics"
 FEATURE = "ci: repair retained refs and failure diagnostics"
+SECOND_MERGE = "merge: CI-MAINT-02 isolate offline verification and record timings"
+SECOND_FEATURE = "ci: isolate offline verification and record timings"
+SECOND_BRANCH = "codex/ci-maintenance-two"
 
 
 class MaintenanceHistoryTests(unittest.TestCase):
@@ -30,23 +33,48 @@ class MaintenanceHistoryTests(unittest.TestCase):
     def write_policy(self, repo, approval, subject=MERGE):
         path = repo.root / MODULE.POLICY_PATH
         policy = json.loads(path.read_text())
-        policy["maintenance_merge_exceptions"] = {subject: approval}
+        policy.setdefault("maintenance_merge_exceptions", {})[subject] = approval
         path.write_text(json.dumps(policy))
 
-    def feature(self, repo, *, approval=None, extra_path=None, subject=FEATURE):
+    def feature(
+        self,
+        repo,
+        *,
+        approval=None,
+        extra_path=None,
+        subject=FEATURE,
+        merge_subject=MERGE,
+        branch="codex/ci-maintenance",
+        path="ci.txt",
+    ):
         approval = approval or self.approval(repo)
-        repo.git("switch", "-c", "codex/ci-maintenance")
-        self.write_policy(repo, approval)
-        (repo.root / "ci.txt").write_text("repair\n")
+        repo.git("switch", "-c", branch)
+        self.write_policy(repo, approval, merge_subject)
+        (repo.root / path).write_text("repair\n")
         if extra_path:
             (repo.root / extra_path).write_text("outside approval\n")
         repo.git("add", ".")
         repo.git("commit", "-m", subject)
         return approval
 
-    def merge(self, repo, subject=MERGE):
+    def merge(self, repo, subject=MERGE, *, branch="codex/ci-maintenance"):
         repo.git("switch", "main")
-        repo.git("merge", "--no-ff", "codex/ci-maintenance", "-m", subject)
+        repo.git("merge", "--no-ff", branch, "-m", subject)
+
+    def second_feature(self, repo, *, extra_path=None):
+        approval = self.approval(repo)
+        approval["feature_subject"] = SECOND_FEATURE
+        approval["allowed_paths"] = ["ci-budget.txt", str(MODULE.POLICY_PATH)]
+        self.feature(
+            repo,
+            approval=approval,
+            extra_path=extra_path,
+            subject=SECOND_FEATURE,
+            merge_subject=SECOND_MERGE,
+            branch=SECOND_BRANCH,
+            path="ci-budget.txt",
+        )
+        return approval
 
     def validate(self, repo, ref="main"):
         return MODULE.validate_history(
@@ -93,6 +121,114 @@ class MaintenanceHistoryTests(unittest.TestCase):
         )
         self.assertEqual([], earlier.completed)
         self.assertEqual([], earlier.maintenance_merges)
+
+    def test_distinct_sequential_approvals_preserve_requirements_and_first_approval(self):
+        repo = self.repository()
+        original = self.validate(repo)
+        retained_refs = repo.git(
+            "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/req/"
+        ).stdout
+        first_approval = self.feature(repo)
+        self.merge(repo)
+        first_merge = repo.git("rev-parse", "main").stdout.strip()
+        second_approval = self.second_feature(repo)
+        self.assertEqual(first_merge, second_approval["base_commit"])
+        self.assertNotEqual(first_approval["base_commit"], second_approval["base_commit"])
+        pending = self.validate(repo)
+        self.assertEqual([first_merge], pending.maintenance_merges)
+        self.merge(repo, SECOND_MERGE, branch=SECOND_BRANCH)
+        second_merge = repo.git("rev-parse", "main").stdout.strip()
+
+        result = self.validate(repo)
+        self.assertEqual(original.requirement_count, result.requirement_count)
+        self.assertEqual(original.completed, result.completed)
+        self.assertEqual(original.missing, result.missing)
+        self.assertEqual(original.results, result.results)
+        self.assertEqual([first_merge, second_merge], result.maintenance_merges)
+        self.assertEqual(
+            retained_refs,
+            repo.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/req/").stdout,
+        )
+        self.assertEqual(
+            {MERGE: first_approval, SECOND_MERGE: second_approval},
+            json.loads((repo.root / MODULE.POLICY_PATH).read_text())[
+                "maintenance_merge_exceptions"
+            ],
+        )
+        self.assertEqual(
+            {MERGE: first_approval},
+            json.loads(repo.git("show", f"{first_merge}:{MODULE.POLICY_PATH}").stdout)[
+                "maintenance_merge_exceptions"
+            ],
+        )
+        repo.git("update-ref", "-d", "refs/heads/req/test-01-control")
+        with self.assertRaisesRegex(MODULE.EvidenceError, "retained req/ branch"):
+            self.validate(repo)
+
+    def test_two_approvals_keep_all_historical_first_parent_snapshots_valid(self):
+        repo = self.repository()
+        requirement_merge = repo.git("rev-parse", "main").stdout.strip()
+        self.feature(repo)
+        self.merge(repo)
+        first_merge = repo.git("rev-parse", "main").stdout.strip()
+        self.second_feature(repo)
+        self.merge(repo, SECOND_MERGE, branch=SECOND_BRANCH)
+        second_merge = repo.git("rev-parse", "main").stdout.strip()
+
+        for ref, completed, maintenance in (
+            (repo.baseline, [], []),
+            (requirement_merge, ["TEST-01"], []),
+            (first_merge, ["TEST-01"], [first_merge]),
+            (second_merge, ["TEST-01"], [first_merge, second_merge]),
+        ):
+            with self.subTest(ref=ref):
+                result = MODULE.validate_history(
+                    repo.root,
+                    ref,
+                    allow_incomplete=True,
+                    check_branches=True,
+                    run_all=False,
+                    run_latest=False,
+                    run_witness=False,
+                )
+                self.assertEqual(1, result.requirement_count)
+                self.assertEqual(completed, result.completed)
+                self.assertEqual([] if completed else ["TEST-01"], result.missing)
+                self.assertEqual(maintenance, result.maintenance_merges)
+
+    def test_second_approval_cannot_reuse_first_merge_subject(self):
+        repo = self.repository()
+        self.feature(repo)
+        self.merge(repo)
+        self.second_feature(repo)
+        self.merge(repo, MERGE, branch=SECOND_BRANCH)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "duplicate approved maintenance"):
+            self.validate(repo)
+
+    def test_second_approval_does_not_inherit_first_path_allowlist(self):
+        repo = self.repository()
+        self.feature(repo)
+        self.merge(repo)
+        # ci.txt was approved for the first repair, not the second repair.
+        self.second_feature(repo, extra_path="ci.txt")
+        self.merge(repo, SECOND_MERGE, branch=SECOND_BRANCH)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "approved exact paths"):
+            self.validate(repo)
+
+    def test_second_approval_cannot_replace_first_history_exception(self):
+        repo = self.repository()
+        self.feature(repo)
+        self.merge(repo)
+        self.second_feature(repo)
+        path = repo.root / MODULE.POLICY_PATH
+        policy = json.loads(path.read_text())
+        del policy["maintenance_merge_exceptions"][MERGE]
+        path.write_text(json.dumps(policy))
+        repo.git("add", str(MODULE.POLICY_PATH))
+        repo.git("commit", "--amend", "--no-edit")
+        self.merge(repo, SECOND_MERGE, branch=SECOND_BRANCH)
+        with self.assertRaisesRegex(MODULE.EvidenceError, "not a requirement merge"):
+            self.validate(repo)
 
     def test_pending_approval_base_must_resolve_to_commit(self):
         repo = self.repository()

@@ -31,6 +31,21 @@
         "docs/verification/maintenance/CI-MAINT-01.md"
       ],
       "approval": "User explicitly approved on 2026-09-09 a narrowly scoped CI-maintenance exception, browser-test and diagnostic fixes, and publication of the 94 retained requirement branches. This approval permits only this exact-base maintenance merge; it neither completes a requirement nor waives any requirement evidence or branch checks."
+    },
+    "merge: CI-MAINT-02 isolate offline verification and record timings": {
+      "base_commit": "d28b40a317207cd24446657b01ed83fb41b2eeeb",
+      "feature_subject": "ci: isolate offline verification and record timings",
+      "allowed_paths": [
+        "scripts/del_05_clean_state.py",
+        "scripts/del_05_offline_diagnostics.py",
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_del_05_offline_diagnostics.py",
+        "tests/tooling/test_ci_maintenance_history.py",
+        "docs/implementation/requirement-branch-workflow.md",
+        "docs/verification/requirement-policy.json",
+        "docs/verification/maintenance/CI-MAINT-02.md"
+      ],
+      "approval": "User explicitly approved on 2026-09-10 CI-MAINT-02 and its scoped history exception: pause idle runtime services during offline tests, restore and verify them before browser checks, and add sanitized timing diagnostics, with all tests and deadlines unchanged. This approval permits only this exact-base maintenance merge; it preserves the earlier exception and does not complete requirements or waive evidence, branch, network, or approval controls."
     }
   },
   "protected_carrier_ids": ["DEL-08", "DEL-09", "EXEC-08"],

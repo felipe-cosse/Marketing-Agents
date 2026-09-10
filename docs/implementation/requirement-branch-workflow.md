@@ -52,7 +52,7 @@ local/remote conflicts, shallow clones, and non-commit refs fail closed. The
 existing verifier still rejects missing, duplicate, or wrong-tip requirement
 branches and invalid merge/evidence history.
 
-## Approved CI maintenance exception
+## Approved CI maintenance exceptions
 
 On 2026-09-09 the user approved one bounded maintenance merge for GitHub CI
 repair, including retained-branch preparation, stale WEB-03/WEB-05 assertions, and
@@ -63,6 +63,15 @@ two-parent merge with an identical tree. Renamed source paths are checked too.
 The exception is not a requirement, does not change the 124-ID inventory or
 completion counts, and cannot excuse missing branches or requirement evidence.
 All other mainline commits still require the normal requirement protocol.
+
+On 2026-09-10 the user separately approved CI-MAINT-02 on the exact CI-MAINT-01
+merge base. It stops the isolated deployment during the unchanged offline
+suites, restores and verifies the deployment before browser checks, and adds
+bounded sanitized timing diagnostics. Its separate exact subjects and file
+allowlist are recorded in the same policy. Neither this approval nor the first
+can be reused, combined into a broader scope, or substitute for requirement
+evidence. All test coverage, execution/cleanup deadlines, and production
+health/network controls remain unchanged.
 
 ## Inventory
 

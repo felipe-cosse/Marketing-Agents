@@ -166,6 +166,200 @@ def test_del_05_every_acquisition_command_forces_default_local_builder(tmp_path,
         assert arguments[arguments.index("--builder") + 1] == "default"
 
 
+@pytest.fixture
+def offline_sequence(tmp_path, monkeypatch):
+    """Exercise the real coordinator and Docker argv, without launching Docker."""
+    verifier = Verification(tmp_path, "HEAD")
+    verifier.source = tmp_path / "source"
+    verifier.source.mkdir()
+    verifier.temporary = tmp_path
+    verifier.source_hash = tree_fingerprint(verifier.source)
+    verifier.caller_status = b""
+    verifier.origin = "http://127.0.0.1:18080"
+    verifier.compose = ["docker", "compose", "--project-name", verifier.project]
+    calls = []
+    options = {}
+    deliveries = 0
+    monkeypatch.setattr(verifier, "prepare", lambda: None)
+
+    def record(label, arguments, **kwargs):
+        calls.append((label, arguments, kwargs))
+        if options.get("fail_at") == label:
+            raise VerificationFailure("injected_command_failure")
+
+    def command(label, arguments, **kwargs):
+        record(label, arguments, **kwargs)
+        output = b""
+        if label == "resolve-owned-web-container":
+            output = b"a" * 64
+        elif label == "verify-runtime-quiesced":
+            output = options.get("running", b"")
+        return subprocess.CompletedProcess(arguments, 0, output, b"")
+
+    def json_command(label, arguments):
+        record(label, arguments)
+        if label == "repeat-catalog-seed":
+            return {
+                "inserted": 0,
+                "updated": 0,
+                "deleted": 0,
+                "configuration_inserted": 0,
+                "configuration_preserved": 43,
+            }
+        if label in {"ready-session-counts", "verify-resumed-runtime"}:
+            return {
+                "session": {"modelMode": "mock", "networkPermission": False},
+                "counts": {
+                    "departments": 5,
+                    "functions": 12,
+                    "templates": 36,
+                    "instances": (
+                        42
+                        if label == "verify-resumed-runtime" and options.get("readiness_drift")
+                        else 43
+                    ),
+                },
+            }
+        return {"ok": True}
+
+    def snapshot(label):
+        record(label, [])
+        return {"key_fingerprint": "synthetic-fingerprint", "counts": {"receipts": 2}}
+
+    def fixture(action):
+        nonlocal deliveries
+        record("fixture-" + action, [])
+        if action == "prepare":
+            return {}
+        deliveries += 1
+        return {
+            "webhook_disposition": "created" if deliveries == 1 else "replayed",
+            **{
+                key: "synthetic-stable-id"
+                for key in (
+                    "webhook_receipt_id",
+                    "webhook_work_id",
+                    "webhook_run_id",
+                    "schedule_occurrence_id",
+                    "schedule_work_id",
+                    "schedule_run_id",
+                )
+            },
+        }
+
+    monkeypatch.setattr(verifier, "command", command)
+    monkeypatch.setattr(verifier, "json_command", json_command)
+    monkeypatch.setattr(verifier, "snapshot", snapshot)
+    monkeypatch.setattr(verifier, "fixture", fixture)
+    monkeypatch.setattr(
+        verifier, "inspect_runtime_network", lambda: record("inspect-runtime-network", [])
+    )
+    return verifier, calls, options
+
+
+def test_del_05_offline_suites_stop_runtime_and_restore_verified_runtime_before_browser(
+    offline_sequence,
+):
+    verifier, calls, _ = offline_sequence
+    verifier.execute()
+    labels = [label for label, _, _ in calls]
+    expected_order = (
+        "snapshot-after-restart",
+        "quiesce-runtime-for-offline",
+        "verify-runtime-quiesced",
+        "offline-backend",
+        "offline-frontend",
+        "resume-runtime-for-browser",
+        "verify-resumed-runtime",
+        "resolve-owned-web-container",
+        "production-browser-loopback-only",
+    )
+    positions = [labels.index(label) for label in expected_order]
+    assert positions == sorted(positions)
+    arguments = {label: (argv, kwargs) for label, argv, kwargs in calls}
+    assert arguments["quiesce-runtime-for-offline"][0] == [
+        *verifier.compose,
+        "stop",
+        *clean_state.RUNTIME_SERVICES,
+    ]
+    assert arguments["verify-runtime-quiesced"][0] == [
+        *verifier.compose,
+        "ps",
+        "--services",
+        "--status",
+        "running",
+        *clean_state.RUNTIME_SERVICES,
+    ]
+    assert arguments["resume-runtime-for-browser"] == (
+        [
+            *verifier.compose,
+            "start",
+            "--wait",
+            "--wait-timeout",
+            "180",
+            *clean_state.RUNTIME_SERVICES,
+        ],
+        {"timeout": 240},
+    )
+    network_checks = [i for i, label in enumerate(labels) if label == "inspect-runtime-network"]
+    assert len(network_checks) == 2
+    assert (
+        labels.index("resume-runtime-for-browser")
+        < network_checks[-1]
+        < labels.index("verify-resumed-runtime")
+    )
+    for suffix, target in (("backend", "backend"), ("frontend", "web")):
+        argv, kwargs = arguments["offline-" + suffix]
+        assert argv[argv.index("--network") + 1] == "none"
+        assert argv[-2:] == ["make", "verify-del-05-offline-" + target]
+        assert kwargs == {"timeout": 1800}
+    assert verifier.report["offline_runtime_isolation"] == {
+        "all_services_stopped": True,
+        "all_services_resumed": True,
+        "resumed_readiness_verified": True,
+    }
+    assert verifier.report["ok"]
+
+
+def test_del_05_running_runtime_blocks_offline_suites(offline_sequence):
+    verifier, calls, options = offline_sequence
+    options["running"] = b"api\n"
+    with pytest.raises(VerificationFailure, match="runtime_still_running"):
+        verifier.execute()
+    assert not any(label.startswith("offline-") for label, _, _ in calls)
+    assert not verifier.report["ok"]
+
+
+@pytest.mark.parametrize(
+    "label",
+    (
+        "quiesce-runtime-for-offline",
+        "verify-runtime-quiesced",
+        "offline-backend",
+        "offline-frontend",
+        "resume-runtime-for-browser",
+        "verify-resumed-runtime",
+    ),
+)
+def test_del_05_offline_or_resume_failure_never_runs_browser(offline_sequence, label):
+    verifier, calls, options = offline_sequence
+    options["fail_at"] = label
+    with pytest.raises(VerificationFailure, match="injected_command_failure"):
+        verifier.execute()
+    assert "production-browser-loopback-only" not in [name for name, _, _ in calls]
+    assert not verifier.report["ok"]
+
+
+def test_del_05_resumed_readiness_drift_never_runs_browser(offline_sequence):
+    verifier, calls, options = offline_sequence
+    options["readiness_drift"] = True
+    with pytest.raises(VerificationFailure, match="resumed_runtime_readiness_drift"):
+        verifier.execute()
+    assert "production-browser-loopback-only" not in [label for label, _, _ in calls]
+    assert verifier.report["offline_runtime_isolation"] == {"all_services_stopped": True}
+    assert not verifier.report["ok"]
+
+
 def test_del_05_execution_expiry_still_cleans_and_restores_signal_state(
     tmp_path, monkeypatch, capsys
 ):

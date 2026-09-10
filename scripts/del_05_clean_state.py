@@ -50,6 +50,7 @@ KEY = "/var/lib/marketing-agents/secrets/digest.key"
 API_SOCKET = "/var/run/marketing-agents/api.sock"
 VOLUMES = ("data", "local-secrets", "api-socket")
 BACKENDS = ("api", "run-worker", "scheduler-worker", "local-secret-init", "migrate-seed")
+RUNTIME_SERVICES = ("api", "web", "run-worker", "scheduler-worker")
 PROJECT_PATTERN = re.compile(r"^marketing-agents-del05-[0-9a-f]{16}$")
 PUBLIC_FIXTURE_HMAC = "del-05-public-test-signing-material-never-use-as-a-secret"
 EXECUTION_SECONDS = 1620
@@ -400,6 +401,7 @@ class Verification:
                 "label": label,
                 "status": "timeout",
                 "timeout": command_timeout,
+                "seconds": round(time.monotonic() - started, 3),
                 "stdout_sha256": hashlib.sha256(exc.stdout or b"").hexdigest(),
                 "stderr_sha256": hashlib.sha256(exc.stderr or b"").hexdigest(),
             }
@@ -417,6 +419,7 @@ class Verification:
                     {
                         "label": label,
                         "status": "interrupted",
+                        "seconds": round(time.monotonic() - started, 3),
                         "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
                         "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
                         "offline_diagnostics": project_diagnostics(
@@ -842,6 +845,15 @@ class Verification:
         )
         self.report["digest_key_fingerprint"] = after_restart["key_fingerprint"]
         self.phase("prebuilt-backend-and-frontend-no-network-verification")
+        # The standalone suites use their own temporary databases/processes.
+        # Stop this already-verified deployment so its readiness probes cannot
+        # repeatedly compile/inspect the catalog while those suites run.
+        self.compose_command("quiesce-runtime-for-offline", "stop", *RUNTIME_SERVICES)
+        running = self.compose_command(
+            "verify-runtime-quiesced", "ps", "--services", "--status", "running", *RUNTIME_SERVICES
+        ).stdout
+        require(not running.strip(), "runtime_still_running_during_offline_verification")
+        self.report["offline_runtime_isolation"] = {"all_services_stopped": True}
         self.run_offline(
             f"{self.project}-api-verification", ["make", "verify-del-05-offline-backend"], "backend"
         )
@@ -850,7 +862,21 @@ class Verification:
         )
         self.phase("scoped-loopback-browser-verification")
         self.compose_command(
-            "resume-workers-for-browser", "start", "run-worker", "scheduler-worker"
+            "resume-runtime-for-browser",
+            "start",
+            "--wait",
+            "--wait-timeout",
+            "180",
+            *RUNTIME_SERVICES,
+            timeout=240,
+        )
+        self.inspect_runtime_network()
+        resumed = self.json_command(
+            "verify-resumed-runtime", ["python3", helper, "ready", "--origin", self.origin]
+        )
+        require(resumed == self.report["startup"], "resumed_runtime_readiness_drift")
+        self.report["offline_runtime_isolation"].update(
+            {"all_services_resumed": True, "resumed_readiness_verified": True}
         )
         web_id = (
             self.compose_command("resolve-owned-web-container", "ps", "-q", "web")

@@ -4,6 +4,11 @@ The CLI wraps an existing command without changing its arguments or exit status.
 The same module can be loaded with pytest's ``-p`` option. Only fixed protocol
 fields, source-declared test names (never parameter IDs), and known exception
 classes survive the outer verifier's projection. Raw output remains hash-only.
+Integer timings use monotonic milliseconds: stages measure their wrapped command;
+tests start relative to pytest configuration and include setup/call/teardown.
+Progress reports completed items separately from existing outcome/phase counts.
+Only the latest and eight slowest distinct source tests are retained, taking the
+longest parameter case per source node. An active start is not a live stopwatch.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PREFIX = "DEL05_OFFLINE_DIAGNOSTIC "
@@ -51,6 +57,9 @@ MAX_FAILURES = 64
 MAX_NODE_BYTES = 512
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_COUNT = 1_000_000
+MAX_ELAPSED_MS = 24 * 60 * 60 * 1000
+MAX_SLOW_TESTS = 8
+COUNT_FIELDS = ("completed", "passed", "failed", "skipped", "collection_errors")
 
 
 def source_test_nodes(root: Path) -> frozenset[str]:
@@ -102,6 +111,37 @@ def _bytes(value: bytes | str | None) -> bytes:
     return value.encode("utf-8", errors="replace") if isinstance(value, str) else b""
 
 
+def _bounded_integer(value: object, maximum: int) -> int | None:
+    # bool is an int subclass; floats (including NaN/infinity) are never timings.
+    return value if type(value) is int and 0 <= value <= maximum else None
+
+
+def _progress(event: dict) -> dict:
+    progress = {}
+    for field in COUNT_FIELDS:
+        if (count := _bounded_integer(event.get(field), MAX_COUNT)) is not None:
+            progress[field] = count
+    if (elapsed := _bounded_integer(event.get("session_elapsed_ms"), MAX_ELAPSED_MS)) is not None:
+        progress["session_elapsed_ms"] = elapsed
+    return progress
+
+
+def _test_timing(event: dict, node: str) -> dict | None:
+    values = {
+        field: _bounded_integer(event.get(field), MAX_ELAPSED_MS)
+        for field in ("started_ms", "elapsed_ms", "session_elapsed_ms")
+    }
+    if any(value is None for value in values.values()):
+        return None
+    started = values["started_ms"]
+    elapsed = values["elapsed_ms"]
+    finished = values["session_elapsed_ms"]
+    # Independent millisecond rounding permits a one-millisecond discrepancy.
+    if started > finished or elapsed > finished - started + 1:
+        return None
+    return {"node_id": node, "started_ms": started, "elapsed_ms": elapsed, "finished_ms": finished}
+
+
 def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, root: Path) -> dict:
     """Parse a bounded tail and copy only validated protocol fields, never text."""
     allowed = source_test_nodes(root)
@@ -135,6 +175,10 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                 continue
             if kind == "stage_started":
                 stages[stage] = {"stage": stage, "status": "running"}
+                if (
+                    elapsed := _bounded_integer(event.get("elapsed_ms"), MAX_ELAPSED_MS)
+                ) is not None:
+                    stages[stage]["elapsed_ms"] = elapsed
                 result["last_stage"] = stage
             elif kind == "stage_finished":
                 code = event.get("returncode")
@@ -144,17 +188,39 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                         "status": "passed" if code == 0 else "failed",
                         "returncode": code,
                     }
+                    if (
+                        elapsed := _bounded_integer(event.get("elapsed_ms"), MAX_ELAPSED_MS)
+                    ) is not None:
+                        stages[stage]["elapsed_ms"] = elapsed
                     result["last_stage"] = stage
             elif stage == "pytest" and kind in {"test_started", "test_finished", "test_failed"}:
                 node = safe_node(event.get("node_id"), allowed)
                 if node is None:
                     continue
                 result["last_stage"] = "pytest"
+                if progress := _progress(event):
+                    result["pytest_progress"] = progress
                 if kind == "test_started":
                     result["active_test"] = node
+                    result.pop("active_test_started_ms", None)
+                    if (
+                        started := _bounded_integer(event.get("session_elapsed_ms"), MAX_ELAPSED_MS)
+                    ) is not None:
+                        result["active_test_started_ms"] = started
                 elif kind == "test_finished":
                     if result.get("active_test") == node:
                         result.pop("active_test", None)
+                        result.pop("active_test_started_ms", None)
+                    if (timing := _test_timing(event, node)) is not None:
+                        result["latest_test"] = timing
+                        slowest = result.setdefault("slowest_tests", [])
+                        prior = next((item for item in slowest if item["node_id"] == node), None)
+                        if prior is None or timing["elapsed_ms"] > prior["elapsed_ms"]:
+                            if prior is not None:
+                                slowest.remove(prior)
+                            slowest.append(timing)
+                            slowest.sort(key=lambda item: (-item["elapsed_ms"], item["node_id"]))
+                            del slowest[MAX_SLOW_TESTS:]
                 else:
                     phase = event.get("phase")
                     exception = event.get("exception")
@@ -177,9 +243,13 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                     result["failed_tests"].append(
                         {"node_id": node, "phase": phase, "exception": exception}
                     )
-            elif stage == "pytest" and kind == "pytest_finished":
+            elif stage == "pytest" and kind in {"pytest_progress", "pytest_finished"}:
+                if progress := _progress(event):
+                    result["pytest_progress"] = progress
+                if kind != "pytest_finished":
+                    continue
                 summary = {}
-                for key in ("passed", "failed", "skipped", "collection_errors"):
+                for key in COUNT_FIELDS:
                     count = event.get(key)
                     if type(count) is int and 0 <= count <= MAX_COUNT:
                         summary[key] = count
@@ -210,26 +280,58 @@ def _exception_class(report: object) -> str:
 
 
 _allowed_nodes: frozenset[str] = frozenset()
-_counts = {"passed": 0, "failed": 0, "skipped": 0, "collection_errors": 0}
+_counts = dict.fromkeys(COUNT_FIELDS, 0)
+_session_started_ns = 0
+_active_test: tuple[str, int] | None = None
+
+
+def _elapsed_ms(started_ns: int, now_ns: int | None = None) -> int:
+    elapsed = ((time.monotonic_ns() if now_ns is None else now_ns) - started_ns) // 1_000_000
+    return max(0, min(elapsed, MAX_ELAPSED_MS))
+
+
+def _current_progress(now_ns: int | None = None) -> dict:
+    return {
+        **{field: min(count, MAX_COUNT) for field, count in _counts.items()},
+        "session_elapsed_ms": _elapsed_ms(_session_started_ns, now_ns),
+    }
 
 
 def pytest_configure(config) -> None:
-    global _allowed_nodes
+    global _allowed_nodes, _session_started_ns, _active_test
+    _session_started_ns = time.monotonic_ns()
+    _active_test = None
     _allowed_nodes = source_test_nodes(Path(config.rootpath))
     for key in _counts:
         _counts[key] = 0
+    _emit("pytest_progress", "pytest", **_current_progress())
 
 
 def pytest_runtest_logstart(nodeid, location) -> None:
+    global _active_test
     del location
+    now = time.monotonic_ns()
+    _active_test = (nodeid, now)
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
-        _emit("test_started", "pytest", node_id=node)
+        _emit("test_started", "pytest", node_id=node, **_current_progress(now))
 
 
 def pytest_runtest_logfinish(nodeid, location) -> None:
+    global _active_test
     del location
+    now = time.monotonic_ns()
+    _counts["completed"] += 1
+    timing = {}
+    if _active_test is not None and _active_test[0] == nodeid:
+        timing = {
+            "started_ms": _elapsed_ms(_session_started_ns, _active_test[1]),
+            "elapsed_ms": _elapsed_ms(_active_test[1], now),
+        }
+    _active_test = None
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
-        _emit("test_finished", "pytest", node_id=node)
+        _emit("test_finished", "pytest", node_id=node, **timing, **_current_progress(now))
+    else:
+        _emit("pytest_progress", "pytest", **_current_progress(now))
 
 
 def pytest_runtest_logreport(report) -> None:
@@ -242,6 +344,7 @@ def pytest_runtest_logreport(report) -> None:
                 node_id=node,
                 phase=report.when,
                 exception=_exception_class(report),
+                **_current_progress(),
             )
     elif report.skipped:
         _counts["skipped"] += 1
@@ -259,12 +362,13 @@ def pytest_collectreport(report) -> None:
                 node_id=node,
                 phase="collection",
                 exception=_exception_class(report),
+                **_current_progress(),
             )
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     del session, exitstatus
-    _emit("pytest_finished", "pytest", **_counts)
+    _emit("pytest_finished", "pytest", **_current_progress())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -275,12 +379,13 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("an existing gate command is required")
-    _emit("stage_started", args.stage)
+    started = time.monotonic_ns()
+    _emit("stage_started", args.stage, elapsed_ms=0)
     try:
         code = subprocess.run(command, check=False).returncode
     except OSError:
         code = 127
-    _emit("stage_finished", args.stage, returncode=code)
+    _emit("stage_finished", args.stage, returncode=code, elapsed_ms=_elapsed_ms(started))
     return code if code >= 0 else 128 - code
 
 
