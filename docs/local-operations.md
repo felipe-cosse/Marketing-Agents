@@ -1,5 +1,10 @@
 # DEL-05 local operations
 
+Claim: **Implemented and verified** within the historical
+[DEL-05 evidence](verification/requirements/DEL-05.md), not a claim that current
+full-release acceptance is green. [Operations](operations.md) is the operator
+entry point; [verification](verification.md) records current results and limits.
+
 ## Startup and storage
 
 `make up` builds the digest-pinned Python/Node/nginx images from frozen uv/pnpm

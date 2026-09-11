@@ -318,6 +318,13 @@ verify-requirement:
 
 verify-governance: format-check verify-source test-source test-tooling verify-architecture verify-history
 
+.PHONY: verify-docs test-del-06-docs
+verify-docs:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_product_docs.py
+
+test-del-06-docs: verify-docs
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest tests.tooling.test_del_06_product_docs
+
 verify-backend: format-check lint typecheck test-backend
 
 verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-unit web-test-demo-02-unit web-test-demo-03-unit web-test-demo-04-unit web-test-demo-05-unit web-test-web-01-unit web-test-web-01-witness web-test-orch-01-unit web-test-orch-01-witness web-test-arch-02-unit web-test-arch-02-witness web-test-arch-02-build web-test-arch-08-unit web-test-web-02-unit web-test-web-02-witness web-test-web-03-unit web-test-web-03-witness web-test-web-04-unit web-test-web-04-witness web-test-web-05-unit web-test-web-05-witness web-test-web-06-unit web-test-web-06-witness web-test-web-07-unit web-test-web-07-witness web-test-web-08-unit web-test-web-08-witness web-test-web-09-unit web-test-web-09-witness web-build
