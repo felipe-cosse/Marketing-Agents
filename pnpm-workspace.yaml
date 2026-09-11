@@ -1,5 +1,6 @@
 packages:
   - apps/web
+  - tools/api-contract
 
 autoInstallPeers: false
 confirmModulesPurge: false

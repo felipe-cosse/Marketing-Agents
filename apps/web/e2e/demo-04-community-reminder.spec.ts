@@ -1,5 +1,5 @@
 // DEMO-04 browser evidence exercises the production build and live discovery contract.
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "./fixtures";
 
 import { installPlaywrightNetworkGuard } from "../../../scripts/browser-network-policy.mjs";
 

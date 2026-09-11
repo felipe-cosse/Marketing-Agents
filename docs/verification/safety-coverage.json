@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "description": "DEL-07 requires complete statement and measured branch coverage for this explicit safety-critical inventory. Counts and executable evidence, not rounded percentages, determine success. This policy does not prove semantic test quality or authenticate a supplied report.",
+  "required_modules": [
+    "application/policies/approval_authorization.py",
+    "application/policies/runtime_guard.py",
+    "application/policies/write_authorization.py",
+    "application/services/approval_boundaries.py",
+    "application/services/approval_decisions.py",
+    "application/services/approval_integrity.py",
+    "application/services/external_action_dispatcher.py",
+    "domain/action_hash.py",
+    "domain/action_idempotency.py",
+    "domain/approval.py",
+    "domain/canonical_json.py",
+    "domain/plan_hash.py",
+    "domain/run_lifecycle.py",
+    "domain/schema_hash.py",
+    "domain/step_lifecycle.py",
+    "infrastructure/adapters/connectors/dispatch.py",
+    "security/approval_digest.py"
+  ],
+  "required_coverage": {
+    "statements": 100,
+    "branches": 100
+  },
+  "exclusion_exceptions": [
+    {
+      "module": "domain/approval.py",
+      "source": "        else:  # pragma: no cover - exact enum exhaustiveness\n            raise AssertionError(\"unhandled approval status\")\n",
+      "sha256": "cccfc33a13dd95549a89491fe39dcdcb21ac4641892c9db284baa5f067a9bc2f",
+      "reason": "Pre-existing two-line fail-closed fallback after exact ApprovalStatus validation and exhaustive handling of every enum member. These two source-pinned lines are excluded from measured coverage, not claimed exercised. No other exclusions are accepted; changing this exception requires a reviewed policy/checker change."
+    }
+  ]
+}

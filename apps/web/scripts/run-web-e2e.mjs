@@ -5,24 +5,22 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  BROWSER_RUNNERS,
+  readBrowserInventory,
+} from "./browser-evidence-inventory.mjs";
+
 const scriptsRoot = dirname(fileURLToPath(import.meta.url));
-for (const script of [
-  "run-web-01-e2e.mjs",
-  "run-web-02-e2e.mjs",
-  "run-web-03-e2e.mjs",
-  "run-web-04-e2e.mjs",
-  "run-web-05-e2e.mjs",
-  "run-web-06-e2e.mjs",
-  "run-web-07-e2e.mjs",
-  "run-web-08-e2e.mjs",
-  "run-web-09-e2e.mjs",
-  "run-arch-02-e2e.mjs",
-  "run-demo-01-e2e.mjs",
-  "run-demo-02-e2e.mjs",
-  "run-demo-03-e2e.mjs",
-  "run-demo-04-e2e.mjs",
-  "run-demo-05-e2e.mjs",
-]) {
+try {
+  const inventory = readBrowserInventory(resolve(scriptsRoot, ".."));
+  process.stdout.write(
+    `Browser inventory: ${String(inventory.specCount)} specs, ${String(inventory.runnerCount)} unfiltered runners.\n`,
+  );
+} catch (error) {
+  process.stderr.write(`Frontend browser inventory failed: ${error.message}\n`);
+  process.exit(2);
+}
+for (const script of BROWSER_RUNNERS) {
   const result = spawnSync(process.execPath, [resolve(scriptsRoot, script)], {
     stdio: "inherit",
     env: process.env,

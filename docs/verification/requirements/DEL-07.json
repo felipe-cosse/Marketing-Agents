@@ -1,0 +1,232 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-07",
+  "matrix_statement_sha256": "d602b798cb34f15abeffa388006d3396a87343bf89e5132847d687dc69780286",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/openapi.json",
+      "apps/api/src/marketing_agents/application/services/approval_boundaries.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/web/config/*network*",
+      "apps/web/config/networkIsolation.test.ts",
+      "apps/web/config/networkTransports.test.ts",
+      "apps/web/e2e/*.spec.ts",
+      "apps/web/e2e/fixtures.ts",
+      "apps/web/eslint.config.js",
+      "apps/web/playwright.config.ts",
+      "apps/web/scripts/browser-evidence-inventory.mjs",
+      "apps/web/scripts/run-browser-network-canary.mjs",
+      "apps/web/scripts/run-web-e2e.mjs",
+      "apps/web/src/api/generated/schema.ts",
+      "apps/web/src/api/localSession.ts",
+      "apps/web/src/test/networkIsolation.ts",
+      "apps/web/src/test/setup.ts",
+      "docker/web.Dockerfile",
+      "docs/testing.md",
+      "docs/verification.md",
+      "docs/verification/safety-coverage.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "scripts/browser-network-policy.mjs",
+      "scripts/browser-network-policy.d.mts",
+      "scripts/node-network-guard.mjs",
+      "scripts/node-network-guard.d.mts",
+      "scripts/check_safety_coverage.py",
+      "scripts/export_openapi.py",
+      "scripts/verify_local.py",
+      "scripts/verify_repository_text.py",
+      "tests/contract/test_del_07_openapi_snapshot.py",
+      "tests/network/browser_network_policy.test.mjs",
+      "tests/network/node_network_guard.test.mjs",
+      "tests/network/web_e2e_inventory.test.mjs",
+      "tests/tooling/test_del_07_*.py",
+      "tests/unit/application/test_del_07_*.py",
+      "tests/unit/domain/test_del_07_*.py",
+      "tools/api-contract/*",
+      "docs/verification/requirements/DEL-07.json",
+      "docs/verification/requirements/DEL-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "implementation", "one_of": ["scripts/verify_local.py"]},
+      {"kind": "implementation", "one_of": ["scripts/check_safety_coverage.py"]},
+      {"kind": "implementation", "one_of": ["scripts/node-network-guard.mjs"]},
+      {"kind": "implementation", "one_of": ["apps/web/e2e/fixtures.ts"]},
+      {"kind": "implementation", "one_of": ["tools/api-contract/generate.mjs"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_del_07_local_verification.py"]},
+      {"kind": "test", "one_of": ["tests/unit/domain/test_del_07_lifecycle_invariants.py"]},
+      {"kind": "test", "one_of": ["tests/unit/application/test_del_07_dispatch_defensive_contracts.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "ordered-source-preserving-local-verification",
+      "type": "contract",
+      "statement": "The local runner executes catalog-first serial bounded gates, uses fresh external coverage storage, inherits offline/frozen dependency policy, fails on missing or failing gates and source drift, and records sanitized status. Acceptance requires exact committed source independently of Git index hints before adding the existing clean-state and paired-backup gates.",
+      "test_refs": ["tests/tooling/test_del_07_local_verification.py"]
+    },
+    {
+      "id": "exhaustive-safety-branch-policy",
+      "type": "negative_control",
+      "statement": "Measured transition, canonical hash, approval and dispatch modules must satisfy exact statement and branch counters for all 17 selected files. Missing, partial, malformed or stale-shaped reports and new exclusions fail. Real invariant, stale-state and corrupt-port negative cases exercise defensive guards; only the explicitly pinned pre-existing two-line exhaustive-enum fallback is excluded.",
+      "test_refs": [
+        "tests/tooling/test_del_07_safety_coverage.py",
+        "tests/unit/domain/test_del_07_approval_invariants.py",
+        "tests/unit/domain/test_del_07_canonical_hashes.py",
+        "tests/unit/domain/test_del_07_lifecycle_invariants.py",
+        "tests/unit/application/test_del_07_approval_decision_faults.py",
+        "tests/unit/application/test_del_07_approval_safety.py",
+        "tests/unit/application/test_del_07_boundary_snapshot_guards.py",
+        "tests/unit/application/test_del_07_boundary_replay_guards.py",
+        "tests/unit/application/test_del_07_connector_dispatch_guards.py",
+        "tests/unit/application/test_del_07_dispatch_admission_guards.py",
+        "tests/unit/application/test_del_07_dispatch_completion_guards.py",
+        "tests/unit/application/test_del_07_dispatch_defensive_contracts.py"
+      ]
+    },
+    {
+      "id": "frontend-real-network-denial",
+      "type": "negative_control",
+      "statement": "The actual Vitest setup blocks real socket, HTTP, DNS, TLS, UDP and fetch transports, including loopback and Unix sockets, while permitting explicit in-memory mocks. Caught violations still fail teardown. Stub delegates installed before negative controls prevent real egress even when a guard is broken; restoration and named ESM bindings are tested.",
+      "test_refs": [
+        "tests/network/node_network_guard.test.mjs",
+        "apps/web/config/networkIsolation.test.ts",
+        "apps/web/config/networkTransports.test.ts"
+      ]
+    },
+    {
+      "id": "complete-guarded-browser-inventory",
+      "type": "journey",
+      "statement": "The browser aggregate owns every one of the 15 local journey specs exactly once and rejects missing, empty, unowned or filtered selections. The automatic context fixture enforces configured loopback HTTP/WebSocket origins with service workers blocked. Actual Chromium canaries use owned loopback tripwires to verify blocked traffic never reaches its destination, and keep an approved in-memory route control.",
+      "test_refs": [
+        "tests/network/web_e2e_inventory.test.mjs",
+        "tests/network/browser_network_policy.test.mjs",
+        "apps/web/config/browser-network-canary.fixture.ts"
+      ]
+    },
+    {
+      "id": "generated-api-contract-drift-control",
+      "type": "contract",
+      "statement": "The real API factory exports deterministic metadata without developer settings or state. Pinned isolated OpenAPI tooling generates the snapshot and frontend schema with no remote references or network. Check mode rejects drift without overwriting, retains numeric bounds, and the actual frontend session type consumes the generated contract without weakening runtime validation or CSRF secrecy.",
+      "test_refs": [
+        "tests/contract/test_del_07_openapi_snapshot.py",
+        "tools/api-contract/generate.test.mjs"
+      ]
+    },
+    {
+      "id": "repository-text-and-artifact-integrity",
+      "type": "negative_control",
+      "statement": "Offline repository text checks reject invalid encoding, whitespace, duplicate JSON/YAML keys, broken local links and unsafe external URL syntax without fetching. Existing source provenance, architecture, product-documentation, retained-history and tracked-secret checks remain separate hard gates. Original reference inputs and protected governance sources are preserved.",
+      "test_refs": ["tests/tooling/test_del_07_repository_text.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-07-backend",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-07-backend", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": ["ordered-source-preserving-local-verification", "exhaustive-safety-branch-policy"]
+    },
+    {
+      "id": "del-07-tooling",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-07-tooling", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "not_required",
+      "covers": ["ordered-source-preserving-local-verification", "exhaustive-safety-branch-policy", "complete-guarded-browser-inventory", "generated-api-contract-drift-control", "repository-text-and-artifact-integrity"]
+    },
+    {
+      "id": "del-07-node-network-witness",
+      "runner": "argv",
+      "argv": ["node", "--test", "tests/network/node_network_guard.test.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["frontend-real-network-denial"]
+    },
+    {
+      "id": "del-07-browser-policy",
+      "runner": "argv",
+      "argv": ["node", "--test", "tests/network/browser_network_policy.test.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["complete-guarded-browser-inventory"]
+    },
+    {
+      "id": "del-07-repository-and-api",
+      "runner": "argv",
+      "argv": ["make", "-j1", "verify-repository", "api-contract-check", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": ["generated-api-contract-drift-control", "repository-text-and-artifact-integrity"]
+    },
+    {
+      "id": "del-07-frontend-static",
+      "runner": "argv",
+      "argv": ["make", "-j1", "web-format-check", "web-lint", "web-typecheck", "web-build", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": ["generated-api-contract-drift-control", "frontend-real-network-denial", "complete-guarded-browser-inventory"]
+    },
+    {
+      "id": "del-07-frontend-units",
+      "runner": "argv",
+      "argv": ["make", "-j1", "web-test", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "deny",
+      "covers": ["frontend-real-network-denial", "generated-api-contract-drift-control"]
+    },
+    {
+      "id": "del-07-browser-journeys",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-e2e", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": ["complete-guarded-browser-inventory"]
+    },
+    {
+      "id": "del-07-clean-state",
+      "runner": "argv",
+      "argv": ["make", "-j1", "verify-clean", "REF=HEAD", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["ordered-source-preserving-local-verification", "complete-guarded-browser-inventory", "frontend-real-network-denial"]
+    },
+    {
+      "id": "del-07-paired-backup",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-05-compose-backup", "PYTHON=.venv/bin/python"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["ordered-source-preserving-local-verification"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["scripts/node-network-guard.mjs"],
+    "gate_id": "del-07-node-network-witness"
+  },
+  "limitations": [
+    "GitHub CI remains manually disabled at user direction. No workflow is removed, rerun or re-enabled; the separate CI repair branch is not part of DEL-07.",
+    "The only permitted coverage exclusion is the explicit source-pinned two-line approval exhaustive-enum fallback. Optional PostgreSQL skips are not compatibility passes; no live-provider delivery is claimed.",
+    "Node and browser guards are application-level test instrumentation, not an operating-system firewall against arbitrary child tools. Backend and frontend clean-export suites additionally run in network-disabled Docker containers after acquisition.",
+    "Browser service workers and context reuse are unsupported; automatic redirect responses are denied, including same-origin redirects. This bounded local journey policy does not claim general browser proxy or production network isolation.",
+    "The API generator uses a separate TypeScript 5.9.3 tooling workspace; the web application remains on TypeScript 6.0.3. Only its session response type is newly connected to generated schemas, not all existing handwritten frontend DTOs.",
+    "Fresh exact-source verification results, skipped tests, timeout or cleanup failures must be recorded before this requirement is marked verified. Development coverage files and earlier browser runs do not substitute for the final aggregate.",
+    "Docker acquisition may use external registries. Scoped backup artifacts contain secrets and stay outside evidence. Clean-state deadlines and resource cleanup checks remain unchanged; a local test pass does not waive them."
+  ]
+}

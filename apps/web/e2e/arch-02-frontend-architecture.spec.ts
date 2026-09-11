@@ -1,6 +1,6 @@
 // ARCH-02 browser evidence proves one accessible graph or semantic tree in the production frontend.
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page, type Response } from "@playwright/test";
+import { expect, test, type Page, type Response } from "./fixtures";
 
 interface HierarchyBody {
   readonly counts: {

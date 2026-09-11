@@ -1,5 +1,5 @@
 // WEB-07 browser evidence exercises the production responsive hierarchy against the real local catalog API.
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "./fixtures";
 
 interface HierarchyInstance {
   readonly id: string;

@@ -141,7 +141,7 @@ Allowed status values:
 | DEL-04 | Migrations and repeatable seed. | 04 | Alembic/seeder | Fresh/reseed tests | verified |
 | DEL-05 | One-command local startup; Docker if useful. | 15 | Compose/Makefile | `make verify-clean` | verified |
 | DEL-06 | README, architecture, assumptions, security docs. | 15 | Required docs | Documentation checklist | verified |
-| DEL-07 | Required unit/catalog/API/state/idempotency/approval/adapter/frontend tests. | 14 | Full test tree | `make verify` | planned |
+| DEL-07 | Required unit/catalog/API/state/idempotency/approval/adapter/frontend tests. | 14 | Full test tree | `make verify` | verified |
 | DEL-08 | Format/lint/type/test task runner commands. | 01, 14, 15 | Makefile/configs | Static gates | implemented |
 | DEL-09 | History verification accepts only explicitly pinned legacy merge-subject exceptions. | 14, 15 | Evidence verifier/policy | Pinned exception tooling tests | verified |
 

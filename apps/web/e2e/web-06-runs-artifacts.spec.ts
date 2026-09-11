@@ -5,7 +5,7 @@ import {
   type Page,
   type Request,
   type TestInfo,
-} from "@playwright/test";
+} from "./fixtures";
 
 type JsonObject = Record<string, unknown>;
 

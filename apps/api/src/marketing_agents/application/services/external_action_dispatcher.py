@@ -168,7 +168,7 @@ class ExternalActionDispatcher:
             or authorization is None
             or permit is None
             or max_output_bytes is None
-        ):  # pragma: no cover - return contract invariant
+        ):
             raise AssertionError("dispatch call-start transaction returned an invalid result")
 
         remaining_seconds = (permit.call_deadline_at - self._dependencies.utc_now()).total_seconds()
@@ -967,7 +967,7 @@ class ExternalActionDispatcher:
             return _terminal_dispatch_result(snapshot)
         now = self._dependencies.utc_now()
         lease = snapshot.lease
-        if lease is None:  # pragma: no cover - domain invariant
+        if lease is None:
             raise ExternalActionDispatchError(
                 "recovery_call_authority_invalid",
                 "dispatching action lacks its exact recovery lease",
@@ -975,7 +975,7 @@ class ExternalActionDispatcher:
         recovery_at = lease.expires_at
         if snapshot.call_started_at is not None:
             call_deadline_at = snapshot.call_deadline_at
-            if call_deadline_at is None:  # pragma: no cover - domain invariant
+            if call_deadline_at is None:
                 raise ExternalActionDispatchError(
                     "recovery_call_authority_invalid",
                     "dispatching action lacks its exact provider-call deadline",
@@ -1001,12 +1001,12 @@ class ExternalActionDispatcher:
         now: datetime,
     ) -> ExternalActionDispatchResult | None:
         lease = snapshot.lease
-        if lease is None:  # pragma: no cover - domain invariant
+        if lease is None:
             return None
         recovery_at = lease.expires_at
         if snapshot.call_started_at is not None:
             call_deadline_at = snapshot.call_deadline_at
-            if call_deadline_at is None:  # pragma: no cover - domain invariant
+            if call_deadline_at is None:
                 raise ExternalActionDispatchError(
                     "recovery_call_authority_invalid",
                     "stale action lacks its exact provider-call deadline",
@@ -1078,7 +1078,7 @@ class ExternalActionDispatcher:
             conclusion = "pre_call_expired"
         elif decision is StaleActionRecoveryDecision.RETRY_PROVIDER_IDEMPOTENT:
             conclusion = "provider_retry"
-        else:  # pragma: no cover - exhaustive fail-closed enum guard
+        else:
             raise ExternalActionDispatchError(
                 "recovery_decision_invalid",
                 "stale recovery returned an unsupported decision",
@@ -1112,7 +1112,7 @@ class ExternalActionDispatcher:
             if current != snapshot:
                 return _terminal_dispatch_result(current)
             lease = current.lease
-            if lease is None:  # pragma: no cover - domain invariant
+            if lease is None:
                 raise ExternalActionDispatchError(
                     "recovery_call_authority_invalid",
                     "terminal action lacks its exact provider-call lease",
@@ -1311,7 +1311,7 @@ class ExternalActionDispatcher:
         conclusion: str,
     ) -> ExternalAction | None:
         lease = snapshot.lease
-        if lease is None:  # pragma: no cover - domain invariant
+        if lease is None:
             return None
         async with self._dependencies.unit_of_work() as unit_of_work:
             released = await unit_of_work.external_actions.release_stale_for_retry(

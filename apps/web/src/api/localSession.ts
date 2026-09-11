@@ -1,3 +1,5 @@
+import type { components } from "./generated/schema";
+
 const SESSION_PATH = "/api/v1/session";
 const API_PREFIX = "/api/v1/";
 
@@ -40,17 +42,12 @@ const FIELD_ERROR_FIELDS = new Set(["pointer", "code", "message"]);
 
 type JsonObject = Record<string, unknown>;
 
-export interface LocalSession {
-  readonly actorId: string;
-  readonly roles: readonly string[];
-  readonly scopes: readonly string[];
-  readonly authMode: "local";
-  readonly environment: "local" | "test" | "production";
-  readonly modelMode: "mock" | "real";
-  readonly connectorMode: string;
-  readonly networkPermission: boolean;
-  readonly warning: "Local identity — not production authentication";
-}
+// DEL-07: the public session derives from the API contract. Runtime validation
+// below still checks untrusted JSON; CSRF material remains private to this module.
+export type LocalSession = Omit<
+  components["schemas"]["SessionResponse"],
+  "csrfToken" | "csrfHeaderName"
+>;
 
 export interface LocalApiFieldError {
   readonly pointer: string;
