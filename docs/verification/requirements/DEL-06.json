@@ -1,0 +1,134 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-06",
+  "matrix_statement_sha256": "1ac97eb303ebfb6579bc96e47ca220be391a5354195306448f7fab47fb0337cd",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "README.md",
+      "docs/architecture.md",
+      "docs/assumptions.md",
+      "docs/security.md",
+      "docs/identity-and-authorization.md",
+      "docs/data-handling.md",
+      "docs/adapter-contracts.md",
+      "docs/catalog-authoring.md",
+      "docs/testing.md",
+      "docs/operations.md",
+      "docs/local-operations.md",
+      "docs/demos.md",
+      "docs/verification.md",
+      "scripts/verify_product_docs.py",
+      "tests/tooling/test_del_06_product_docs.py",
+      "Makefile",
+      "docs/verification/requirements/DEL-06.json",
+      "docs/verification/requirements/DEL-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "implementation", "one_of": ["README.md"]},
+      {"kind": "implementation", "one_of": ["docs/architecture.md"]},
+      {"kind": "implementation", "one_of": ["docs/security.md"]},
+      {"kind": "implementation", "one_of": ["docs/assumptions.md"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_del_06_product_docs.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-navigable-product-guides",
+      "type": "documentation",
+      "statement": "README and all required architecture, assumptions, security, identity, data, adapter, catalog, testing, operation, demo and verification guides exist with navigable local source/evidence links and explicit claim categories. The existing local runbook is preserved and linked.",
+      "test_refs": [
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_required_current_product_guides_pass_from_repository_and_copied_root",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_every_required_guide_is_a_causal_input",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_missing_readme_navigation"
+      ]
+    },
+    {
+      "id": "source-pinned-documentation-contract",
+      "type": "contract",
+      "statement": "The offline documentation consumer compares README counts and toolchain versions with committed source pins, verifies the catalog hash in the verification record, retains 24 stable assumption IDs, and requires the accepted lifecycle decision without rewriting ADRs or application behavior.",
+      "test_refs": [
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_release_count_changes_invalidate_documented_counts",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_release_hash_changes_invalidate_verification_record",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_pinned_toolchain_changes_invalidate_readme",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_stable_assumptions_and_closed_lifecycle_decision_are_required"
+      ]
+    },
+    {
+      "id": "broken-or-unsafe-documentation-fails",
+      "type": "negative_control",
+      "statement": "Missing or placeholder guides, broken links/headings, repository escapes, unsupported link schemes, missing taxonomy, and unavailable or nonliteral shell Make targets fail the gate. Examples and external links are inspected without executing commands or fetching destinations.",
+      "test_refs": [
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_placeholder_guide",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_missing_local_evidence",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_broken_local_heading",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_links_outside_repository_even_when_destination_exists",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_rejects_unknown_make_command_without_running_it",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_all_compound_make_commands_are_checked",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_all_claim_taxonomy_categories_are_required",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_external_sources_are_not_fetched"
+      ]
+    },
+    {
+      "id": "honest-scope-and-repeatable-checklist",
+      "type": "documentation",
+      "statement": "The guides separate recorded results from new checks, mocks from external delivery, local identity from production authentication, configured expiry from physical deletion, backend denial from web outbound capability, and implemented commands from pending acceptance targets. A stdlib CLI validates repository and explicit copied roots.",
+      "test_refs": [
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_cli_checks_explicit_root_and_fails_when_a_guide_is_absent",
+        "tests/tooling/test_del_06_product_docs.py::ProductDocumentationTests.test_stable_assumptions_and_closed_lifecycle_decision_are_required"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-06-product-documentation",
+      "runner": "argv",
+      "argv": ["make", "test-del-06-docs", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-navigable-product-guides",
+        "source-pinned-documentation-contract",
+        "broken-or-unsafe-documentation-fails",
+        "honest-scope-and-repeatable-checklist"
+      ]
+    },
+    {
+      "id": "del-06-source-assumptions",
+      "runner": "argv",
+      "argv": ["python3", "-m", "unittest", "tests.source.test_src_03_assumption_register"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["source-pinned-documentation-contract", "honest-scope-and-repeatable-checklist"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "README.md",
+      "docs/architecture.md",
+      "docs/assumptions.md",
+      "docs/security.md",
+      "docs/identity-and-authorization.md",
+      "docs/data-handling.md",
+      "docs/adapter-contracts.md",
+      "docs/catalog-authoring.md",
+      "docs/testing.md",
+      "docs/operations.md",
+      "docs/local-operations.md",
+      "docs/demos.md",
+      "docs/verification.md"
+    ],
+    "gate_id": "del-06-product-documentation"
+  },
+  "limitations": [
+    "Mechanical documentation checks do not prove arbitrary prose semantics or that every linked behavior test was newly executed. Independent source review and the explicit dated verification record provide the additional scoped evidence.",
+    "DEL-06 changes no application, catalog, migration, adapter, security enforcement or CI workflow behavior. It does not complete missing test aggregation, coverage, physical retention maintenance, real-provider work or final acceptance.",
+    "GitHub CI remains disabled at user direction. Earlier startup/deadline failures are not resolved or waived; the unmerged CI-MAINT-02 branch remains separate from this requirement.",
+    "No frontend/browser/Docker/PostgreSQL test or live provider request was performed for the documentation-only gate. Historical runtime evidence remains tied to its original source and environment.",
+    "HTTP(S) links are not fetched by the documentation checker; availability and current content of external pages are not guaranteed. Only repository-contained inline Markdown links and ordinary heading anchors are checked."
+  ]
+}
