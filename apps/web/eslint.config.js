@@ -50,6 +50,12 @@ export default tseslint.config(
     },
   },
   {
+    // DEL-07 keeps the generator's canonical readonly index signatures. Only
+    // this equivalent syntax preference differs; all safety/type rules remain.
+    files: ["src/api/generated/schema.ts"],
+    rules: { "@typescript-eslint/consistent-indexed-object-style": "off" },
+  },
+  {
     files: ["**/*.test.{ts,tsx}", "src/test/**/*.{ts,tsx}"],
     languageOptions: {
       globals: { ...globals.browser, ...globals.es2023 },

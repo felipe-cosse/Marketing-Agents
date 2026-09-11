@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "./fixtures";
 
 import { installPlaywrightNetworkGuard } from "../../../scripts/browser-network-policy.mjs";
 

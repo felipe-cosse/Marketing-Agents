@@ -1551,7 +1551,7 @@ class ApprovalBoundaryService:
     ) -> None:
         request = stored.request
         decision = stored.decision
-        if decision is None:  # pragma: no cover - caller already rejects this
+        if decision is None:
             raise AssertionError("approved leaf lost its decision")
         expected_roles = request.policy.required_roles | frozenset({APPROVER_ROLE})
         expected_scopes = request.policy.required_scopes | frozenset({APPROVAL_DECIDE_SCOPE})

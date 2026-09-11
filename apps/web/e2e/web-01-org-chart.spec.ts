@@ -1,5 +1,5 @@
 // WEB-01 browser evidence uses the real Vite proxy and local hierarchy API.
-import { expect, test, type Page, type Response } from "@playwright/test";
+import { expect, test, type Page, type Response } from "./fixtures";
 
 interface HierarchyResponseBody {
   readonly counts: {

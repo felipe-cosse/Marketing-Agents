@@ -92,7 +92,7 @@ test-tooling:
 		tests.tooling.test_ci_maintenance_history
 
 test-backend:
-	$(UV) run pytest -q
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen pytest -q
 
 test-catalog-compiler:
 	$(UV) run pytest -q tests/catalog/test_arch_04_catalog_compiler.py
@@ -160,7 +160,7 @@ verify-architecture:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_architecture_boundaries.py
 
 test-network:
-	PYTHONDONTWRITEBYTECODE=1 $(UV) run python -m unittest tests.network.test_safe_11_network_isolation
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m unittest tests.network.test_safe_11_network_isolation
 	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs
 
 test-arch-08-backend:
@@ -174,25 +174,33 @@ web-bootstrap:
 	corepack pnpm --dir apps/web browser:install
 
 web-format:
-	corepack pnpm --dir apps/web format
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/prettier --write .
 
 web-format-check:
-	corepack pnpm --dir apps/web format:check
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/prettier --check .
 
 web-lint:
-	corepack pnpm --dir apps/web lint
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/eslint . --max-warnings=0
 
 web-typecheck:
-	corepack pnpm --dir apps/web typecheck
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/tsc -b --pretty false
 
 web-test:
-	corepack pnpm --dir apps/web test
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/vitest run
 
 web-test-coverage:
-	corepack pnpm --dir apps/web test:coverage
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/vitest run --coverage
 
 web-build:
-	corepack pnpm --dir apps/web build
+	node apps/web/scripts/require-pinned-node.mjs
+	cd apps/web && node_modules/.bin/tsc -b --pretty false
+	cd apps/web && node_modules/.bin/vite build
 
 web-test-e2e:
 	node apps/web/scripts/run-web-e2e.mjs
@@ -305,7 +313,60 @@ web-test-web-09-unit:
 web-test-web-09-witness:
 	node apps/web/scripts/run-web-09-witness.mjs
 
-test: test-source test-tooling test-network
+# DEL-07 runs this recipe sequentially, even when the caller requests make -j.
+# Component aliases remain independently usable; verify adds static/drift/coverage.
+test:
+	UV_OFFLINE=1 UV_FROZEN=1 $(MAKE) -j1 catalog-validate verify-catalog-release
+	$(MAKE) -j1 test-backend
+	$(MAKE) -j1 test-network
+	$(MAKE) -j1 test-frontend
+	$(MAKE) -j1 test-e2e
+
+.PHONY: verify acceptance test-frontend test-contract test-integration test-e2e api-contract-check api-contract-generate verify-repository test-del-07-tooling test-del-07-backend test-del-07-browser-network
+
+test-frontend: web-test
+
+test-contract:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen pytest -q tests/contract
+
+test-integration:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen pytest -q tests/integration
+
+test-e2e:
+	$(MAKE) -j1 test-del-07-browser-network
+	$(MAKE) -j1 web-test-e2e
+
+test-del-07-browser-network:
+	node apps/web/scripts/run-browser-network-canary.mjs
+
+test-del-07-backend:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_local --backend
+
+api-contract-check:
+	node tools/api-contract/generate.mjs --check
+
+api-contract-generate:
+	node tools/api-contract/generate.mjs --write
+
+verify-repository:
+	$(UV) run --offline --frozen ruff format --check scripts/check_safety_coverage.py scripts/export_openapi.py scripts/verify_local.py scripts/verify_repository_text.py tests/tooling/test_del_07_*.py tests/contract/test_del_07_openapi_snapshot.py
+	$(UV) run --offline --frozen ruff check scripts/check_safety_coverage.py scripts/export_openapi.py scripts/verify_local.py scripts/verify_repository_text.py tests/tooling/test_del_07_*.py tests/contract/test_del_07_openapi_snapshot.py
+	node apps/web/scripts/require-pinned-node.mjs
+	apps/web/node_modules/.bin/prettier --check tools/api-contract scripts/node-network-guard.mjs scripts/node-network-guard.d.mts scripts/browser-network-policy.mjs scripts/browser-network-policy.d.mts tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs tests/network/web_e2e_inventory.test.mjs
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_repository_text
+	$(MAKE) -j1 verify-docs verify-architecture verify-source verify-history
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/scan_secrets.py --tracked
+	git diff --check
+
+test-del-07-tooling:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen pytest -q tests/tooling/test_del_07_safety_coverage.py tests/tooling/test_del_07_local_verification.py tests/tooling/test_del_07_repository_text.py tests/contract/test_del_07_openapi_snapshot.py
+	node --test tools/api-contract/generate.test.mjs tests/network/web_e2e_inventory.test.mjs
+
+verify:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_local
+
+acceptance:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_local --acceptance --ref "$(REF)"
 
 verify-source:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_source_evidence.py --json

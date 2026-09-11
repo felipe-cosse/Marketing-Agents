@@ -5,6 +5,7 @@ ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .nvmrc ./
 COPY apps/web/package.json /app/apps/web/package.json
+COPY tools/api-contract/package.json /app/tools/api-contract/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS builder

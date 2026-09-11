@@ -7,7 +7,7 @@ import {
   type Locator,
   type Page,
   type TestInfo,
-} from "@playwright/test";
+} from "./fixtures";
 
 interface HierarchyInstance {
   readonly id: string;

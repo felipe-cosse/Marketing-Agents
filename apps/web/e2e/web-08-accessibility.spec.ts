@@ -1,6 +1,6 @@
 // WEB-08 browser evidence exercises accessibility across the production control surface.
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "./fixtures";
 
 import {
   makeArtifactPage,

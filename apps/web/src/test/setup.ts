@@ -1,3 +1,4 @@
+import "./networkIsolation";
 import "@testing-library/jest-dom/vitest";
 
 class TestResizeObserver implements ResizeObserver {

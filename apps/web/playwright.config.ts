@@ -16,6 +16,7 @@ export default defineConfig({
     browserName: "chromium",
     colorScheme: "light",
     locale: "en-US",
+    serviceWorkers: "block",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "off",

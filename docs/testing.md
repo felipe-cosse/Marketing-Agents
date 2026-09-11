@@ -46,13 +46,35 @@ ignored caches or build output.
 | `make test-del-05-backup` | Paired database/key backup contracts and rejection paths. |
 | `make test-del-05-compose-backup` | Scoped Docker round-trip into new storage, distinct from the startup smoke. |
 | `make verify-clean REF=HEAD` | Exact committed export, fresh Docker storage, deployed demos/replay, offline suites, production browser smoke, owned cleanup. Does not test uncommitted edits. |
+| `make verify` | Ordered catalog-first local static, repository, network, backend coverage, frontend and full browser gates, then source-drift comparison. Stops at the first failure. |
+| `make test` | Catalog validation, full backend discovery, network canaries, frontend units and full browser journeys, sequential even under parallel Make. Static/coverage enforcement belongs to `verify`. |
+| `make test-frontend` / `make test-e2e` | Frontend unit suite / all 15 owned browser specs. New unowned, missing, empty or filtered browser inventory fails closed. |
+| `make test-contract` / `make test-integration` | Independently runnable Python contract / integration directories. Empty pytest collection fails. |
+| `make test-del-07-backend` | Catalog-first backend static/full pytest and all 17 coverage thresholds, using the same gates and fresh report isolation as `verify`. |
+| `make test-del-07-browser-network` | Actual Chromium positive/negative controls for the automatic exact-origin fixture, using a private loopback tripwire and no external destination. |
+| `make api-contract-check` | Regenerate OpenAPI metadata and frontend types in memory; missing or changed artifacts fail without overwriting them. |
+| `make api-contract-generate` | Explicitly regenerate the two checked-in API artifacts after an intentional route/schema change. |
+| `make verify-repository` | DEL-07 tooling static checks, offline JSON/YAML/Markdown text policy and links, product docs, architecture, source provenance, retained main history (incomplete requirements allowed), tracked secret scan and whitespace checks. |
+| `make acceptance REF=HEAD` | Requires source matching the selected commit; runs all local verification, then exact committed clean-state verification and paired Compose backup/restore. Does not automatically complete acceptance matrix rows. |
 
-Claim: **Acceptance target not yet verified** — the planned all-in-one `make
-verify`, `make acceptance`, `make test-frontend`, `make test-contract`, and
-`make test-e2e` aliases are not implemented here. `make test` currently runs only
-source/tooling/network gates; it is **not** the full test aggregate. DEL-07 owns
-the broader entry-point and coverage gaps. Do not omit the separate browser or
-backup gate when claiming those behaviors.
+Claim: **Implemented and verified** — the recorded DEL-07 frozen-worktree
+`make verify` run passed all 20 gates without changing source. Its exact counts
+and limitations are in the [verification record](verification.md).
+The exact committed candidate also passed all eight clean-state phases; its
+revision, report hash and environment differences are recorded separately.
+Claim: **Acceptance target not yet verified** — final feature branch attestation
+remains separate. A `verify` pass is not an `acceptance` pass; do not omit browser
+or backup gates when claiming those behaviors.
+
+The local verifier uses a fresh external report directory and records gate
+status/timing without environment values. It compares tracked and nonignored
+untracked source content, modes and symlinks before/after, including failure
+paths. Existing caller edits are preserved; verification does not repair files.
+No prior coverage file can satisfy a new run. Pytest catalog tests run before
+the remaining backend tests, and both contribute to one measured report.
+Nested verification commands inherit offline/frozen dependency settings. The
+acceptance precondition compares committed blob bytes, executable bits and
+symlink targets directly, independent of Git's index change-detection hints.
 
 ## Network boundaries and optional compatibility
 
@@ -67,8 +89,30 @@ The clean verifier executes prebuilt Python and frontend suites with Docker
 requests outside the exact local origin. API/workers have no IP network;
 the web ingress container retains an outbound route, as disclosed in
 [security](security.md). Host Vitest's [setup](../apps/web/src/test/setup.ts)
-does not globally install the Node network guard: passing the separate canary
-does not prove that every ordinary host frontend test is network-isolated.
+now installs the Node guard globally: real sockets (including loopback/Unix),
+HTTP(S), DNS callbacks/promises/resolvers, TLS/UDP and global fetch are denied.
+Tests supply explicit in-memory fetch mocks; this repository does not use MSW.
+A swallowed denial still fails the test lifecycle hook. A subprocess canary
+exercises the actual setup connection with stub delegates, so even a broken
+guard cannot egress during its negative control. This remains application-level
+instrumentation, not an OS firewall or protection against arbitrary child tools.
+
+All browser specs now use the automatic [fixture](../apps/web/e2e/fixtures.ts).
+It guards default and explicitly created contexts, blocks service workers,
+permits only the configured loopback origin (and matching WebSocket origin),
+and fails on denied HTTP/WebSocket attempts even if the page catches the error.
+In-memory API route mocks remain usable; registered route handlers cannot
+continue an unapproved request around the context guard. URL overrides are
+validated, real pass-through fetches disable automatic redirects, and redirect
+responses are denied before fulfillment (304 cache responses remain allowed).
+This intentionally rejects even same-origin redirects; context reuse is also
+unsupported and rejected. The separate actual Chromium canary checks zero
+requests reached its unapproved loopback tripwire.
+The recorded full rerun passed all 15 runners and 32 cases with this boundary.
+Demo browser mutations use explicit route mocks. A separate composed native
+smoke verifies real overview endpoints and desktop/mobile UI health, while
+actual API/worker mutation and restart behavior has separate process tests;
+their combined successes are not one integrated browser-to-worker journey.
 
 Optional PostgreSQL tests use an opt-in temporary Unix-socket cluster and the
 project's optional `postgresql` dependency. Install the extra and supported
@@ -95,9 +139,34 @@ limits. Keep sanitized reports outside the repository; never upload database/key
 backup bundles, raw payloads, full prompts, or credentials. Failed and interrupted
 commands remain failures even if an unchanged retry later passes.
 
-Claim: **Acceptance target not yet verified** — remaining release work includes
-enforced safety-critical branch coverage, comprehensive task-runner aggregation,
-tracked secret scanning in the normal gate, broader format/drift coverage, and
-full requirement-by-requirement acceptance. Coverage configuration alone does
-not establish a threshold. Disabling CI is not a waiver of local tests or proof
-that the prior startup/deadline failures are fixed.
+The [safety policy](verification/safety-coverage.json) pins 17 transition, hash,
+approval and dispatch modules. The checker requires every measured statement
+and branch, validates integer counts against individual arrays, rejects missing
+modules and new exclusions, and never uses rounded percentage displays. The
+existing two-line domain approval exhaustive-enum fallback is the only explicit
+source-pinned exclusion; it is not silently counted as exercised.
+
+The API snapshot retains the factory's schema and numeric bounds. The offline
+[generator](../tools/api-contract/generate.mjs) uses pinned
+[openapi-typescript](https://openapi-ts.dev/node) and refuses nonlocal references;
+the real frontend session type consumes the generated contract while preserving
+runtime validation and private CSRF handling. Its supported TypeScript 5.9.3
+compiler lives in an isolated tooling workspace; the web app stays on 6.0.3.
+Only the generated file's index-signature-versus-Record style preference is
+exempted from ESLint; type and safety rules remain enabled.
+
+Repository text formatting means UTF-8/LF, space indentation, final newlines,
+trailing-whitespace control, and duplicate-free parsed JSON/YAML. Markdown local
+links/anchors and approved external URL syntax are checked without fetching.
+Original `references/` inputs are byte-preserved under the source-provenance
+gate; historical evidence is not rewritten to impose a different line layout.
+Frontend/generated files additionally use their pinned canonical formatter.
+The tracked secret scanner targets high-confidence patterns, not every possible
+secret; ignored developer files are not proof of secret absence.
+
+Claim: **Acceptance target not yet verified** — final feature attestation and
+requirement-by-requirement acceptance remain open. The recorded fresh coverage,
+candidate clean-state and current-source backup results do not complete those checks.
+Coverage configuration alone does not establish a passing threshold. Disabling
+CI is not a waiver of local tests or proof that prior startup/deadline failures
+are fixed.

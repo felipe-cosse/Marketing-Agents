@@ -6,7 +6,7 @@ import {
   type Request,
   type Route,
   type TestInfo,
-} from "@playwright/test";
+} from "./fixtures";
 
 interface DryRunObservation {
   readonly posts: {

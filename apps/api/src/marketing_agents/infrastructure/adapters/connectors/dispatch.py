@@ -524,6 +524,4 @@ class RegistryConnectorWriteGateway:
                 "connector returned a response outside its registered result schema",
                 request_may_have_left_process=True,
             )
-        if response_failure is not None:
-            raise response_failure from None
-        return validated_result
+        raise response_failure from None
