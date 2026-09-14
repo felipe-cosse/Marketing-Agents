@@ -15,6 +15,7 @@ HEAD ?= HEAD
 .PHONY: test-arch-08-backend verify-architecture web-test-arch-08-unit
 .PHONY: test-del-03-contracts test-del-03-demos
 .PHONY: init-local-secret migrate seed seed-check test-del-04-persistence test-del-04-postgresql test-del-04-regression
+.PHONY: verify-native-offline
 
 DATABASE_URL ?= sqlite+aiosqlite:///./data/marketing_agents.db
 MARKETING_AGENTS_DIGEST_KEY_PATH ?= data/digest.key
@@ -420,6 +421,13 @@ logs:
 
 dev:
 	.venv/bin/python scripts/dev.py --state-dir "$(LOCAL_STATE)"
+
+# OBJ-04: explicit native-only qualification. Python-only backend images do not
+# contain Node/Corepack/Vite; missing native prerequisites must fail, not skip.
+verify-native-offline:
+	PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q \
+		tests/tooling/obj_04_corepack_offline.py \
+		tests/acceptance/obj_04_native_offline.py
 
 backup-local:
 	.venv/bin/python scripts/local_backup.py backup --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --destination "$(DESTINATION)" $(if $(filter native,$(LOCAL_MODE)),--database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)",)

@@ -1,0 +1,226 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-04",
+  "matrix_statement_sha256": "7050d9e809bfa0bf7796bba7d0dc7a15648ba823f9c96e196084116f1027290a",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "scripts/dev.py",
+      "scripts/verify_obj_04_environment.py",
+      "Makefile",
+      "tests/tooling/test_del_05_native.py",
+      "tests/tooling/test_obj_04_native_environment.py",
+      "tests/tooling/obj_04_corepack_offline.py",
+      "tests/tooling/obj_04_corepack_probe.mjs",
+      "tests/acceptance/obj_04_native_offline.py",
+      "tests/acceptance/obj_04_controller.py",
+      "tests/acceptance/obj_04_child.py",
+      "tests/acceptance/obj_04_guard.py",
+      "tests/acceptance/test_obj_04_native_guard.py",
+      "README.md",
+      "docs/operations.md",
+      "docs/verification/requirements/OBJ-04.json",
+      "docs/verification/requirements/OBJ-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      { "kind": "implementation", "one_of": ["scripts/dev.py"] },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_obj_04_native_environment.py",
+          "tests/acceptance/obj_04_native_offline.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "offline-native-process-boundary",
+      "type": "contract",
+      "statement": "Prerequisite version checks and supervised runtime children use an explicit environment that strips inherited credentials, proxies and loader options, forces offline Corepack/pnpm flags, and retains public local cache paths. Checks run in the repository and pnpm uses the selected Node path; unavailable installed tools fail safely with a bootstrap instruction.",
+      "test_refs": [
+        "tests/tooling/test_obj_04_native_environment.py",
+        "scripts/verify_obj_04_environment.py",
+        "tests/acceptance/obj_04_native_offline.py"
+      ]
+    },
+    {
+      "id": "real-corepack-cold-cache-refusal",
+      "type": "negative_control",
+      "statement": "The actual installed Corepack shim, invoked through the production version helper with isolated empty caches and synthetic ambient credentials, refuses its missing pinned pnpm before any guarded Node transport attempt. It neither changes package metadata nor downloads cache files; the parent exposes only the safe bootstrap error.",
+      "test_refs": [
+        "tests/tooling/obj_04_corepack_offline.py",
+        "tests/tooling/obj_04_corepack_probe.mjs"
+      ]
+    },
+    {
+      "id": "credential-free-native-lifecycle",
+      "type": "journey",
+      "statement": "The real native supervisor initializes a fresh database/key with an empty home and installed dependencies despite synthetic credentials and real-mode opt-ins. API, workers and Vite complete all five mock demos through the web origin, respect the email all-approvals barrier, and preserve key, counts and receipt identities across restart/replay while cleaning up owned process groups.",
+      "test_refs": ["tests/acceptance/obj_04_native_offline.py"]
+    },
+    {
+      "id": "observable-python-network-guard",
+      "type": "negative_control",
+      "statement": "Each instrumented native Python child and controller proves five blocked DNS/socket canaries with under-guard tripwires, then records zero external attempts through those interfaces during the real lifecycle. Disabling the primary guard fails at the in-memory tripwire without an OS call. Existing Python/Node guard controls, mock defaults, adapter and Compose contracts also remain passing.",
+      "test_refs": [
+        "tests/acceptance/obj_04_guard.py",
+        "tests/acceptance/test_obj_04_native_guard.py",
+        "tests/acceptance/obj_04_native_offline.py"
+      ]
+    },
+    {
+      "id": "bounded-owned-process-shutdown",
+      "type": "contract",
+      "statement": "Native shutdown retries transient permission-denied process-group probes within its existing grace bound, requires confirmed disappearance, and does not re-signal groups already known absent. Persistent denial remains a safe failure. Deterministic controls cover transient and persistent denial, forced cleanup and owned-only cleanup after controller failure; the real launcher still must shut down normally on both generations.",
+      "test_refs": [
+        "tests/tooling/test_obj_04_native_environment.py",
+        "tests/acceptance/test_obj_04_native_guard.py",
+        "tests/acceptance/obj_04_native_offline.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-04-runtime-regression",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/security/test_safe_01_default_mock_mode.py",
+        "tests/contract/test_arch_06_llm_provider.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/tooling/test_del_05_compose_contract.py",
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_del_05_clean_state_fixture.py",
+        "tests/tooling/test_obj_04_native_environment.py",
+        "tests/tooling/test_del_05_native.py",
+        "tests/acceptance/test_obj_04_native_guard.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "offline-native-process-boundary",
+        "observable-python-network-guard",
+        "bounded-owned-process-shutdown"
+      ]
+    },
+    {
+      "id": "obj-04-native-offline",
+      "runner": "argv",
+      "argv": ["make", "verify-native-offline"],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "offline-native-process-boundary",
+        "real-corepack-cold-cache-refusal",
+        "credential-free-native-lifecycle",
+        "observable-python-network-guard",
+        "bounded-owned-process-shutdown"
+      ]
+    },
+    {
+      "id": "obj-04-network-controls",
+      "runner": "argv",
+      "argv": ["make", "test-network", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "real-corepack-cold-cache-refusal",
+        "observable-python-network-guard"
+      ]
+    },
+    {
+      "id": "obj-04-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "scripts/dev.py",
+        "scripts/verify_obj_04_environment.py",
+        "tests/tooling/test_del_05_native.py",
+        "tests/tooling/test_obj_04_native_environment.py",
+        "tests/tooling/obj_04_corepack_offline.py",
+        "tests/acceptance/obj_04_native_offline.py",
+        "tests/acceptance/obj_04_controller.py",
+        "tests/acceptance/obj_04_child.py",
+        "tests/acceptance/obj_04_guard.py",
+        "tests/acceptance/test_obj_04_native_guard.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "offline-native-process-boundary",
+        "credential-free-native-lifecycle"
+      ]
+    },
+    {
+      "id": "obj-04-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "scripts/dev.py",
+        "scripts/verify_obj_04_environment.py",
+        "tests/tooling/test_del_05_native.py",
+        "tests/tooling/test_obj_04_native_environment.py",
+        "tests/tooling/obj_04_corepack_offline.py",
+        "tests/acceptance/obj_04_native_offline.py",
+        "tests/acceptance/obj_04_controller.py",
+        "tests/acceptance/obj_04_child.py",
+        "tests/acceptance/obj_04_guard.py",
+        "tests/acceptance/test_obj_04_native_guard.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "offline-native-process-boundary",
+        "credential-free-native-lifecycle"
+      ]
+    },
+    {
+      "id": "obj-04-documentation",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_product_docs.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "offline-native-process-boundary",
+        "credential-free-native-lifecycle"
+      ]
+    },
+    {
+      "id": "obj-04-environment-witness",
+      "runner": "argv",
+      "argv": ["python3", "-m", "scripts.verify_obj_04_environment"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": ["offline-native-process-boundary"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["scripts/dev.py"],
+    "gate_id": "obj-04-environment-witness"
+  },
+  "limitations": [
+    "Native qualification requires already installed Python/Node dependencies and real Corepack with cached pnpm 11.24.0. It reads only that declared tool cache while HOME and application state start empty. Bootstrap/image acquisition is separate and may need registry access.",
+    "Python child argv adds a test-only preloader before the original worker module; actual supervisor, prerequisites, environments, initialization, readiness and cleanup execute unchanged. Vite runs unmodified, but its Node transport is not instrumented by the Python lifecycle guard.",
+    "Python canaries cover five socket/DNS interfaces, not every OS egress mechanism. The Corepack probe uses the separate Node guard. Neither is an OS-wide native sandbox; browser guards and Compose backend network_mode none remain distinct evidence.",
+    "The five-demo journey observes actual API/Vite/workers and durable mock results, not browser UI behavior, all catalog workflows or real external delivery. The fresh native installation is not a fresh committed-export Compose release qualification.",
+    "Instrumented native qualification reproduced macOS EPERM while probing an owned process group during shutdown. The underlying OS reason is not established. Bounded retry must observe actual group disappearance; permanent permission denial remains a failure. Test diagnostics retain categorical exception evidence, and forced harness cleanup never substitutes for a successful product shutdown.",
+    "Compose contract and clean-state harness tests do not mean a new full make verify-clean run was executed for this feature. The static web ingress container retains an OS-level outbound route; prior DEL-05 container evidence retains its stated limits.",
+    "CI remains disabled and no remote refs or workflows are changed. Whole-system acceptance and final release verification remain separate."
+  ]
+}

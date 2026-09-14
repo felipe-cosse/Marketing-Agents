@@ -121,6 +121,14 @@ installation. Ctrl-C stops only its child processes. See
 [operations](docs/operations.md) for explicit paths, paired backups, recovery,
 networking, and troubleshooting.
 
+Startup uses installed tools only, including prerequisite version checks. It
+strips inherited credential, proxy, and loader variables and disables Corepack
+downloads and pnpm updates. If the pinned package manager is not cached, startup
+fails with a bootstrap instruction; it does not fetch it automatically.
+`make verify-native-offline` separately qualifies the installed native stack with
+fresh state, an empty home, five mock demos, and a restart. See the
+[OBJ-04 evidence and guard limits](docs/verification/requirements/OBJ-04.md).
+
 After bootstrap, these existing commands cover different checks:
 
 ```sh

@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -38,9 +38,50 @@ class Tools:
     pnpm: Path
 
 
-def _version(command: Sequence[str]) -> str:
+def _tool_environment(
+    inherited: Mapping[str, str] | None = None, *, node: Path | None = None
+) -> dict[str, str]:
+    """Use installed tools only; acquisition belongs to explicit bootstrap."""
+    inherited = os.environ if inherited is None else inherited
+    environment = {
+        name: inherited[name]
+        for name in (
+            "HOME",
+            "TMPDIR",
+            "LANG",
+            "LC_ALL",
+            "SYSTEMROOT",
+            "COREPACK_HOME",
+            "XDG_CACHE_HOME",
+            "LOCALAPPDATA",
+        )
+        if name in inherited
+    }
+    path = inherited.get("PATH", os.defpath)
+    environment.update(
+        {
+            "PATH": str(node.parent) + os.pathsep + path if node is not None else path,
+            "COREPACK_ENABLE_NETWORK": "0",
+            "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+            "COREPACK_ENABLE_AUTO_PIN": "0",
+            "PNPM_CONFIG_OFFLINE": "true",
+            "PNPM_CONFIG_UPDATE_NOTIFIER": "false",
+        }
+    )
+    return environment
+
+
+def _version(command: Sequence[str], *, cwd: Path = ROOT, node: Path | None = None) -> str:
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=True)
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            env=_tool_environment(node=node),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
     except (OSError, subprocess.SubprocessError):
         raise NativeStartupError("native_tool_unavailable: run make bootstrap first") from None
     return result.stdout.strip()
@@ -50,13 +91,13 @@ def prerequisites(root: Path = ROOT, *, node: Path | None = None) -> Tools:
     python = root / ".venv" / "bin" / "python"
     if not python.is_file() or not (root / "apps/web/node_modules/.bin/vite").is_file():
         raise NativeStartupError("native_dependencies_missing: run make bootstrap first")
-    if not _version([str(python), "--version"]).startswith("Python 3.12."):
+    if not _version([str(python), "--version"], cwd=root).startswith("Python 3.12."):
         raise NativeStartupError("native_python_version: Python 3.12 is required")
     selected_node = node or Path(shutil.which("node") or "/missing/node")
-    if _version([str(selected_node), "--version"]) != NODE_VERSION:
+    if _version([str(selected_node), "--version"], cwd=root) != NODE_VERSION:
         raise NativeStartupError(f"native_node_version: activate Node {NODE_VERSION[1:]}")
     pnpm = Path(shutil.which("pnpm") or "/missing/pnpm")
-    if _version([str(pnpm), "--version"]) != PNPM_VERSION:
+    if _version([str(pnpm), "--version"], cwd=root, node=selected_node) != PNPM_VERSION:
         raise NativeStartupError(f"native_pnpm_version: pnpm {PNPM_VERSION} is required")
     return Tools(python, selected_node, pnpm)
 
@@ -82,15 +123,9 @@ def safe_environment(
     inherited: Mapping[str, str] | None = None,
     root: Path = ROOT,
 ) -> dict[str, str]:
-    inherited = os.environ if inherited is None else inherited
-    environment = {
-        name: inherited[name]
-        for name in ("HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT")
-        if name in inherited
-    }
+    environment = _tool_environment(inherited, node=tools.node)
     environment.update(
         {
-            "PATH": str(tools.node.parent) + os.pathsep + inherited.get("PATH", os.defpath),
             "PYTHONUNBUFFERED": "1",
             "APP_ENV": "local",
             "AUTH_MODE": "local",
@@ -174,6 +209,7 @@ class Supervisor:
         self.grace = grace
         self.children: list[Child] = []
         self.stopping = False
+        self._absent_groups: set[int] = set()
 
     def start(self, name: str, command: Sequence[str], *, cwd: Path) -> Child:
         descriptor = os.open(self.logs / f"{name}.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -213,29 +249,87 @@ class Supervisor:
 
     def close(self) -> None:
         # Every process gets its own new session. Only those exact groups are stopped.
-        alive = [child for child in self.children if not child.initialized]
-        for child in alive:
-            with suppress(ProcessLookupError):
-                os.killpg(child.process.pid, signal.SIGTERM)
-        deadline = time.monotonic() + self.grace
-        while time.monotonic() < deadline:
-            remaining = False
-            for child in alive:
-                child.process.poll()
+        pending = {
+            child.process.pid: child
+            for child in self.children
+            if not child.initialized and child.process.pid not in self._absent_groups
+        }
+        uninspectable: set[int] = set()
+        cleanup_failed = False
+
+        def probe_groups() -> None:
+            nonlocal cleanup_failed
+            for group, child in tuple(pending.items()):
                 try:
-                    os.killpg(child.process.pid, 0)
-                    remaining = True
+                    child.process.poll()
+                except OSError:
+                    cleanup_failed = True
+                try:
+                    os.killpg(group, 0)
                 except ProcessLookupError:
-                    continue
-            if not remaining:
-                break
-            time.sleep(0.05)
-        for child in alive:
-            with suppress(ProcessLookupError):
-                os.killpg(child.process.pid, signal.SIGKILL)
-            child.process.wait(timeout=5)
-        for child in self.children:
-            child.log.close()
+                    self._absent_groups.add(group)
+                    del pending[group]
+                    uninspectable.discard(group)
+                except PermissionError:
+                    # Denial is not proof of exit. Keep ownership and retry
+                    # within the current grace/reap deadline only.
+                    uninspectable.add(group)
+                except OSError:
+                    cleanup_failed = True
+                else:
+                    uninspectable.discard(group)
+
+        def wait_for_groups(deadline: float) -> None:
+            while pending and time.monotonic() < deadline:
+                probe_groups()
+                if pending:
+                    time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+
+        try:
+            for group in tuple(pending):
+                try:
+                    os.killpg(group, signal.SIGTERM)
+                except ProcessLookupError:
+                    self._absent_groups.add(group)
+                    del pending[group]
+                except OSError:
+                    cleanup_failed = True
+            wait_for_groups(time.monotonic() + self.grace)
+            for group in tuple(pending):
+                try:
+                    os.killpg(group, signal.SIGKILL)
+                except ProcessLookupError:
+                    self._absent_groups.add(group)
+                    del pending[group]
+                    uninspectable.discard(group)
+                except OSError:
+                    cleanup_failed = True
+        finally:
+            # Failure to inspect one group must not strand the other direct
+            # children or their logs. Waiting for a child does not prove that
+            # its entire process group is absent. Reaping and post-force
+            # confirmation share one five-second budget, not a new grace.
+            reap_deadline = time.monotonic() + 5
+            try:
+                for child in self.children:
+                    try:
+                        child.process.wait(timeout=max(0, reap_deadline - time.monotonic()))
+                    except (OSError, subprocess.TimeoutExpired):
+                        cleanup_failed = True
+                probe_groups()
+                wait_for_groups(reap_deadline)
+            finally:
+                for child in self.children:
+                    try:
+                        child.log.close()
+                    except OSError:
+                        cleanup_failed = True
+        if uninspectable:
+            raise NativeStartupError("native_shutdown_unverified: owned group inspection denied")
+        if pending:
+            raise NativeStartupError("native_shutdown_incomplete: owned process group remains")
+        if cleanup_failed:
+            raise NativeStartupError("native_shutdown_failed: inspect local process logs")
 
 
 def _get(port: int, path: str) -> tuple[int, bytes]:

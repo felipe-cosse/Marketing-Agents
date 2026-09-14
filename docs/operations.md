@@ -60,6 +60,21 @@ and `data/digest.key`); do not run them against native state without explicitly
 setting both paths. See the detailed [native workflow](local-operations.md#native-workflow)
 for path and port overrides.
 
+Native startup, including version checks, uses a sanitized environment and
+disables Corepack network acquisition and pnpm updates. Public tool-cache
+locations such as `COREPACK_HOME` and `XDG_CACHE_HOME` are preserved; credential,
+proxy, and loader variables are not. Missing installed/cached dependencies must
+be acquired separately with explicit `make bootstrap`, never by enabling runtime
+network access. This does not turn the native processes into an OS-level sandbox.
+
+After bootstrap, `make verify-native-offline` checks the real native launcher with
+fresh storage, an empty home, synthetic credential variables, all five mock demos,
+and restart/replay. It requires pinned Node/Corepack and a prewarmed pnpm cache;
+it fails rather than skipping or installing absent prerequisites. It is a
+separate native-only gate, not part of the Python-only backend image tests or a
+replacement for committed-export Compose verification. Detailed instrumentation
+and coverage limits are recorded in [OBJ-04](verification/requirements/OBJ-04.md).
+
 ## Readiness and safe operation
 
 Initialization is ordered: local key creation/verification, migration and seed,
