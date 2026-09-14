@@ -63,7 +63,7 @@ def test_del_05_native_refuses_unpinned_node_before_state_creation(
     monkeypatch.setattr(
         dev,
         "_version",
-        lambda command: "Python 3.12.12" if command[0] == str(python) else "v24.3.0",
+        lambda command, **kwargs: "Python 3.12.12" if command[0] == str(python) else "v24.3.0",
     )
     with pytest.raises(dev.NativeStartupError, match=r"activate Node 24\.20\.0"):
         dev.prerequisites(tmp_path, node=Path("/usr/bin/node"))
