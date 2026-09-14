@@ -192,6 +192,55 @@ results above verify DEL-07 behavior; they do not complete unrelated acceptance
 rows or the whole-system acceptance target. The [testing guide](testing.md)
 describes the commands and limits.
 
+## OBJ-03 operational workflows
+
+Claim: **Implemented and verified** within local mock boundaries — on 2026-09-14,
+the ten application-source [OBJ-03 gate commands](verification/requirements/OBJ-03.json)
+passed preflight before the final replay-fixture repair on the implementation based on
+`19e96d3da4ecdbd3d87a69b76086b5438b8a990c`. Python was 3.12.12 and Node 24.20.0;
+no dependencies were acquired. The [detailed record](verification/requirements/OBJ-03.md)
+identifies commands, individual durations, component counts and limitations.
+The matrix records these scoped tests, not whole-system acceptance. Every gate and
+the actual restored-base witness must still independently pass on the final feature
+commit before the non-fast-forward merge; the tree-bound attestation stays outside Git.
+
+- Actual API admission and restarted workers exercised all 43 manual dry-run
+  instances: 37 role-specific reads and six inert write-proposal previews.
+- Explicit mock execution for all six write-only instances waits for independent
+  approval of the exact action. Durable local receipts, replay and cancellation
+  checks do not claim real delivery. Preview rendering grants no action authority.
+- Saved schedule input is schema-validated, keyed to its workflow, admin-only and
+  dry-run-only. Configuration/claim fences prevent stale admission; legacy schedules
+  without explicit input remain readable but do not execute.
+- Separate local-output executors preserve no-call accounting and atomic step,
+  artifact and audit persistence. Populated SQLite upgrades and injected copy/drop,
+  audit and final foreign-key failures preserve prior state on rollback.
+- Frontend units, static checks, generated contracts and the declared WEB-03 browser
+  runner passed. Additional real-API desktop/mobile QA verified saved-input
+  save/reopen and privacy, not browser-to-worker completion or an approved write.
+
+The current-source archive witness passed; restoring only the production attempt
+classifier caused the expected ordinary `TOOL != NO_CALL` assertion failure, with
+archive-local imports and no dependency/collection error. This is preflight evidence,
+not a substitute for the final committed-tree witness. Optional PostgreSQL runtime
+and live adapters remain unverified. The earlier interrupted broad diagnostic is
+explicitly not a full-suite pass; separate completed output is required for any
+additional broad-backend claim.
+
+The subsequent permission-corrected broad backend run completed with 2,919 passes,
+one stale replay-fixture failure, 32 optional PostgreSQL skips and 55 passing unittest
+subtests in 1,398.36 seconds. The verification-only fixture must provide explicit
+signed schedule input and the registered workflow, matching normal scheduler rules.
+Its repair and regression are included in OBJ-03; all 82 targeted clean-state,
+fixture and real-HTTP cases then passed in 40.71 seconds. No scheduler safety check
+is relaxed. The expanded final manifest gate includes the fixture regression.
+That broad result remains a failed aggregate, not a green full-suite claim. The detailed
+record also discloses the earlier sandbox-only local-socket failures and successful
+permission-corrected transport rerun.
+
+GitHub reported the workflow `disabled_manually` on this resumption. CI remains off
+by user direction; its source, the separate repair branch and remote refs are unchanged.
+
 ## Historical runtime and CI evidence
 
 Claim: **Deterministic mock behavior**. The historical

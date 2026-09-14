@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
+from marketing_agents.application.orchestration.executable_workflows import (
+    ExecutableWorkflowRegistry,
+)
 from marketing_agents.application.policies.catalog_authorization import (
     CatalogAuthorizationError,
     authorize_catalog_reader,
@@ -28,6 +31,12 @@ from marketing_agents.application.ports.recurrence import (
     RecurrenceCalculator,
 )
 from marketing_agents.application.services.audit_events import AuditEventFactory
+from marketing_agents.application.services.schedule_configuration import (
+    ScheduleConfigurationError,
+    ScheduleConfigurationService,
+    bind_scheduled_input,
+    verify_scheduled_input,
+)
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.enums import TriggerKind
@@ -149,6 +158,7 @@ class InstanceConfigurationService:
         recurrence: RecurrenceCalculator,
         clock: Clock,
         audit_pseudonym_key: DigestKey,
+        workflows: ExecutableWorkflowRegistry | None = None,
     ) -> None:
         if type(audit_pseudonym_key) is not DigestKey:
             raise ValueError("instance configuration audit requires the exact pseudonym key")
@@ -158,6 +168,7 @@ class InstanceConfigurationService:
         self._recurrence = recurrence
         self._clock = clock
         self._audit_pseudonym_key = audit_pseudonym_key
+        self._workflows = workflows
 
     async def read(
         self,
@@ -266,6 +277,26 @@ class InstanceConfigurationService:
                         "instance configuration is invalid",
                     ) from None
                 self._require_configuration(candidate, constraints, now=now, client_value=True)
+                if candidate.scheduled_input is not None:
+                    if self._workflows is None:
+                        raise self._unavailable()
+                    try:
+                        bound = bind_scheduled_input(
+                            candidate.scheduled_input,
+                            constraints,
+                            self._workflows,
+                            self._audit_pseudonym_key,
+                        )
+                        if (
+                            not command.patch.scheduled_input.provided
+                            and candidate.scheduled_input != bound
+                        ):
+                            raise ValueError("scheduled workflow changed; resubmit explicit input")
+                        candidate = replace(candidate, scheduled_input=bound)
+                    except (ValueError, ScheduleConfigurationError):
+                        raise InstanceConfigurationServiceError(
+                            "configuration_invalid", "scheduled input is invalid for this workflow"
+                        ) from None
                 if candidate == current:
                     return InstanceConfigurationUpdateResult(
                         configuration=current,
@@ -280,6 +311,12 @@ class InstanceConfigurationService:
                     raise self._unavailable()
                 if not replaced:
                     raise _CompareAndSwapLost
+                if current.scheduled_input is not None or replacement.scheduled_input is not None:
+                    await ScheduleConfigurationService(self._recurrence).synchronize_in_uow(
+                        unit_of_work,
+                        replacement,
+                        now=now,
+                    )
                 audit_context = AuditContext.authenticated_user(
                     principal.actor_id,
                     authentication_method=principal.authentication_method.value,
@@ -382,6 +419,21 @@ class InstanceConfigurationService:
             for family, binding in configuration.connector_bindings.items()
         ):
             raise error
+        if configuration.scheduled_input is not None:
+            if TriggerKind.SCHEDULE not in constraints.supported_trigger_kinds:
+                raise error
+            if configuration.scheduled_input.authority is None:
+                if not client_value:
+                    raise error
+            else:
+                try:
+                    verify_scheduled_input(
+                        configuration.instance_id,
+                        configuration.scheduled_input,
+                        self._audit_pseudonym_key,
+                    )
+                except ScheduleConfigurationError:
+                    raise error from None
         if configuration.schedule is None:
             return
         try:
@@ -634,5 +686,25 @@ def _configuration_schema(
                 "additionalProperties": False,
             },
             "schedule": schedule_schema,
+            "scheduledInput": {
+                "oneOf": [
+                    {"type": "null"},
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["input"],
+                        "properties": {
+                            "input": {"type": "object", "minProperties": 1, "maxProperties": 64},
+                            "executionMode": {
+                                "type": "string",
+                                "enum": ["dry_run"],
+                                "default": "dry_run",
+                            },
+                        },
+                    },
+                ],
+            }
+            if TriggerKind.SCHEDULE in constraints.supported_trigger_kinds
+            else {"type": "null"},
         },
     }

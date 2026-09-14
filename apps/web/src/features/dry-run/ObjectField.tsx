@@ -19,6 +19,7 @@ export interface ObjectFieldProps {
   readonly issues: readonly SchemaValidationIssue[];
   readonly formId: string;
   readonly disabled: boolean;
+  readonly sensitiveValueNotice?: string;
   readonly onChange: (value: unknown) => void;
 }
 
@@ -46,6 +47,7 @@ export function ObjectField({
   formId,
   disabled,
   onChange,
+  sensitiveValueNotice,
 }: ObjectFieldProps): React.JSX.Element {
   const objectValue = asDraftObject(value);
   const messages = issues
@@ -114,6 +116,9 @@ export function ObjectField({
               issues={issues}
               formId={formId}
               disabled={disabled}
+              {...(sensitiveValueNotice === undefined
+                ? {}
+                : { sensitiveValueNotice })}
               onChange={(nextValue) => {
                 onChange({ ...objectValue, [property.name]: nextValue });
               }}

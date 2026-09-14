@@ -9,6 +9,11 @@ from typing import Any
 
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.enums import Effect, RunState, StepState
+from marketing_agents.domain.planner_output import (
+    PLANNER_OUTPUT_FAMILY,
+    PROPOSAL_PREVIEW_CAPABILITIES,
+    PROPOSAL_PREVIEW_KIND,
+)
 from marketing_agents.domain.runtime_policy import (
     RunRuntimePolicy,
     StepRuntimePolicy,
@@ -343,7 +348,15 @@ class RunStep:
             or not 1 <= self.timeout_seconds <= 120
         ):
             raise ValueError("step timeout must be from 1 through 120 seconds")
-        if self.connector_family in {"model", "artifact"}:
+        preview = self.connector_family == PLANNER_OUTPUT_FAMILY
+        if preview != (self.kind == PROPOSAL_PREVIEW_KIND):
+            raise ValueError("planner proposal preview kind and family must be paired")
+        if preview and (
+            self.capability_id not in PROPOSAL_PREVIEW_CAPABILITIES
+            or self.effect is not Effect.READ
+        ):
+            raise ValueError("planner proposal previews cannot carry execution authority")
+        if self.connector_family in {"model", "artifact", PLANNER_OUTPUT_FAMILY}:
             if (
                 self.binding_id is not None
                 or self.binding_configuration_revision is not None
@@ -353,14 +366,16 @@ class RunStep:
                 or self.data_classification is not DataClassification.INTERNAL
             ):
                 raise ValueError("non-connector steps cannot retain connector contract metadata")
-            if self.connector_family == "model" and (
+            if self.connector_family in {"model", PLANNER_OUTPUT_FAMILY} and (
                 self.request_schema_id is None or self.result_schema_id is None
             ):
-                raise ValueError("model steps require their selected template schema pair")
+                raise ValueError(
+                    "model and planner steps require their selected template schema pair"
+                )
             if self.connector_family == "artifact" and (
-                self.request_schema_id is not None or self.result_schema_id is not None
+                (self.request_schema_id is None) != (self.result_schema_id is None)
             ):
-                raise ValueError("artifact no-call steps cannot retain call schema IDs")
+                raise ValueError("local artifact steps require a complete schema pair or neither")
         elif (
             self.binding_id is None
             or self.binding_configuration_revision is None
@@ -391,7 +406,7 @@ class RunStep:
             ):
                 raise ValueError("read step cannot retain write approval authority")
         elif (
-            self.connector_family in {"model", "artifact"}
+            self.connector_family in {"model", "artifact", PLANNER_OUTPUT_FAMILY}
             or self.idempotency_support != "required"
             or not self.approval_required_roles
             or not self.approval_required_scopes

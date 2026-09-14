@@ -26,6 +26,7 @@ class ScheduleClaimService:
         *,
         lease_duration: timedelta = DEFAULT_SCHEDULE_LEASE,
         batch_size: int = DEFAULT_CLAIM_BATCH_SIZE,
+        require_configuration_binding: bool = False,
     ) -> None:
         if not MIN_SCHEDULE_LEASE <= lease_duration <= MAX_SCHEDULE_LEASE:
             raise ValueError("schedule lease must be from one second through ten minutes")
@@ -34,6 +35,9 @@ class ScheduleClaimService:
         self._dependencies = dependencies
         self._lease_duration = lease_duration
         self._batch_size = batch_size
+        if type(require_configuration_binding) is not bool:
+            raise ValueError("configuration binding selection must be boolean")
+        self._require_configuration_binding = require_configuration_binding
 
     async def claim_due_once(self, *, lease_owner: str) -> ScheduleClaim | None:
         """Commit and return one lease, or return None after bounded CAS losses."""
@@ -43,10 +47,14 @@ class ScheduleClaimService:
         lease_expires_at_utc = claimed_at_utc + self._lease_duration
 
         async with self._dependencies.unit_of_work() as unit_of_work:
-            candidates = await unit_of_work.schedules.list_claimable_due(
-                now=claimed_at_utc,
-                limit=self._batch_size,
-            )
+            if self._require_configuration_binding:
+                candidates = await unit_of_work.schedules.list_claimable_due(
+                    now=claimed_at_utc, limit=self._batch_size, configuration_bound_only=True
+                )
+            else:
+                candidates = await unit_of_work.schedules.list_claimable_due(
+                    now=claimed_at_utc, limit=self._batch_size
+                )
 
         for candidate in candidates:
             async with self._dependencies.unit_of_work() as unit_of_work:

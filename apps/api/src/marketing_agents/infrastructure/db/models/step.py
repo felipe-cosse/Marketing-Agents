@@ -103,9 +103,15 @@ class RunStepRecord(Base):
             "data_classification = 'internal') OR "
             "(connector_family = 'artifact' AND binding_id IS NULL AND "
             "binding_configuration_revision IS NULL AND timeout_seconds IS NULL AND "
-            "request_schema_id IS NULL AND result_schema_id IS NULL AND "
+            "((request_schema_id IS NULL AND result_schema_id IS NULL) OR "
+            "(request_schema_id IS NOT NULL AND result_schema_id IS NOT NULL)) AND "
             "data_classification = 'internal') OR "
-            "(connector_family NOT IN ('model','artifact') AND binding_id IS NOT NULL AND "
+            "(connector_family = 'planner-output' AND binding_id IS NULL AND "
+            "binding_configuration_revision IS NULL AND timeout_seconds IS NULL AND "
+            "request_schema_id IS NOT NULL AND result_schema_id IS NOT NULL AND "
+            "data_classification = 'internal') OR "
+            "(connector_family NOT IN ('model','artifact','planner-output') "
+            "AND binding_id IS NOT NULL AND "
             "binding_configuration_revision = configuration_revision AND "
             "timeout_seconds IS NOT NULL AND request_schema_id IS NOT NULL AND "
             "result_schema_id IS NOT NULL)",
@@ -115,12 +121,28 @@ class RunStepRecord(Base):
             "(effect = 'read' AND idempotency_support = 'not_applicable' AND "
             "approval_expires_after_seconds IS NULL AND "
             "approval_allow_self_approval IS NULL) OR "
-            "(effect = 'write' AND connector_family NOT IN ('model','artifact') AND "
+            "(effect = 'write' AND connector_family NOT IN ('model','artifact','planner-output') "
+            "AND "
             "idempotency_support = 'required' AND "
             "approval_expires_after_seconds IS NOT NULL AND "
             "approval_allow_self_approval IS NOT NULL AND request_schema_id IS NOT NULL AND "
             "result_schema_id IS NOT NULL)",
             name="ck_run_steps_effect_policy_snapshot",
+        ),
+        CheckConstraint(
+            "(connector_family <> 'planner-output' AND kind <> 'planner.proposal-preview.v1') OR "
+            "(connector_family = 'planner-output' AND kind = 'planner.proposal-preview.v1' AND "
+            "capability_id IN ('cap.events.enroll-attendee','cap.messaging.send-message',"
+            "'cap.newsletter.subscribe','cap.newsletter.unsubscribe') AND effect = 'read' AND "
+            "request_schema_id IS NOT NULL AND result_schema_id IS NOT NULL AND "
+            "result_schema_hash IS NOT NULL AND "
+            "idempotency_support = 'not_applicable' AND "
+            "CAST(request_redaction_fields AS TEXT) = '[]' AND "
+            "CAST(result_redaction_fields AS TEXT) = '[]' AND "
+            "CAST(approval_required_roles AS TEXT) = '[]' AND "
+            "CAST(approval_required_scopes AS TEXT) = '[]' AND "
+            "state NOT IN ('awaiting_approval','rejected'))",
+            name="ck_run_steps_planner_preview",
         ),
         CheckConstraint(
             "(state IN ('succeeded','failed','rejected','cancelled','skipped') AND "

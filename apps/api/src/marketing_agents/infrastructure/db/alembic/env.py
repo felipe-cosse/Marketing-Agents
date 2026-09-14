@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection
 
 from marketing_agents.config import Settings
 from marketing_agents.infrastructure.db import Base, create_database_runtime
-from marketing_agents.infrastructure.db.migrations import expected_tables
+from marketing_agents.infrastructure.db.migrations import expected_tables, migration_transaction
 from marketing_agents.infrastructure.db.types import UTCDateTime
 
 config = context.config
@@ -66,9 +66,7 @@ def run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     runtime = create_database_runtime(arguments.get("database_url") or Settings().database_url)
     try:
-        async with runtime.engine.connect() as connection, connection.begin():
-            if connection.dialect.name == "sqlite":
-                await connection.exec_driver_sql("BEGIN IMMEDIATE")
+        async with migration_transaction(runtime) as connection:
             await connection.run_sync(run_migrations)
     finally:
         await runtime.dispose()

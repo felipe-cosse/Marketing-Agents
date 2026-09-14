@@ -18,12 +18,15 @@ from marketing_agents.application.ports.instance_configuration import (
     InstanceConfigurationRepositoryError,
 )
 from marketing_agents.domain.canonical_json import CanonicalJsonError, canonical_json_bytes
-from marketing_agents.domain.enums import MisfirePolicy, TriggerKind
+from marketing_agents.domain.enums import MisfirePolicy, TriggerKind, WorkMode
 from marketing_agents.domain.instance_configuration import (
     InstanceConfiguration,
     InstanceConnectorBinding,
     InstanceSchedule,
     InstanceTriggerBinding,
+    ScheduledInput,
+    ScheduledInputAuthority,
+    scheduled_input_to_mapping,
 )
 from marketing_agents.domain.validation import require_id
 from marketing_agents.infrastructure.db.models.deployment import TriggerDefinitionRecord
@@ -31,6 +34,7 @@ from marketing_agents.infrastructure.db.models.instance_configuration import (
     AgentInstanceConfigurationRecord,
 )
 from marketing_agents.infrastructure.db.repositories.audit import SQLAlchemyAuditRepository
+from marketing_agents.infrastructure.db.repositories.schedule import SQLAlchemyScheduleRepository
 
 _INTEGRITY_DOMAIN = b"marketing-agents:instance-configuration:persistence:v1\x00"
 _MAX_SNAPSHOT_BYTES = 65_536
@@ -95,7 +99,7 @@ def _configuration_material(configuration: InstanceConfiguration) -> dict[str, A
             "instance_configuration_invalid",
             "configuration persistence requires one exact validated instance configuration",
         )
-    return {
+    material = {
         "instance_id": configuration.instance_id,
         "enabled": configuration.enabled,
         "variant_label": configuration.variant_label,
@@ -109,6 +113,13 @@ def _configuration_material(configuration: InstanceConfiguration) -> dict[str, A
         "schedule": _schedule_material(configuration.schedule),
         "configuration_revision": configuration.configuration_revision,
     }
+    if configuration.scheduled_input is not None:
+        if configuration.scheduled_input.authority is None:
+            raise InstanceConfigurationPersistenceError(
+                "scheduled_input_unbound", "scheduled input must carry server-issued authority"
+            )
+        material["scheduled_input"] = scheduled_input_to_mapping(configuration.scheduled_input)
+    return material
 
 
 def _integrity_digest(material: dict[str, Any]) -> str:
@@ -170,13 +181,18 @@ def _to_record(configuration: InstanceConfiguration) -> AgentInstanceConfigurati
             material["connector_bindings"], "connector bindings"
         ),
         schedule_json=_canonical_text(material["schedule"], "schedule"),
+        scheduled_input_json=(
+            _canonical_text(material["scheduled_input"], "scheduled input")
+            if "scheduled_input" in material
+            else None
+        ),
         version=configuration.configuration_revision,
         integrity_digest=_integrity_digest(material),
     )
 
 
 def _record_material(record: AgentInstanceConfigurationRecord) -> dict[str, Any]:
-    return {
+    material = {
         "instance_id": record.instance_id,
         "enabled": record.enabled,
         "variant_label": record.variant_label,
@@ -187,6 +203,11 @@ def _record_material(record: AgentInstanceConfigurationRecord) -> dict[str, Any]
         "schedule": _parse_canonical_text(record.schedule_json, "schedule"),
         "configuration_revision": record.version,
     }
+    if record.scheduled_input_json is not None:
+        material["scheduled_input"] = _parse_canonical_text(
+            record.scheduled_input_json, "scheduled input"
+        )
+    return material
 
 
 def _to_domain(record: AgentInstanceConfigurationRecord) -> InstanceConfiguration:
@@ -248,6 +269,26 @@ def _to_domain(record: AgentInstanceConfigurationRecord) -> InstanceConfiguratio
                 misfire_grace_seconds=schedule_value["misfire_grace_seconds"],
             )
         )
+        scheduled_input = None
+        if "scheduled_input" in material:
+            snapshot = material["scheduled_input"]
+            if not isinstance(snapshot, dict) or set(snapshot) != {"input", "mode", "authority"}:
+                raise ValueError("persisted scheduled input has an invalid shape")
+            authority = snapshot["authority"]
+            if not isinstance(authority, dict) or set(authority) != {
+                "workflow_id",
+                "workflow_definition_hash",
+                "input_schema_id",
+                "input_schema_hash",
+                "digest_key_version",
+                "binding_digest",
+            }:
+                raise ValueError("persisted scheduled authority has an invalid shape")
+            scheduled_input = ScheduledInput(
+                admitted_payload=snapshot["input"],
+                mode=WorkMode(snapshot["mode"]),
+                authority=ScheduledInputAuthority(**authority),
+            )
         return InstanceConfiguration(
             instance_id=material["instance_id"],
             enabled=material["enabled"],
@@ -256,6 +297,7 @@ def _to_domain(record: AgentInstanceConfigurationRecord) -> InstanceConfiguratio
             connector_bindings=connectors,
             schedule=schedule,
             configuration_revision=material["configuration_revision"],
+            scheduled_input=scheduled_input,
         )
     except InstanceConfigurationPersistenceError:
         raise
@@ -370,6 +412,28 @@ class SQLAlchemyInstanceConfigurationRepository:
         await self._verify_triggers(configurations)
         return configurations
 
+    async def fence_revision(self, configuration: InstanceConfiguration) -> bool:
+        digest = _integrity_digest(_configuration_material(configuration))
+        statement = (
+            update(AgentInstanceConfigurationRecord)
+            .where(
+                AgentInstanceConfigurationRecord.instance_id == configuration.instance_id,
+                AgentInstanceConfigurationRecord.version == configuration.configuration_revision,
+                AgentInstanceConfigurationRecord.integrity_digest == digest,
+            )
+            .values(integrity_digest=digest)
+            .returning(AgentInstanceConfigurationRecord.instance_id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            return (
+                await self._session.execute(statement)
+            ).scalar_one_or_none() == configuration.instance_id
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return False
+            raise
+
     async def insert_missing(self, configuration: InstanceConfiguration) -> bool:
         record = _to_record(configuration)
         try:
@@ -416,6 +480,7 @@ class SQLAlchemyInstanceConfigurationRepository:
                 trigger_bindings_json=replacement_record.trigger_bindings_json,
                 connector_bindings_json=replacement_record.connector_bindings_json,
                 schedule_json=replacement_record.schedule_json,
+                scheduled_input_json=replacement_record.scheduled_input_json,
                 version=replacement_record.version,
                 integrity_digest=replacement_record.integrity_digest,
             )
@@ -442,6 +507,7 @@ class InstanceConfigurationSQLAlchemyUnitOfWork:
         self._session: AsyncSession | None = None
         self._configurations: SQLAlchemyInstanceConfigurationRepository | None = None
         self._audits: SQLAlchemyAuditRepository | None = None
+        self._schedules: SQLAlchemyScheduleRepository | None = None
         self._finished = False
 
     def _require_session(self) -> AsyncSession:
@@ -460,6 +526,14 @@ class InstanceConfigurationSQLAlchemyUnitOfWork:
                 "instance configuration unit of work has not been entered",
             )
         return self._configurations
+
+    @property
+    def schedules(self) -> SQLAlchemyScheduleRepository:
+        if self._schedules is None:
+            raise InstanceConfigurationPersistenceError(
+                "instance_configuration_uow_inactive", "configuration unit of work is inactive"
+            )
+        return self._schedules
 
     @property
     def audits(self) -> SQLAlchemyAuditRepository:
@@ -482,6 +556,7 @@ class InstanceConfigurationSQLAlchemyUnitOfWork:
             await self._session.execute(text("BEGIN DEFERRED"))
         self._configurations = SQLAlchemyInstanceConfigurationRepository(self._session)
         self._audits = SQLAlchemyAuditRepository(self._session)
+        self._schedules = SQLAlchemyScheduleRepository(self._session)
         return self
 
     async def __aexit__(

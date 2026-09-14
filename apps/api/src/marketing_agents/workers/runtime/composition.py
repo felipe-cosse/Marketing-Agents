@@ -10,6 +10,9 @@ from fastapi import FastAPI
 
 from marketing_agents.api.app import create_app
 from marketing_agents.application.orchestration import OrchestrationDependencies
+from marketing_agents.application.orchestration.executable_workflows import (
+    ExecutableWorkflowRegistry,
+)
 from marketing_agents.application.ports.clock import Clock
 from marketing_agents.application.ports.webhook_sources import WebhookSourceDefinition
 from marketing_agents.application.ports.webhooks import WebhookVerifierConfig
@@ -27,6 +30,10 @@ from marketing_agents.config import Settings
 from marketing_agents.demos import DEMO_SCENARIOS, DemoRunService, build_demo_read_adapter
 from marketing_agents.demos.email_signup_service import EmailSignupRunService
 from marketing_agents.domain.enums import TriggerKind
+from marketing_agents.infrastructure.adapters.catalog_role_read_adapter import (
+    build_catalog_role_read_adapter,
+)
+from marketing_agents.infrastructure.adapters.catalog_roles import CatalogRoleRenderer
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 from marketing_agents.infrastructure.db import (
@@ -48,12 +55,18 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyWorkRepository,
     create_database_runtime,
 )
+from marketing_agents.infrastructure.executable_workflows import build_executable_workflow_registry
 from marketing_agents.infrastructure.instance_configuration_constraints import (
     CompiledCatalogInstanceConfigurationConstraintProvider,
     LocalMockRegisteredBindingProvider,
 )
 from marketing_agents.infrastructure.manual_work import CompiledCatalogManualAdmissionResolver
 from marketing_agents.infrastructure.readiness import LocalReadinessProbe
+from marketing_agents.infrastructure.runtime.catalog_proposals import CatalogProposalWorkflowService
+from marketing_agents.infrastructure.runtime.catalog_workflows import CatalogReadWorkflowService
+from marketing_agents.infrastructure.runtime.catalog_write_workflows import (
+    CatalogWriteWorkflowService,
+)
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
 from marketing_agents.infrastructure.webhook_ingress import CompiledCatalogWebhookAdmissionResolver
 from marketing_agents.infrastructure.webhook_signatures import (
@@ -93,6 +106,10 @@ class LocalRuntime:
     email: EmailSignupRunService
     configurations: InstanceConfigurationService
     webhook: WebhookAdmissionService
+    workflows: ExecutableWorkflowRegistry
+    catalog_reads: CatalogReadWorkflowService
+    catalog_proposals: CatalogProposalWorkflowService
+    catalog_writes: CatalogWriteWorkflowService
 
     def create_app(self) -> FastAPI:
         dependencies = self.dependencies
@@ -160,11 +177,19 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             RandomIds(),
             SQLAlchemyManualAdmissionUnitOfWorkFactory(database.session_factory, factories),
         )
+        workflows = build_executable_workflow_registry(
+            catalog, demo_scenarios=DEMO_SCENARIOS.list()
+        )
+        role_renderer = CatalogRoleRenderer(catalog)
+        role_adapter = build_catalog_role_read_adapter(catalog, workflows, role_renderer)
         manual = ManualDryRunService(
             dependencies,
             key,
             CompiledCatalogManualAdmissionResolver(
-                catalog, mock_connectors_active=True, demo_scenarios=DEMO_SCENARIOS
+                catalog,
+                mock_connectors_active=True,
+                demo_scenarios=DEMO_SCENARIOS,
+                workflows=workflows,
             ),
             current_catalog_hash=catalog.content_hash,
         )
@@ -178,6 +203,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             recurrence=CroniterRecurrenceCalculator(),
             clock=dependencies.clock,
             audit_pseudonym_key=key,
+            workflows=workflows,
         )
         definitions: list[WebhookSourceDefinition] = []
         if settings.webhook_hmac_secret is not None:
@@ -223,7 +249,9 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             dependencies,
             key,
             StaticWebhookSourceRegistry(tuple(definitions)),
-            CompiledCatalogWebhookAdmissionResolver(catalog, mock_connectors_active=True),
+            CompiledCatalogWebhookAdmissionResolver(
+                catalog, mock_connectors_active=True, workflows=workflows
+            ),
             current_catalog_hash=catalog.content_hash,
         )
         return LocalRuntime(
@@ -237,6 +265,12 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             EmailSignupRunService(dependencies, manual, catalog, adapter),
             configurations,
             webhook,
+            workflows,
+            CatalogReadWorkflowService(
+                dependencies, catalog, workflows, role_adapter, role_renderer
+            ),
+            CatalogProposalWorkflowService(dependencies, catalog, workflows),
+            CatalogWriteWorkflowService(dependencies, catalog, workflows),
         )
     except BaseException:
         await database.dispose()

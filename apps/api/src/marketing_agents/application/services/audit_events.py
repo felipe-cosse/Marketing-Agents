@@ -47,15 +47,23 @@ from marketing_agents.domain.entities import (
 from marketing_agents.domain.enums import (
     ApprovalDecisionKind,
     ApprovalStatus,
+    Effect,
     ExternalActionState,
     MisfirePolicy,
     OccurrenceState,
     RunState,
+    StepState,
 )
 from marketing_agents.domain.execution_control import AttemptOutcome, ExecutionAttempt
-from marketing_agents.domain.provenance import ArtifactEnvelope
+from marketing_agents.domain.planner_output import (
+    PLANNER_OUTPUT_FAMILY,
+    PROPOSAL_PREVIEW_CAPABILITIES,
+    PROPOSAL_PREVIEW_KIND,
+)
+from marketing_agents.domain.provenance import ArtifactEnvelope, ProviderVersion
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
+from marketing_agents.domain.runtime_policy import AttemptKind
 from marketing_agents.domain.schedule_misfire import (
     ScheduleDisposition,
     ScheduleOccurrencePlan,
@@ -1250,6 +1258,105 @@ class AuditEventFactory:
             step_id=provenance.step_id,
             artifact_id=provenance.artifact_id,
             attempt_id=attempt.id,
+            mutation_version=1,
+            previous_state=None,
+            new_state="persisted",
+        )
+
+    def artifact_transformed(self, artifact: ArtifactEnvelope, step: RunStep) -> AuditEventDraft:
+        """Witness a local NO_CALL output without inventing an execution attempt."""
+        if type(artifact) is not ArtifactEnvelope or type(step) is not RunStep:
+            raise ValueError("local artifact audit requires exact artifact and step contracts")
+        ArtifactEnvelope.model_validate(artifact.model_dump(mode="python"))
+        replace(step)
+        provenance = artifact.provenance
+        if (
+            not artifact.verify_payload()
+            or step.effect is not Effect.READ
+            or step.connector_family != "artifact"
+            or step.capability_id != "cap.artifact.transform-deterministic"
+            or step.runtime_policy.attempt_kind is not AttemptKind.NO_CALL
+            or step.state is not StepState.SUCCEEDED
+            or provenance.run_id != step.run_id
+            or provenance.step_id != step.id
+            or provenance.template_id != step.template_id
+            or provenance.instance_id != step.selected_instance_id
+            or provenance.instance_config_revision != step.configuration_revision
+            or provenance.output_schema_id != step.result_schema_id
+            or provenance.output_schema_hash != step.result_schema_hash
+            or provenance.created_at != step.updated_at
+            or any(provider.mode != "local" for provider in provenance.providers)
+        ):
+            raise ValueError("local artifact audit does not match its succeeded transform")
+        return self._build(
+            run_id=provenance.run_id,
+            event_type="artifact.transformed",
+            aggregate_type="artifact",
+            aggregate_id=provenance.artifact_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=provenance.created_at,
+            metadata={
+                "data_classification": provenance.classification.value,
+                "output_schema_id": provenance.output_schema_id,
+                "output_schema_version": provenance.output_schema_version,
+                "output_schema_hash": provenance.output_schema_hash,
+            },
+            step_id=provenance.step_id,
+            artifact_id=provenance.artifact_id,
+            mutation_version=1,
+            previous_state=None,
+            new_state="persisted",
+        )
+
+    def artifact_previewed(self, artifact: ArtifactEnvelope, step: RunStep) -> AuditEventDraft:
+        """Witness an inert planner proposal without claiming an external effect."""
+        if type(artifact) is not ArtifactEnvelope or type(step) is not RunStep:
+            raise ValueError("proposal preview audit requires exact artifact and step contracts")
+        ArtifactEnvelope.model_validate(artifact.model_dump(mode="python"))
+        replace(step)
+        provenance = artifact.provenance
+        if (
+            not artifact.verify_payload()
+            or step.effect is not Effect.READ
+            or step.connector_family != PLANNER_OUTPUT_FAMILY
+            or step.kind != PROPOSAL_PREVIEW_KIND
+            or step.capability_id not in PROPOSAL_PREVIEW_CAPABILITIES
+            or step.runtime_policy.attempt_kind is not AttemptKind.NO_CALL
+            or step.state is not StepState.SUCCEEDED
+            or provenance.run_id != step.run_id
+            or provenance.step_id != step.id
+            or provenance.template_id != step.template_id
+            or provenance.instance_id != step.selected_instance_id
+            or provenance.instance_config_revision != step.configuration_revision
+            or provenance.output_schema_id != step.result_schema_id
+            or provenance.output_schema_hash != step.result_schema_hash
+            or provenance.created_at != step.updated_at
+            or provenance.providers
+            != (
+                ProviderVersion(
+                    provider_kind="planner",
+                    mode="local",
+                    name="catalog-write-proposal",
+                    version="v1",
+                ),
+            )
+        ):
+            raise ValueError("proposal preview audit does not match its succeeded planner output")
+        return self._build(
+            run_id=provenance.run_id,
+            event_type="artifact.previewed",
+            aggregate_type="artifact",
+            aggregate_id=provenance.artifact_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=provenance.created_at,
+            metadata={
+                "data_classification": provenance.classification.value,
+                "output_schema_id": provenance.output_schema_id,
+                "output_schema_version": provenance.output_schema_version,
+                "output_schema_hash": provenance.output_schema_hash,
+            },
+            step_id=provenance.step_id,
+            artifact_id=provenance.artifact_id,
             mutation_version=1,
             previous_state=None,
             new_state="persisted",

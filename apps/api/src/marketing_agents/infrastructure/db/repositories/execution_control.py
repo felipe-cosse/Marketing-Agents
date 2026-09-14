@@ -740,6 +740,49 @@ class SQLAlchemyExecutionControlRepository:
             )
         return ExecutionControlStartResult(control=next_control, started=True)
 
+    async def fence_active(
+        self,
+        *,
+        run_id: str,
+        expected_control_version: int,
+        occurred_at: datetime,
+    ) -> bool:
+        """Serialize local completion with cancellation without charging a call."""
+        require_id(run_id, "execution fence Run ID")
+        require_utc(occurred_at, "execution fence time")
+        current = await self.get(run_id)
+        if (
+            current is None
+            or current.version != expected_control_version
+            or current.started_at is None
+            or current.deadline_at is None
+            or not current.started_at <= occurred_at < current.deadline_at
+            or current.cancel_requested_at is not None
+        ):
+            return False
+        digest = execution_control_record_digest(
+            _control_material(self._control_record(current)), self._integrity_key
+        )
+        try:
+            result = await self._session.scalar(
+                update(RunExecutionControlRecord)
+                .where(
+                    RunExecutionControlRecord.run_id == run_id,
+                    RunExecutionControlRecord.version == expected_control_version,
+                    RunExecutionControlRecord.integrity_digest == digest,
+                    RunExecutionControlRecord.cancel_requested_at.is_(None),
+                    RunExecutionControlRecord.deadline_at > occurred_at,
+                )
+                .values(version=RunExecutionControlRecord.version)
+                .returning(RunExecutionControlRecord.run_id)
+                .execution_options(synchronize_session=False)
+            )
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return False
+            raise
+        return result is not None
+
     async def request_cancel(
         self,
         *,

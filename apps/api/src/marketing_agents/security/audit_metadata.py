@@ -167,6 +167,22 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
             "output_schema_version",
         }
     ),
+    "artifact.transformed": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
+        }
+    ),
+    "artifact.previewed": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
+        }
+    ),
     "action.proposed": frozenset({"idempotency_support"}),
     "action.awaiting_approval": frozenset({"idempotency_support"}),
     "action.approved": frozenset({"idempotency_support"}),
@@ -524,6 +540,12 @@ def _pseudonymize_configuration_snapshot(value: Any, key: DigestKey) -> Any:
     if not isinstance(value, Mapping):
         return value
     result = dict(value)
+    if "scheduled_input" in result:
+        result["scheduled_input"] = _pseudonymize_configuration_text(
+            result["scheduled_input"],
+            field_domain="scheduled_input",
+            key=key,
+        )
     if "variant_label" in result:
         result["variant_label"] = _pseudonymize_configuration_text(
             result["variant_label"],
@@ -829,11 +851,21 @@ def _validate_deployment_configuration(
     *,
     stored_representation: bool,
 ) -> None:
+    expected_fields = _DEPLOYMENT_CONFIGURATION_FIELDS
+    if isinstance(value, Mapping) and "scheduled_input" in value:
+        expected_fields = expected_fields | {"scheduled_input"}
     configuration = _require_exact_configuration_fields(
         value,
-        _DEPLOYMENT_CONFIGURATION_FIELDS,
+        expected_fields,
         field_name,
     )
+    if "scheduled_input" in configuration:
+        _require_optional_configuration_text(
+            configuration["scheduled_input"],
+            f"{field_name}.scheduled_input",
+            maximum=65_536,
+            stored_representation=stored_representation,
+        )
     _require_configuration_boolean(configuration["enabled"], f"{field_name}.enabled")
     variant_label = _require_optional_configuration_text(
         configuration["variant_label"],

@@ -9,8 +9,15 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Self
 
-from marketing_agents.domain.enums import MisfirePolicy, TriggerKind
-from marketing_agents.domain.validation import require_iana_timezone, require_id, require_text
+from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.enums import MisfirePolicy, TriggerKind, WorkMode
+from marketing_agents.domain.validation import (
+    frozen_json_mapping,
+    require_digest,
+    require_iana_timezone,
+    require_id,
+    require_text,
+)
 
 MAX_INSTANCE_TRIGGER_BINDINGS = 16
 MAX_INSTANCE_CONNECTOR_BINDINGS = 16
@@ -22,6 +29,67 @@ MAX_INSTANCE_MISFIRE_GRACE_SECONDS = 86_400
 _CONNECTOR_FAMILY_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _CONNECTOR_BINDING_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _EVENT_SOURCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledInputAuthority:
+    """Server-issued identity and keyed seal; never supplied by a configuration client."""
+
+    workflow_id: str
+    workflow_definition_hash: str
+    input_schema_id: str
+    input_schema_hash: str
+    digest_key_version: str
+    binding_digest: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        for value in (self.workflow_id, self.input_schema_id, self.digest_key_version):
+            require_id(value, "scheduled input authority identity")
+        from marketing_agents.domain.schema_hash import require_schema_hash
+
+        require_schema_hash(self.input_schema_hash, "scheduled input schema hash")
+        require_digest(self.binding_digest, "scheduled input binding digest")
+        require_digest(self.workflow_definition_hash, "scheduled workflow definition hash")
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledInput:
+    """Explicit reusable business input, optionally sealed by the configuration service."""
+
+    admitted_payload: Mapping[str, Any] = field(repr=False)
+    mode: WorkMode = WorkMode.DRY_RUN
+    authority: ScheduledInputAuthority | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.mode) is not WorkMode or self.mode not in (
+            WorkMode.DRY_RUN,
+            WorkMode.MOCK_EXECUTION,
+        ):
+            raise ValueError("scheduled input mode is unsupported")
+        payload = frozen_json_mapping(self.admitted_payload, "scheduled input")
+        if len(canonical_json_bytes(payload)) > 32_768:
+            raise ValueError("scheduled input exceeds its storage budget")
+        object.__setattr__(self, "admitted_payload", payload)
+        if self.authority is not None and type(self.authority) is not ScheduledInputAuthority:
+            raise ValueError("scheduled input authority must use the exact value")
+
+
+def scheduled_input_to_mapping(value: ScheduledInput) -> dict[str, Any]:
+    authority = value.authority
+    return {
+        "input": dict(value.admitted_payload),
+        "mode": value.mode.value,
+        "authority": None
+        if authority is None
+        else {
+            "workflow_id": authority.workflow_id,
+            "workflow_definition_hash": authority.workflow_definition_hash,
+            "input_schema_id": authority.input_schema_id,
+            "input_schema_hash": authority.input_schema_hash,
+            "digest_key_version": authority.digest_key_version,
+            "binding_digest": authority.binding_digest,
+        },
+    }
 
 
 def _require_exact_bool(value: bool, field_name: str) -> None:
@@ -170,6 +238,7 @@ class InstanceConfiguration:
     connector_bindings: Mapping[str, InstanceConnectorBinding]
     schedule: InstanceSchedule | None
     configuration_revision: int
+    scheduled_input: ScheduledInput | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         require_id(self.instance_id, "configured instance ID")
@@ -212,6 +281,8 @@ class InstanceConfiguration:
             raise ValueError("instance schedule must use the exact immutable value")
         if type(self.configuration_revision) is not int or self.configuration_revision < 1:
             raise ValueError("instance configuration revision must be a positive integer")
+        if self.scheduled_input is not None and type(self.scheduled_input) is not ScheduledInput:
+            raise ValueError("scheduled input must use the exact immutable value")
 
         schedule_triggers = tuple(
             item for item in self.trigger_bindings if item.kind is TriggerKind.SCHEDULE
@@ -237,6 +308,7 @@ class InstanceConfiguration:
             connector_bindings=self.connector_bindings,
             schedule=self.schedule,
             configuration_revision=configuration_revision,
+            scheduled_input=self.scheduled_input,
         )
 
 
@@ -275,6 +347,7 @@ class InstanceConfigurationPatch:
         default_factory=PatchValue.omitted
     )
     schedule: PatchValue[InstanceSchedule | None] = field(default_factory=PatchValue.omitted)
+    scheduled_input: PatchValue[ScheduledInput | None] = field(default_factory=PatchValue.omitted)
 
     def __post_init__(self) -> None:
         fields = (
@@ -283,6 +356,7 @@ class InstanceConfigurationPatch:
             self.trigger_bindings,
             self.connector_bindings,
             self.schedule,
+            self.scheduled_input,
         )
         if any(type(item) is not PatchValue for item in fields):
             raise ValueError("configuration patch fields must use exact patch values")
@@ -320,6 +394,15 @@ class InstanceConfigurationPatch:
             and type(self.schedule.value) is not InstanceSchedule
         ):
             raise ValueError("supplied schedule must use the exact immutable value")
+        if (
+            self.scheduled_input.provided
+            and self.scheduled_input.value is not None
+            and (
+                type(self.scheduled_input.value) is not ScheduledInput
+                or self.scheduled_input.value.authority is not None
+            )
+        ):
+            raise ValueError("scheduled input patches cannot supply server authority")
 
     @property
     def is_empty(self) -> bool:
@@ -331,6 +414,7 @@ class InstanceConfigurationPatch:
                 self.trigger_bindings,
                 self.connector_bindings,
                 self.schedule,
+                self.scheduled_input,
             )
         )
 
@@ -362,6 +446,11 @@ class InstanceConfigurationPatch:
             connector_bindings=connectors,
             schedule=self.schedule.value if self.schedule.provided else current.schedule,
             configuration_revision=current.configuration_revision,
+            scheduled_input=(
+                self.scheduled_input.value
+                if self.scheduled_input.provided
+                else current.scheduled_input
+            ),
         )
 
 
@@ -370,7 +459,7 @@ def configuration_to_plain_mapping(configuration: InstanceConfiguration) -> dict
 
     if type(configuration) is not InstanceConfiguration:
         raise ValueError("configuration serialization requires the exact domain projection")
-    return {
+    material = {
         "enabled": configuration.enabled,
         "variant_label": configuration.variant_label,
         "trigger_bindings": [
@@ -406,3 +495,8 @@ def configuration_to_plain_mapping(configuration: InstanceConfiguration) -> dict
             }
         ),
     }
+    if configuration.scheduled_input is not None:
+        material["scheduled_input"] = canonical_json_bytes(
+            scheduled_input_to_mapping(configuration.scheduled_input)
+        ).decode("utf-8")
+    return material

@@ -393,7 +393,7 @@ def test_del_05_migration_cannot_destructively_downgrade() -> None:
 
 
 @pytest.mark.asyncio
-async def test_del_05_scheduler_intake_is_durable_and_never_executes_inline(tmp_path: Path) -> None:
+async def test_del_05_scheduler_requires_explicit_bound_input_after_upgrade(tmp_path: Path) -> None:
     settings = await _installation(tmp_path)
     clock = Clock()
     runtime = await build_runtime(settings, clock=clock)
@@ -415,7 +415,10 @@ async def test_del_05_scheduler_intake_is_durable_and_never_executes_inline(tmp_
             assert (await unit_of_work.schedules.add_or_get(schedule)).inserted
             await unit_of_work.commit()
         scheduler = SchedulerWorker(runtime, "scheduler.integration.one")
-        assert await scheduler.drain_once()
+        # Legacy schedules never contained operator-authored business input or
+        # an executable definition. Retain them for review, but do not fabricate
+        # work to make them runnable. OBJ-03 covers the bound API-configured path.
+        assert not await scheduler.drain_once()
         await runtime.close()
         runtime = await build_runtime(settings, clock=clock)
         assert not await SchedulerWorker(runtime, "scheduler.integration.restarted").drain_once()
@@ -423,14 +426,8 @@ async def test_del_05_scheduler_intake_is_durable_and_never_executes_inline(tmp_
             occurrence = await unit_of_work.schedules.get_occurrence_by_schedule_due(
                 schedule.id, schedule.next_run_at_utc
             )
-            assert occurrence is not None and occurrence.run_id is not None
-            run = await unit_of_work.runs.get(occurrence.run_id)
-            assert run is not None and run.state is RunState.RECEIVED
-            assert await unit_of_work.artifacts.list_for_run(run.id) == ()
-        # Unsupported workflows terminate visibly instead of silently remaining queued.
-        assert await RunWorker(runtime, "worker.unsupported").drain_once()
-        async with runtime.dependencies.unit_of_work() as unit_of_work:
-            failed = await unit_of_work.runs.get(run.id)
-            assert failed is not None and failed.state is RunState.FAILED
+            assert occurrence is None
+            assert await unit_of_work.schedules.get(schedule.id) == schedule
+        assert not await RunWorker(runtime, "worker.unsupported").drain_once()
     finally:
         await runtime.close()

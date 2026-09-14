@@ -41,7 +41,11 @@ export interface paths {
       readonly path?: never;
       readonly cookie?: never;
     };
-    readonly get?: never;
+    /**
+     * Get Instance Configuration
+     * @description Explicit sensitive view; the ordinary catalog projection never includes this input.
+     */
+    readonly get: operations["getAgentInstanceConfiguration"];
     readonly put?: never;
     readonly post?: never;
     readonly delete?: never;
@@ -1795,6 +1799,8 @@ export interface components {
       /** Enabled */
       readonly enabled?: boolean;
       readonly schedule?: components["schemas"]["ScheduleBindingInput"] | null;
+      readonly scheduledInput?:
+        components["schemas"]["ScheduledInputInput"] | null;
       /** Triggerbindings */
       readonly triggerBindings?: readonly components["schemas"]["TriggerBindingInput"][];
       /** Variantlabel */
@@ -1877,6 +1883,8 @@ export interface components {
       /** Instanceid */
       readonly instanceId: string;
       readonly schedule: components["schemas"]["ScheduleBindingView"] | null;
+      readonly scheduledInput?:
+        components["schemas"]["ScheduledInputInput"] | null;
       /** Triggerbindings */
       readonly triggerBindings: readonly components["schemas"]["marketing_agents__api__schemas__instance_configuration__TriggerBindingView"][];
       /** Variantlabel */
@@ -2942,6 +2950,19 @@ export interface components {
       /** Timezone */
       readonly timezone: string;
     };
+    /** ScheduledInputInput */
+    readonly ScheduledInputInput: {
+      /**
+       * Executionmode
+       * @default dry_run
+       * @constant
+       */
+      readonly executionMode: "dry_run";
+      /** Input */
+      readonly input: {
+        readonly [key: string]: unknown;
+      };
+    };
     /** SessionResponse */
     readonly SessionResponse: {
       /** Actorid */
@@ -3279,6 +3300,101 @@ export interface operations {
           readonly "Cache-Control"?: "no-store";
           /** @description Shared caches must separate authorization contexts. */
           readonly Vary?: "Authorization";
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly getAgentInstanceConfiguration: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path: {
+        readonly instance_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Administrator-only deployment configuration and saved scheduled input. */
+      readonly 200: {
+        headers: {
+          /** @description Configuration responses must not be stored. */
+          readonly "Cache-Control"?: "no-store";
+          /** @description Strong revision validator required by the next PATCH. */
+          readonly ETag?: string;
+          /** @description Shared caches must separate authorization contexts. */
+          readonly Vary?: "Authorization";
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["InstanceConfigurationResponse"];
+        };
+      };
+      /** @description The authentication header shape is malformed. */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Authentication is required. */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Saved execution input requires a configuration administrator. */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description The selected agent instance does not exist. */
+      readonly 404: {
+        headers: {
+          /** @description Configuration responses must not be stored. */
+          readonly "Cache-Control"?: "no-store";
+          /** @description Shared caches must separate authorization contexts. */
+          readonly Vary?: "Authorization";
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description The instance path parameter is invalid. */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description The configuration service is unavailable or violated its contract. */
+      readonly 503: {
+        headers: {
           readonly [name: string]: unknown;
         };
         content: {

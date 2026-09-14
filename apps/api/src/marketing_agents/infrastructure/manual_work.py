@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
+from marketing_agents.application.orchestration.executable_workflows import (
+    ExecutableWorkflowDefinition,
+    ExecutableWorkflowRegistry,
+    ExecutableWorkflowRegistryError,
+    catalog_role_workflow_id,
+)
 from marketing_agents.application.policies.runtime_guard import (
     CapabilityPolicy,
     RuntimePolicyGuard,
@@ -19,12 +25,10 @@ from marketing_agents.application.ports.manual_work import (
 )
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services.incoming_work_validation import (
-    CampaignBriefPolicy,
     ConfiguredIncomingTrigger,
     IncomingWorkValidationError,
     IncomingWorkValidator,
     ValidatedIncomingWork,
-    WorkflowAdmissionDefinition,
 )
 from marketing_agents.application.services.manual_work_intake import ManualDryRunCommand
 from marketing_agents.demos import (
@@ -45,6 +49,7 @@ from marketing_agents.infrastructure.catalog.models import (
     CompiledCatalog,
     ToolCapabilityRecord,
 )
+from marketing_agents.infrastructure.executable_workflows import build_executable_workflow_registry
 from marketing_agents.infrastructure.instance_configuration_constraints import (
     InstanceConfigurationConstraintError,
     validate_mock_connector_bindings,
@@ -161,6 +166,7 @@ class CompiledCatalogManualAdmissionResolver:
         *,
         mock_connectors_active: bool,
         demo_scenarios: DemoScenarioRegistry = DEMO_SCENARIOS,
+        workflows: ExecutableWorkflowRegistry | None = None,
     ) -> None:
         if type(catalog) is not CompiledCatalog:
             raise ValueError("manual admission resolver requires one compiled catalog")
@@ -177,6 +183,15 @@ class CompiledCatalogManualAdmissionResolver:
         self._catalog = catalog
         self._mock_connectors_active = mock_connectors_active
         self._demo_scenarios = demo_scenarios
+        if workflows is not None and type(workflows) is not ExecutableWorkflowRegistry:
+            raise ValueError("manual admission resolver requires an exact executable registry")
+        self._workflows = (
+            build_executable_workflow_registry(catalog, demo_scenarios=demo_scenarios.list())
+            if workflows is None
+            else workflows
+        )
+        if self._workflows.catalog_content_hash != catalog.content_hash:
+            raise ValueError("manual executable registry belongs to a different catalog")
         self._instances = _unique_index(catalog.instances, label="instance")
         self._templates = _unique_index(catalog.templates, label="template")
         self._capabilities = _unique_index(catalog.tool_capabilities, label="capability")
@@ -280,9 +295,25 @@ class CompiledCatalogManualAdmissionResolver:
                 "demo_scenario_unknown",
                 "demo scenario is not registered for this agent instance",
             )
-        workflow_id = (
-            scenario.workflow_id if scenario is not None else self._manual_workflow_id(template.id)
-        )
+        try:
+            definition = (
+                self._workflows.for_demo(scenario.id)
+                if scenario is not None
+                else self._workflows.for_catalog_role(template.id, TriggerKind.MANUAL)
+            )
+            self._workflows.require_match(
+                definition.id,
+                instance_id=configuration.instance_id,
+                template_id=template.id,
+                trigger_kind=TriggerKind.MANUAL,
+                mode=command.mode,
+                catalog_content_hash=self._catalog.content_hash,
+            )
+        except ExecutableWorkflowRegistryError:
+            raise _unavailable() from None
+        if scenario is not None and definition.definition_hash != scenario.definition_hash:
+            raise _unavailable()
+        workflow_id = definition.id
         base_validator = self._validator(
             template=template,
             configuration=configuration,
@@ -290,6 +321,7 @@ class CompiledCatalogManualAdmissionResolver:
             workflow_id=workflow_id,
             allowed_modes=allowed_modes,
             scenario=scenario,
+            definition=definition,
         )
         validator: ManualIncomingWorkValidator = base_validator
         if scenario is not None:
@@ -319,17 +351,9 @@ class CompiledCatalogManualAdmissionResolver:
         workflow_id: str,
         allowed_modes: tuple[WorkMode, ...],
         scenario: DemoScenarioDefinition | None,
+        definition: ExecutableWorkflowDefinition,
     ) -> IncomingWorkValidator:
-        schema = (
-            scenario.input_schema
-            if scenario is not None
-            else self._catalog.input_schema_by_template.get(template.id)
-        )
-        if schema is None:
-            raise _unavailable()
-        input_schema_id = (
-            scenario.input_schema_id if scenario is not None else template.input_schema_id
-        )
+        schema = definition.input_schema
         capabilities = self._selected_capabilities(template, scenario=scenario)
         budget = template.budget_policy
         timeout = template.timeout_policy
@@ -350,15 +374,11 @@ class CompiledCatalogManualAdmissionResolver:
                 max_json_depth=64,
                 max_content_parts=256,
                 max_content_characters=min(budget.max_input_bytes, 1_000_000),
-                max_model_calls=(
-                    scenario.expected_model_calls
-                    if scenario is not None
-                    else budget.max_model_calls
-                ),
+                max_model_calls=definition.expected_model_calls,
                 max_tool_calls=(
-                    scenario.expected_connector_calls
-                    if scenario is not None
-                    else budget.max_tool_calls
+                    budget.max_tool_calls
+                    if definition.expected_connector_calls is None
+                    else definition.expected_connector_calls
                 ),
                 rate_window_max_calls=rate_limit.max_calls,
                 rate_window_seconds=rate_limit.window_seconds,
@@ -387,13 +407,11 @@ class CompiledCatalogManualAdmissionResolver:
                 ),
             ),
             workflows=(
-                WorkflowAdmissionDefinition(
-                    id=workflow_id,
-                    eligible_template_ids=(template.id,),
-                    eligible_trigger_kinds=(TriggerKind.MANUAL,),
-                    allowed_modes=allowed_modes,
-                    input_schema_ids_by_template={template.id: input_schema_id},
-                    campaign_brief_policy=CampaignBriefPolicy.FORBIDDEN,
+                replace(
+                    definition.admission_definition(),
+                    allowed_modes=tuple(
+                        mode for mode in definition.allowed_modes if mode in allowed_modes
+                    ),
                 ),
             ),
             campaign_brief_revisions=(),
@@ -456,9 +474,7 @@ class CompiledCatalogManualAdmissionResolver:
 
     @staticmethod
     def _manual_workflow_id(template_id: str) -> str:
-        identifier = f"workflow.manual.{template_id.removeprefix('tpl.')}.v1"
-        require_id(identifier, "manual workflow ID")
-        return identifier
+        return catalog_role_workflow_id(template_id, TriggerKind.MANUAL)
 
 
 __all__ = ["CompiledCatalogManualAdmissionResolver"]

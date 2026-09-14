@@ -36,6 +36,7 @@ class Schedule:
     recurrence_version: str
     version: int = 1
     last_scheduled_at_utc: datetime | None = None
+    configuration_revision: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -63,6 +64,10 @@ class Schedule:
             raise ValueError("schedule enabled flag must be a boolean")
         if type(self.version) is not int or self.version < 1:
             raise ValueError("schedule version must be positive")
+        if self.configuration_revision is not None and (
+            type(self.configuration_revision) is not int or self.configuration_revision < 1
+        ):
+            raise ValueError("schedule configuration revision must be positive")
         if self.last_scheduled_at_utc is not None:
             require_utc(self.last_scheduled_at_utc, "last scheduled UTC time")
             if self.last_scheduled_at_utc >= self.next_run_at_utc:

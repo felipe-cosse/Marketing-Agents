@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  fetchInstanceConfiguration,
   clearLocalSession,
   fetchInstanceConfigurationSchema,
   fetchLocalSession,
@@ -178,6 +179,24 @@ function schemaBody(): Record<string, unknown> {
         schedule: {
           oneOf: [nullSchema(), enabledScheduleSchema()],
         },
+        scheduledInput: {
+          oneOf: [
+            nullSchema(),
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["input"],
+              properties: {
+                input: { type: "object", minProperties: 1, maxProperties: 64 },
+                executionMode: {
+                  type: "string",
+                  enum: ["dry_run"],
+                  default: "dry_run",
+                },
+              },
+            },
+          ],
+        },
       },
     },
   };
@@ -204,9 +223,110 @@ function successBody(revision = 1): Record<string, unknown> {
       connectorBindings: {},
       schedule: null,
       configurationRevision: revision,
+      scheduledInput: null,
     },
   };
 }
+
+describe("OBJ-03 restricted scheduled input", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("loads only the explicit admin configuration endpoint with no-store and validates its revision", async () => {
+    const payload = successBody(8);
+    (payload.configuration as Record<string, unknown>).scheduledInput = {
+      input: {
+        request_id: "request.explicit",
+        source_content: "private-canary",
+      },
+      executionMode: "dry_run",
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse(payload, { etag: '"instance-configuration-v1-8"' }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const result = await fetchInstanceConfiguration(
+      INSTANCE_ID,
+      controller.signal,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/agent-instances/${INSTANCE_ID}/configuration`,
+      expect.objectContaining({
+        method: "GET",
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      }),
+    );
+    expect(result.configuration.scheduledInput?.input.source_content).toBe(
+      "private-canary",
+    );
+    expect(result.configurationEtag).toBe('"instance-configuration-v1-8"');
+    expect(Object.isFrozen(result.configuration.scheduledInput?.input)).toBe(
+      true,
+    );
+  });
+
+  it("rejects authority injection, unsafe modes, invalid JSON and oversized saved input", () => {
+    for (const scheduledInput of [
+      { input: { source_content: "private-canary" }, authority: "forged" },
+      { input: { source_content: "private-canary" }, executionMode: "live" },
+      {
+        input: { source_content: "private-canary" },
+        executionMode: "mock_execute",
+      },
+      {
+        input: { source_content: "private-canary" },
+        executionMode: "mock_execution",
+      },
+      { input: { source_content: "private-canary" }, executionMode: null },
+      { input: { value: Number.NaN } },
+      { input: { value: new Array(3) } },
+      { input: { value: Object.assign([], { arbitrary: "lost-data" }) } },
+      { input: { value: "x".repeat(32_769) } },
+      { input: {} },
+    ]) {
+      expect(() =>
+        serializeInstanceConfigurationPatch({
+          scheduledInput,
+        } as unknown as InstanceConfigurationPatch),
+      ).toThrow("The instance configuration changes are invalid.");
+    }
+    expect(
+      serializeInstanceConfigurationPatch({ scheduledInput: null }),
+    ).toEqual({ scheduledInput: null });
+  });
+
+  it("does not accept sensitive data from a mismatched instance or configuration ETag", async () => {
+    const payload = successBody(2);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse(payload, { etag: CONFIGURATION_ETAG })),
+    );
+    await expect(fetchInstanceConfiguration(INSTANCE_ID)).rejects.toMatchObject(
+      { code: "invalid_configuration_response" },
+    );
+    (payload.configuration as Record<string, unknown>).instanceId =
+      "inst.other.other.other.01";
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          jsonResponse(payload, { etag: '"instance-configuration-v1-2"' }),
+        ),
+    );
+    await expect(fetchInstanceConfiguration(INSTANCE_ID)).rejects.toMatchObject(
+      { code: "invalid_configuration_response" },
+    );
+  });
+});
 
 function problemBody(
   status: number,

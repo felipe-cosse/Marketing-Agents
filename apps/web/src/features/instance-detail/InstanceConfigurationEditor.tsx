@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInstanceDetail } from "../../api/agentInstanceDetail";
 import {
+  fetchInstanceConfiguration,
   fetchInstanceConfigurationSchema,
   fetchLocalSession,
   InstanceConfigurationRequestError,
@@ -11,11 +12,20 @@ import {
   type ConnectorBindingPatch,
   type InstanceConfigurationPatch,
   type InstanceConfigurationSchema,
+  type ScheduledInput,
   type MisfirePolicy,
   type SchedulePatch,
   type SupportedTriggerType,
   type TriggerBindingPatch,
 } from "../../api/instanceConfiguration";
+import { SchemaField } from "../dry-run/SchemaField";
+import {
+  compileInputSchema,
+  type CompiledObjectSchema,
+  type SchemaDraftObject,
+} from "../dry-run/schemaModel";
+import { escapeJsonPointerSegment } from "../dry-run/schemaFieldIds";
+import { validateSchemaInput } from "../dry-run/schemaValidation";
 import "./instance-configuration.css";
 
 const LOCAL_SESSION_QUERY_KEY = ["session", "local"] as const;
@@ -50,6 +60,7 @@ interface ConfigurationDraft {
   >;
   readonly connectorBindings: Readonly<Record<string, ConnectorDraft>>;
   readonly schedule: ScheduleDraft;
+  readonly scheduledInput: ScheduledInput | null;
 }
 
 interface EditableConfiguration {
@@ -58,6 +69,7 @@ interface EditableConfiguration {
   readonly triggerBindings: readonly TriggerBindingPatch[];
   readonly connectorBindings: Readonly<Record<string, ConnectorBindingPatch>>;
   readonly schedule: SchedulePatch | null;
+  readonly scheduledInput: ScheduledInput | null;
 }
 
 export interface InstanceConfigurationEditorProps {
@@ -88,6 +100,7 @@ function scheduleDefaults(
 function draftFrom(
   detail: AgentInstanceDetail,
   schema: InstanceConfigurationSchema,
+  scheduledInput: ScheduledInput | null,
 ): ConfigurationDraft {
   const triggerDraft = (type: SupportedTriggerType): TriggerDraft => {
     const current = detail.instance.triggerBindings.find(
@@ -123,6 +136,7 @@ function draftFrom(
     variantLabel: detail.instance.variantLabel ?? "",
     triggerBindings,
     connectorBindings,
+    scheduledInput,
     schedule: {
       enabled:
         schema.scheduleSupported &&
@@ -191,6 +205,7 @@ function editableFrom(
     triggerBindings,
     connectorBindings,
     schedule,
+    scheduledInput: draft.scheduledInput,
   };
 }
 
@@ -208,6 +223,7 @@ function partialPatch(
     triggerBindings?: readonly TriggerBindingPatch[];
     connectorBindings?: Readonly<Record<string, ConnectorBindingPatch>>;
     schedule?: SchedulePatch | null;
+    scheduledInput?: ScheduledInput | null;
   } = {};
   if (previous.enabled !== next.enabled) patch.enabled = next.enabled;
   if (previous.variantLabel !== next.variantLabel) {
@@ -215,6 +231,9 @@ function partialPatch(
   }
   if (!sameValue(previous.connectorBindings, next.connectorBindings)) {
     patch.connectorBindings = next.connectorBindings;
+  }
+  if (!sameValue(previous.scheduledInput, next.scheduledInput)) {
+    patch.scheduledInput = next.scheduledInput;
   }
   if (
     !sameValue(previous.triggerBindings, next.triggerBindings) ||
@@ -302,6 +321,7 @@ function compatibilityIssue(
 interface ConfigurationFormProps {
   readonly detail: AgentInstanceDetail;
   readonly schema: InstanceConfigurationSchema;
+  readonly savedInput: ScheduledInput | null;
   readonly onDirtyChange: (dirty: boolean) => void;
   readonly onCancel: () => void;
   readonly onCommitted: () => Promise<void>;
@@ -311,16 +331,18 @@ interface ConfigurationFormProps {
 function ConfigurationForm({
   detail,
   schema,
+  savedInput,
   onDirtyChange,
   onCancel,
   onCommitted,
   onReloaded,
 }: ConfigurationFormProps): React.JSX.Element {
+  const formRef = useRef<HTMLFormElement>(null);
   const [draft, setDraft] = useState<ConfigurationDraft>(() =>
-    draftFrom(detail, schema),
+    draftFrom(detail, schema, savedInput),
   );
   const [baseline] = useState<EditableConfiguration>(() =>
-    editableFrom(draftFrom(detail, schema), schema),
+    editableFrom(draftFrom(detail, schema, savedInput), schema),
   );
   const [saving, setSaving] = useState(false);
   const [reloading, setReloading] = useState(false);
@@ -328,16 +350,48 @@ function ConfigurationForm({
   const [requestError, setRequestError] =
     useState<InstanceConfigurationRequestError | null>(null);
   const [unexpectedError, setUnexpectedError] = useState<string | null>(null);
+  useEffect(() => {
+    formRef.current
+      ?.querySelector<HTMLElement>("input:not(:disabled)")
+      ?.focus();
+  }, []);
   const editable = useMemo(() => editableFrom(draft, schema), [draft, schema]);
   const patch = useMemo(
     () => partialPatch(baseline, editable),
     [baseline, editable],
   );
   const dirty = !committed && Object.keys(patch).length > 0;
-  const clientErrors = useMemo(
-    () => validationMessages(draft, schema),
-    [draft, schema],
+  const inputSchema = useMemo(() => {
+    try {
+      return compileInputSchema(detail.inputSchema);
+    } catch {
+      return null;
+    }
+  }, [detail.inputSchema]);
+  const inputValidation = useMemo(
+    () =>
+      inputSchema === null || draft.scheduledInput === null
+        ? null
+        : validateSchemaInput(
+            inputSchema,
+            draft.scheduledInput.input as SchemaDraftObject,
+          ),
+    [inputSchema, draft.scheduledInput],
   );
+  const clientErrors = [
+    ...validationMessages(draft, schema),
+    ...(draft.schedule.enabled && draft.scheduledInput === null
+      ? [
+          "Saved input is required before this schedule can execute. Enter the reusable business input below.",
+        ]
+      : []),
+    ...(draft.scheduledInput !== null && inputSchema === null
+      ? ["The input schema cannot be edited safely."]
+      : []),
+    ...(inputValidation?.ok === false
+      ? inputValidation.issues.map((issue) => issue.message)
+      : []),
+  ];
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -387,11 +441,23 @@ function ConfigurationForm({
     setRequestError(null);
     setUnexpectedError(null);
     try {
-      serializeInstanceConfigurationPatch(patch, schema);
+      const validatedPatch =
+        patch.scheduledInput !== undefined &&
+        patch.scheduledInput !== null &&
+        inputValidation?.ok === true
+          ? {
+              ...patch,
+              scheduledInput: {
+                ...patch.scheduledInput,
+                input: inputValidation.input,
+              },
+            }
+          : patch;
+      serializeInstanceConfigurationPatch(validatedPatch, schema);
       await updateInstanceConfiguration({
         instanceId: detail.instance.id,
         configurationEtag: detail.instance.configurationEtag,
-        patch,
+        patch: validatedPatch,
       });
       setCommitted(true);
       await onCommitted();
@@ -427,7 +493,9 @@ function ConfigurationForm({
 
   return (
     <form
+      ref={formRef}
       className="instance-configuration__form"
+      autoComplete="off"
       aria-label="Deployment configuration editor"
       noValidate
       onSubmit={(event) => void save(event)}
@@ -631,6 +699,74 @@ function ConfigurationForm({
               }
             />
           </label>
+          <fieldset
+            className="instance-configuration__group"
+            disabled={saving || reloading}
+          >
+            <legend>Saved schedule input</legend>
+            <p className="instance-configuration__hint">
+              Every occurrence reuses this exact input. Supply the business
+              content explicitly; no request or content is generated for you.
+              Saved input is stored locally, restricted to configuration
+              administrators, and omitted from the catalog and audit timeline.
+            </p>
+            {draft.scheduledInput === null ? (
+              <p role="status">
+                No input is saved. This schedule cannot execute until reusable
+                input is provided.
+              </p>
+            ) : null}
+            {inputSchema === null ? (
+              <p role="alert">The input schema cannot be edited safely.</p>
+            ) : (
+              <ScheduledInputFields
+                schema={inputSchema}
+                draft={draft.scheduledInput?.input ?? {}}
+                onChange={(input) =>
+                  setDraft((current) => ({
+                    ...current,
+                    scheduledInput: {
+                      input,
+                      executionMode:
+                        current.scheduledInput?.executionMode ?? "dry_run",
+                    },
+                  }))
+                }
+              />
+            )}
+            <label className="instance-configuration__field">
+              <span>Scheduled execution mode</span>
+              <select
+                value={draft.scheduledInput?.executionMode ?? "dry_run"}
+                onChange={(event) => {
+                  const executionMode = event.target
+                    .value as ScheduledInput["executionMode"];
+                  setDraft((current) => ({
+                    ...current,
+                    scheduledInput: {
+                      input: current.scheduledInput?.input ?? {},
+                      executionMode,
+                    },
+                  }));
+                }}
+              >
+                <option value="dry_run">
+                  Dry run — external effects disabled
+                </option>
+              </select>
+            </label>
+            {draft.scheduledInput !== null ? (
+              <button
+                type="button"
+                className="instance-configuration__button is-secondary"
+                onClick={() =>
+                  setDraft((current) => ({ ...current, scheduledInput: null }))
+                }
+              >
+                Clear saved input
+              </button>
+            ) : null}
+          </fieldset>
         </fieldset>
       ) : null}
 
@@ -784,6 +920,104 @@ function ConfigurationForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function ScheduledInputFields({
+  schema,
+  draft,
+  onChange,
+}: {
+  readonly schema: CompiledObjectSchema;
+  readonly draft: Readonly<Record<string, unknown>>;
+  readonly onChange: (draft: SchemaDraftObject) => void;
+}): React.JSX.Element {
+  return (
+    <div className="schema-form__fields">
+      {schema.properties.map((property) => (
+        <SchemaField
+          key={property.name}
+          schema={property.schema}
+          pointer={`${schema.pointer}/${escapeJsonPointerSegment(property.name)}`}
+          value={draft[property.name]}
+          required={property.required}
+          issues={[]}
+          formId="saved-schedule-input"
+          sensitiveValueNotice="Sensitive value. Saving stores this input locally for scheduled runs; configuration administrators can reopen it."
+          disabled={false}
+          onChange={(value) => onChange({ ...draft, [property.name]: value })}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SavedConfigurationForm(
+  props: Omit<ConfigurationFormProps, "savedInput" | "schema"> & {
+    readonly schema: InstanceConfigurationSchema | undefined;
+  },
+): React.JSX.Element | null {
+  const query = useQuery({
+    queryKey: [
+      "agent-instance",
+      props.detail.instance.id,
+      "restricted-configuration",
+    ],
+    queryFn: ({ signal }) =>
+      fetchInstanceConfiguration(props.detail.instance.id, signal),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  if (props.schema === undefined) return null;
+  if (query.isPending) return <p role="status">Loading saved configuration…</p>;
+  if (query.isError)
+    return (
+      <div role="alert" className="instance-configuration__error">
+        <strong>Saved configuration is unavailable</strong>
+        <p>
+          {messageFrom(
+            query.error,
+            "The current configuration could not be loaded.",
+          )}
+        </p>
+        <button type="button" onClick={props.onCancel}>
+          Cancel
+        </button>
+        <button type="button" onClick={() => void query.refetch()}>
+          Try again
+        </button>
+      </div>
+    );
+  const saved = query.data;
+  const detail: AgentInstanceDetail = {
+    ...props.detail,
+    instance: {
+      ...props.detail.instance,
+      ...saved.configuration,
+      configurationEtag: saved.configurationEtag,
+    },
+  };
+  const compatibility = compatibilityIssue(detail, props.schema);
+  if (compatibility !== null)
+    return (
+      <div role="alert">
+        <p>{compatibility}</p>
+        <button type="button" onClick={props.onCancel}>
+          Cancel
+        </button>
+      </div>
+    );
+  return (
+    <ConfigurationForm
+      {...props}
+      schema={props.schema}
+      detail={detail}
+      savedInput={saved.configuration.scheduledInput}
+      key={saved.configurationEtag}
+    />
   );
 }
 
@@ -988,8 +1222,8 @@ export function InstanceConfigurationEditor({
         </div>
       ) : null}
 
-      {editing && schemaQuery.data !== undefined && compatibility === null ? (
-        <ConfigurationForm
+      {editing && canEdit && compatibility === null ? (
+        <SavedConfigurationForm
           key={`${detail.instance.id}:${detail.instance.configurationEtag}`}
           detail={detail}
           schema={schemaQuery.data}

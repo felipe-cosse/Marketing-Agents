@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Protocol
 
+from marketing_agents.application.ports.repositories import ScheduleRepository
 from marketing_agents.domain.audit import AuditEvent, AuditEventDraft
 from marketing_agents.domain.enums import TriggerKind
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
@@ -28,6 +29,8 @@ class InstanceConfigurationConstraints:
     template_id: str
     supported_trigger_kinds: frozenset[TriggerKind]
     allowed_connector_families: frozenset[str]
+    input_max_bytes: int = 32_768
+    input_max_field_bytes: int = 16_384
 
     def __post_init__(self) -> None:
         require_id(self.instance_id, "constraint instance ID")
@@ -44,6 +47,11 @@ class InstanceConfigurationConstraints:
             raise ValueError("allowed connector families must be one exact immutable string set")
         for family in self.allowed_connector_families:
             require_id(family, "allowed connector family")
+        if any(
+            type(value) is not int or value < 1
+            for value in (self.input_max_bytes, self.input_max_field_bytes)
+        ):
+            raise ValueError("configuration input limits must be positive integers")
 
 
 class InstanceConfigurationConstraintProvider(Protocol):
@@ -63,6 +71,10 @@ class InstanceConfigurationRepository(Protocol):
 
     async def get_for_update(self, instance_id: str) -> InstanceConfiguration | None:
         """Lock one configuration snapshot for a same-transaction dependent mutation."""
+        ...
+
+    async def fence_revision(self, configuration: InstanceConfiguration) -> bool:
+        """Acquire a transaction-scoped write fence without incrementing the revision."""
         ...
 
     async def list_all(self) -> tuple[InstanceConfiguration, ...]: ...
@@ -85,6 +97,9 @@ class InstanceConfigurationAuditRepository(Protocol):
 
 
 class InstanceConfigurationUnitOfWork(Protocol):
+    @property
+    def schedules(self) -> ScheduleRepository: ...
+
     @property
     def configurations(self) -> InstanceConfigurationRepository: ...
 

@@ -103,6 +103,7 @@ class ScheduleRecord(Base):
         nullable=False,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    configuration_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String(240), nullable=True)
     lease_claimed_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     lease_expires_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

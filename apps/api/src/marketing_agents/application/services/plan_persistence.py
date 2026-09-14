@@ -17,12 +17,13 @@ from marketing_agents.domain.entities import (
     RunPlanSnapshot,
     RunStep,
 )
-from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.execution_control import (
     OperationExecutionPolicy,
     RunExecutionPolicy,
 )
 from marketing_agents.domain.graph import DependencyGraph
+from marketing_agents.domain.planner_output import PLANNER_OUTPUT_FAMILY
 from marketing_agents.domain.run_lifecycle import (
     NoRunTransitionContext,
     RunLifecycleCommand,
@@ -552,6 +553,19 @@ def _validate_admission_scope(
             "plan Run lacks its authoritative admitted WorkItem",
             run_id=run.id,
         )
+    if any(step.connector_family == PLANNER_OUTPUT_FAMILY for step in effect_plan.steps) and (
+        work_item.mode is not WorkMode.DRY_RUN
+        or len(effect_plan.steps) != 1
+        or effect_plan.proposed_actions
+        or effect_plan.approval_requests
+        or effect_plan.run_policy.max_model_calls != 0
+        or effect_plan.run_policy.max_tool_calls != 0
+    ):
+        raise PlanPersistenceError(
+            "preview_admission_scope_invalid",
+            "planner proposal outputs require an admitted dry run with zero execution authority",
+            run_id=run.id,
+        )
     normalized_catalog = (
         run.catalog_hash
         if run.catalog_hash.startswith("catalog-sha256-v1:")
@@ -615,7 +629,7 @@ async def _validate_current_configurations(
                 run_id=run.id,
             )
         for step in steps_by_instance.get(instance_id, []):
-            if step.connector_family in {"model", "artifact"}:
+            if step.connector_family in {"model", "artifact", PLANNER_OUTPUT_FAMILY}:
                 continue
             binding = configuration.connector_bindings.get(step.connector_family)
             if (

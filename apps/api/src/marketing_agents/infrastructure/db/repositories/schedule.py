@@ -66,8 +66,9 @@ def _integrity_material(
     lease_owner: str | None,
     lease_claimed_at_utc: datetime | None,
     lease_expires_at_utc: datetime | None,
+    configuration_revision: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    material = {
         "id": schedule_id,
         "trigger_id": trigger_id,
         "instance_id": instance_id,
@@ -85,6 +86,9 @@ def _integrity_material(
         "lease_claimed_at_utc": _optional_timestamp_material(lease_claimed_at_utc),
         "lease_expires_at_utc": _optional_timestamp_material(lease_expires_at_utc),
     }
+    if configuration_revision is not None:
+        material["configuration_revision"] = configuration_revision
+    return material
 
 
 def _integrity_digest(material: dict[str, Any]) -> str:
@@ -94,6 +98,7 @@ def _integrity_digest(material: dict[str, Any]) -> str:
 def _schedule_material(schedule: Schedule) -> dict[str, Any]:
     return _integrity_material(
         schedule_id=schedule.id,
+        configuration_revision=schedule.configuration_revision,
         trigger_id=schedule.trigger_id,
         instance_id=schedule.instance_id,
         workflow_id=schedule.workflow_id,
@@ -115,6 +120,7 @@ def _schedule_material(schedule: Schedule) -> dict[str, Any]:
 def _record_material(record: ScheduleRecord) -> dict[str, Any]:
     return _integrity_material(
         schedule_id=record.id,
+        configuration_revision=record.configuration_revision,
         trigger_id=record.trigger_id,
         instance_id=record.instance_id,
         workflow_id=record.workflow_id,
@@ -149,6 +155,7 @@ def _to_record(schedule: Schedule) -> ScheduleRecord:
     material = _schedule_material(schedule)
     return ScheduleRecord(
         id=schedule.id,
+        configuration_revision=schedule.configuration_revision,
         trigger_id=schedule.trigger_id,
         instance_id=schedule.instance_id,
         workflow_id=schedule.workflow_id,
@@ -213,6 +220,7 @@ def _to_domain(record: ScheduleRecord) -> Schedule:
     try:
         schedule = Schedule(
             id=record.id,
+            configuration_revision=record.configuration_revision,
             trigger_id=record.trigger_id,
             instance_id=record.instance_id,
             workflow_id=record.workflow_id,
@@ -251,6 +259,7 @@ def _creation_facts(schedule: Schedule) -> tuple[Any, ...]:
         schedule.misfire_policy,
         schedule.misfire_grace_seconds,
         schedule.enabled,
+        schedule.configuration_revision,
     )
 
 
@@ -459,6 +468,64 @@ class SQLAlchemyScheduleRepository:
         record = await self._session.get(ScheduleRecord, schedule_id)
         return None if record is None else _to_domain(record)
 
+    async def compare_and_swap_configuration(
+        self,
+        previous: Schedule,
+        replacement: Schedule,
+    ) -> bool:
+        if (
+            type(previous) is not Schedule
+            or type(replacement) is not Schedule
+            or replacement.id != previous.id
+            or replacement.instance_id != previous.instance_id
+            or replacement.trigger_id != previous.trigger_id
+            or replacement.version != previous.version + 1
+            or replacement.configuration_revision is None
+            or replacement.last_scheduled_at_utc != previous.last_scheduled_at_utc
+        ):
+            raise SchedulePersistenceConflict(
+                "schedule_configuration_invalid",
+                "schedule replacement is not an exact bound revision",
+            )
+        current = await self._session.scalar(
+            select(ScheduleRecord)
+            .where(ScheduleRecord.id == previous.id)
+            .execution_options(populate_existing=True)
+        )
+        if current is None or _to_domain(current) != previous:
+            return False
+        statement = (
+            update(ScheduleRecord)
+            .where(
+                ScheduleRecord.id == previous.id,
+                ScheduleRecord.version == previous.version,
+                ScheduleRecord.integrity_digest == current.integrity_digest,
+            )
+            .values(
+                workflow_id=replacement.workflow_id,
+                cron_expression=replacement.cron,
+                timezone_name=replacement.timezone,
+                misfire_policy=replacement.misfire_policy.value,
+                misfire_grace_seconds=replacement.misfire_grace_seconds,
+                enabled=replacement.enabled,
+                next_run_at_utc=replacement.next_run_at_utc,
+                configuration_revision=replacement.configuration_revision,
+                version=replacement.version,
+                lease_owner=None,
+                lease_claimed_at_utc=None,
+                lease_expires_at_utc=None,
+                integrity_digest=_integrity_digest(_schedule_material(replacement)),
+            )
+            .returning(ScheduleRecord.id)
+            .execution_options(synchronize_session=False)
+        )
+        try:
+            return (await self._session.execute(statement)).scalar_one_or_none() == previous.id
+        except OperationalError as exc:
+            if _is_sqlite_busy(self._session, exc):
+                return False
+            raise
+
     async def get_claim(self, schedule_id: str) -> ScheduleClaim | None:
         record = await self._session.get(ScheduleRecord, schedule_id)
         if record is None:
@@ -555,10 +622,13 @@ class SQLAlchemyScheduleRepository:
         *,
         now: datetime,
         limit: int,
+        configuration_bound_only: bool = False,
     ) -> tuple[Schedule, ...]:
         require_utc(now, "schedule claim boundary")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("schedule claim limit must be from 1 through 100")
+        if type(configuration_bound_only) is not bool:
+            raise ValueError("schedule binding filter must be boolean")
         statement = (
             select(ScheduleRecord)
             .where(
@@ -580,6 +650,8 @@ class SQLAlchemyScheduleRepository:
             .order_by(ScheduleRecord.next_run_at_utc, ScheduleRecord.id)
             .limit(limit)
         )
+        if configuration_bound_only:
+            statement = statement.where(ScheduleRecord.configuration_revision.is_not(None))
         records = (await self._session.execute(statement)).scalars()
         return tuple(_to_domain(record) for record in records)
 
@@ -630,6 +702,7 @@ class SQLAlchemyScheduleRepository:
         new_digest = _integrity_digest(
             _integrity_material(
                 schedule_id=current.id,
+                configuration_revision=current.configuration_revision,
                 trigger_id=current.trigger_id,
                 instance_id=current.instance_id,
                 workflow_id=current.workflow_id,
@@ -738,6 +811,7 @@ class SQLAlchemyScheduleRepository:
         new_digest = _integrity_digest(
             _integrity_material(
                 schedule_id=current.id,
+                configuration_revision=current.configuration_revision,
                 trigger_id=current.trigger_id,
                 instance_id=current.instance_id,
                 workflow_id=current.workflow_id,

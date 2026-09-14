@@ -1,3 +1,4 @@
+// OBJ-03 covers restricted configuration loading and explicit dry-run-only schedule input.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,6 +15,7 @@ import {
   type AgentInstanceDetailIdentity,
 } from "../../api/agentInstanceDetail";
 import {
+  fetchInstanceConfiguration,
   fetchInstanceConfigurationSchema,
   fetchLocalSession,
   InstanceConfigurationRequestError,
@@ -32,6 +34,7 @@ vi.mock("../../api/instanceConfiguration", async () => {
   return {
     ...actual,
     fetchLocalSession: vi.fn(),
+    fetchInstanceConfiguration: vi.fn(),
     fetchInstanceConfigurationSchema: vi.fn(),
     updateInstanceConfiguration: vi.fn(),
   };
@@ -88,7 +91,7 @@ const SCHEMA: InstanceConfigurationSchema = {
 const RESULT = {} as InstanceConfigurationResult;
 
 function makeDetail(): AgentInstanceDetail {
-  return normalizeAgentInstanceDetail(
+  const detail = normalizeAgentInstanceDetail(
     makeAgentDetailPayload({
       instanceId: INSTANCE_ID,
       templateId: TEMPLATE_ID,
@@ -99,6 +102,31 @@ function makeDetail(): AgentInstanceDetail {
     IDENTITY,
     AGENT_DETAIL_ETAG,
   );
+  return {
+    ...detail,
+    inputSchema: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $id: detail.template.inputSchemaId,
+      type: "object",
+      additionalProperties: false,
+      required: ["request_id", "source_content"],
+      properties: {
+        request_id: {
+          type: "string",
+          title: "Request ID",
+          minLength: 1,
+          maxLength: 80,
+        },
+        source_content: {
+          type: "string",
+          title: "Source content",
+          minLength: 1,
+          maxLength: 12000,
+          "x-sensitive": true,
+        },
+      },
+    },
+  };
 }
 
 interface RenderOptions {
@@ -106,24 +134,31 @@ interface RenderOptions {
   readonly onDirtyChange?: (dirty: boolean) => void;
   readonly onSaved?: () => Promise<void>;
   readonly onReload?: () => Promise<void>;
+  readonly client?: QueryClient;
 }
 
 function Providers({
   children,
+  client: providedClient,
 }: {
   readonly children: ReactNode;
+  readonly client?: QueryClient;
 }): React.JSX.Element {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, gcTime: Number.POSITIVE_INFINITY },
-    },
-  });
+  const client =
+    providedClient ??
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: Number.POSITIVE_INFINITY },
+      },
+    });
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
 function renderEditor(options: RenderOptions = {}): ReturnType<typeof render> {
   return render(
-    <Providers>
+    <Providers
+      {...(options.client === undefined ? {} : { client: options.client })}
+    >
       <InstanceConfigurationEditor
         detail={options.detail ?? makeDetail()}
         onDirtyChange={options.onDirtyChange ?? vi.fn()}
@@ -136,6 +171,7 @@ function renderEditor(options: RenderOptions = {}): ReturnType<typeof render> {
 
 const fetchSessionMock = vi.mocked(fetchLocalSession);
 const fetchSchemaMock = vi.mocked(fetchInstanceConfigurationSchema);
+const fetchConfigurationMock = vi.mocked(fetchInstanceConfiguration);
 const updateConfigurationMock = vi.mocked(updateInstanceConfiguration);
 
 async function openEditor(
@@ -152,6 +188,16 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
     vi.clearAllMocks();
     fetchSessionMock.mockResolvedValue(ADMIN_SESSION);
     fetchSchemaMock.mockResolvedValue(SCHEMA);
+    const detail = makeDetail();
+    fetchConfigurationMock.mockResolvedValue({
+      projectionVersion: "instance-configuration-v1",
+      configuration: {
+        ...detail.instance,
+        instanceId: INSTANCE_ID,
+        scheduledInput: null,
+      },
+      configurationEtag: detail.instance.configurationEtag,
+    });
     updateConfigurationMock.mockResolvedValue(RESULT);
   });
 
@@ -167,6 +213,7 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
     ).not.toBeInTheDocument();
     expect(fetchSessionMock).toHaveBeenCalledOnce();
     expect(fetchSchemaMock).not.toHaveBeenCalled();
+    expect(fetchConfigurationMock).not.toHaveBeenCalled();
   });
 
   it("loads the edit schema only after a local admin explicitly chooses Edit", async () => {
@@ -175,6 +222,7 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
 
     const edit = await screen.findByRole("button", { name: "Edit" });
     expect(fetchSchemaMock).not.toHaveBeenCalled();
+    expect(fetchConfigurationMock).not.toHaveBeenCalled();
     await user.click(edit);
 
     expect(
@@ -184,6 +232,10 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
     ).toBeVisible();
     expect(fetchSchemaMock).toHaveBeenCalledWith(
       { instanceId: INSTANCE_ID, templateId: TEMPLATE_ID },
+      expect.any(AbortSignal),
+    );
+    expect(fetchConfigurationMock).toHaveBeenCalledWith(
+      INSTANCE_ID,
       expect.any(AbortSignal),
     );
   });
@@ -235,6 +287,24 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
       within(form).getByLabelText("Cron expression"),
       "0 9 * * 1",
     );
+    expect(
+      within(form).getByRole("button", { name: "Save configuration" }),
+    ).toBeDisabled();
+    expect(within(form).getByText(/Saved input is required/u)).toBeVisible();
+    expect(
+      within(form).getByText(/Saving stores this input locally/u),
+    ).toBeVisible();
+    expect(
+      within(form).queryByText("Sensitive value. Kept only in this open form."),
+    ).not.toBeInTheDocument();
+    await user.type(
+      within(form).getByRole("textbox", { name: /Request ID/u }),
+      "request.scheduled.explicit",
+    );
+    await user.type(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+      "Operator-supplied business content",
+    );
     await user.click(
       within(form).getByRole("button", { name: "Save configuration" }),
     );
@@ -242,6 +312,13 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
     await waitFor(() => expect(updateConfigurationMock).toHaveBeenCalledOnce());
     const request = updateConfigurationMock.mock.calls[0]?.[0];
     expect(request?.patch).toEqual({
+      scheduledInput: {
+        input: {
+          request_id: "request.scheduled.explicit",
+          source_content: "Operator-supplied business content",
+        },
+        executionMode: "dry_run",
+      },
       triggerBindings: [
         { type: "manual", enabled: true },
         {
@@ -299,6 +376,189 @@ describe("WEB-03 InstanceConfigurationEditor", () => {
         },
       });
     });
+  });
+
+  it("uses a fresh restricted snapshot and its revision instead of a stale detail", async () => {
+    const detail = makeDetail();
+    const scheduledInput = {
+      input: {
+        request_id: "request.saved",
+        source_content: "private-saved-canary",
+      },
+      executionMode: "dry_run" as const,
+    };
+    fetchConfigurationMock.mockResolvedValue({
+      projectionVersion: "instance-configuration-v1",
+      configurationEtag: '"instance-configuration-v1-9"',
+      configuration: {
+        ...detail.instance,
+        instanceId: INSTANCE_ID,
+        variantLabel: "Fresh server label",
+        configurationRevision: 9,
+        scheduledInput,
+        triggerBindings: [
+          ...detail.instance.triggerBindings,
+          {
+            type: "schedule",
+            enabled: false,
+            eventSource: null,
+            cron: null,
+            timezone: null,
+            misfirePolicy: null,
+            misfireGraceSeconds: null,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderEditor({ detail });
+    expect(screen.queryByText("private-saved-canary")).not.toBeInTheDocument();
+    const form = await openEditor(user);
+    expect(
+      within(form).getByRole("checkbox", { name: "Deployment enabled" }),
+    ).toHaveFocus();
+    expect(within(form).getByLabelText("Variant label")).toHaveValue(
+      "Fresh server label",
+    );
+    expect(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+    ).toHaveValue("private-saved-canary");
+    expect(within(form).getByLabelText("Scheduled execution mode")).toHaveValue(
+      "dry_run",
+    );
+    expect(
+      within(form).queryByRole("option", { name: /Mock execution/u }),
+    ).not.toBeInTheDocument();
+    await user.clear(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+    );
+    await user.type(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+      "Updated explicit content",
+    );
+    await user.click(
+      within(form).getByRole("button", { name: "Save configuration" }),
+    );
+    await waitFor(() =>
+      expect(updateConfigurationMock).toHaveBeenCalledWith({
+        instanceId: INSTANCE_ID,
+        configurationEtag: '"instance-configuration-v1-9"',
+        patch: {
+          scheduledInput: {
+            ...scheduledInput,
+            input: {
+              request_id: "request.saved",
+              source_content: "Updated explicit content",
+            },
+          },
+        },
+      }),
+    );
+  });
+
+  it("discards restricted cache and unsaved input on close and fetches again on reopen", async () => {
+    const client = new QueryClient();
+    const user = userEvent.setup();
+    const localStorageWrite = vi.spyOn(Storage.prototype, "setItem");
+    renderEditor({ client });
+    const form = await openEditor(user);
+    await user.click(
+      within(form).getByRole("checkbox", {
+        name: "Configure schedule trigger",
+      }),
+    );
+    await user.type(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+      "Unsaved sensitive content",
+    );
+    await user.click(within(form).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        client.getQueryData([
+          "agent-instance",
+          INSTANCE_ID,
+          "restricted-configuration",
+        ]),
+      ).toBeUndefined(),
+    );
+    const reopened = await openEditor(user);
+    expect(fetchConfigurationMock).toHaveBeenCalledTimes(2);
+    await user.click(
+      within(reopened).getByRole("checkbox", {
+        name: "Configure schedule trigger",
+      }),
+    );
+    expect(
+      within(reopened).getByRole("textbox", { name: /Source content/u }),
+    ).toHaveValue("");
+    expect(localStorageWrite).not.toHaveBeenCalled();
+    localStorageWrite.mockRestore();
+  });
+
+  it("allows explicitly clearing stored input with a disabled schedule", async () => {
+    const detail = makeDetail();
+    fetchConfigurationMock.mockResolvedValue({
+      projectionVersion: "instance-configuration-v1",
+      configurationEtag: detail.instance.configurationEtag,
+      configuration: {
+        ...detail.instance,
+        instanceId: INSTANCE_ID,
+        scheduledInput: {
+          input: {
+            request_id: "request.saved",
+            source_content: "private-canary",
+          },
+          executionMode: "dry_run",
+        },
+        triggerBindings: [
+          ...detail.instance.triggerBindings,
+          {
+            type: "schedule",
+            enabled: false,
+            eventSource: null,
+            cron: null,
+            timezone: null,
+            misfirePolicy: null,
+            misfireGraceSeconds: null,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderEditor();
+    const form = await openEditor(user);
+    await user.click(
+      within(form).getByRole("button", { name: "Clear saved input" }),
+    );
+    expect(
+      within(form).getByRole("textbox", { name: /Source content/u }),
+    ).toHaveValue("");
+    await user.click(
+      within(form).getByRole("button", { name: "Save configuration" }),
+    );
+    await waitFor(() =>
+      expect(updateConfigurationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ patch: { scheduledInput: null } }),
+      ),
+    );
+  });
+
+  it("does not render an editable fallback if the sensitive snapshot is denied", async () => {
+    fetchConfigurationMock.mockRejectedValue(
+      new InstanceConfigurationRequestError(
+        403,
+        "configuration_forbidden",
+        "Administrator access required.",
+      ),
+    );
+    const user = userEvent.setup();
+    renderEditor();
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(
+      await screen.findByText("Saved configuration is unavailable"),
+    ).toBeVisible();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+    expect(updateConfigurationMock).not.toHaveBeenCalled();
   });
 
   it("preserves a draft on conflict and reloads explicitly without resubmitting", async () => {

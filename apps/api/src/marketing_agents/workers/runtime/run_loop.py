@@ -5,6 +5,10 @@ from __future__ import annotations
 import asyncio
 import hmac
 
+from marketing_agents.application.orchestration.executable_workflows import (
+    ExecutableWorkflowHandler,
+)
+from marketing_agents.application.policies.json_schema import compile_json_schema
 from marketing_agents.application.services.approval_boundaries import ApprovalBoundaryService
 from marketing_agents.application.services.run_lifecycle import (
     RunAdvanceDisposition,
@@ -13,11 +17,9 @@ from marketing_agents.application.services.run_lifecycle import (
 from marketing_agents.application.services.terminal_execution_cleanup import (
     TerminalExecutionCleanupService,
 )
-from marketing_agents.demos import DEMO_SCENARIOS
-from marketing_agents.demos.email_signup_onboarding import EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
-from marketing_agents.domain.enums import RunState, StepState
+from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.run_lifecycle import (
     FailureContext,
     RunFailurePhase,
@@ -97,8 +99,19 @@ class RunWorker:
             return
         # A signed admitted envelope, frozen schema, and exact registry contract
         # are rechecked before received -> validated and before any resumed call.
-        scenario = DEMO_SCENARIOS.get(work.workflow_id)
-        schema = scenario.input_schema
+        definition = self.runtime.workflows.get(work.workflow_id)
+        instance = next(
+            item for item in self.runtime.catalog.instances if item.id == work.instance_id
+        )
+        self.runtime.workflows.require_match(
+            work.workflow_id,
+            instance_id=work.instance_id,
+            template_id=instance.template_id,
+            trigger_kind=definition.eligible_trigger_kinds[0],
+            mode=work.mode,
+            catalog_content_hash=run.catalog_hash,
+        )
+        schema = definition.input_schema
         expected = derive_admission_digests(
             AdmissionEnvelope(
                 source=work.source,
@@ -118,15 +131,32 @@ class RunWorker:
             not hmac.compare_digest(expected.input_digest, work.input_digest)
             or not hmac.compare_digest(expected.admission_digest, work.admission_digest)
             or expected.digest_key_version != work.digest_key_version
-            or work.instance_id != scenario.instance_id
-            or work.input_schema_id != scenario.input_schema_id
+            or work.instance_id not in definition.target_instance_ids
+            or work.input_schema_id != definition.input_schema_id
             or work.input_schema_hash != canonical_schema_hash(schema)
             or run.catalog_hash != self.runtime.catalog.content_hash
         ):
             raise ValueError("runtime_admission_integrity_invalid")
-        DEMO_SCENARIOS.resolve_input(scenario.id, work.admitted_payload)
+        compile_json_schema(schema, expected_schema_id=definition.input_schema_id).validate(
+            work.admitted_payload, pointer_root="/input", max_depth=16
+        )
         correlation = dependencies.new_id("worker-advance")
-        if work.workflow_id == EMAIL_SIGNUP_ONBOARDING_SCENARIO_ID:
+        if definition.handler_kind is ExecutableWorkflowHandler.CATALOG_ROLE:
+            await self.runtime.catalog_reads.resume_persisted(
+                run.id, correlation_id=correlation, worker_id=self.worker_id
+            )
+        elif definition.handler_kind is ExecutableWorkflowHandler.CATALOG_WRITE:
+            if work.mode is WorkMode.DRY_RUN:
+                await self.runtime.catalog_proposals.resume_persisted(
+                    run.id, correlation_id=correlation, worker_id=self.worker_id
+                )
+            elif work.mode is WorkMode.MOCK_EXECUTION:
+                await self.runtime.catalog_writes.resume_persisted(
+                    run.id, correlation_id=correlation, worker_id=self.worker_id
+                )
+            else:
+                raise ValueError("catalog_write_mode_invalid")
+        elif definition.handler_kind is ExecutableWorkflowHandler.DEMO_EMAIL:
             if run.state is RunState.AWAITING_APPROVAL:
                 await ApprovalBoundaryService(dependencies).evaluate(
                     run.id,
@@ -135,10 +165,12 @@ class RunWorker:
             await self.runtime.email.resume(
                 run.id, correlation_id=correlation, worker_id=self.worker_id
             )
-        else:
+        elif definition.handler_kind is ExecutableWorkflowHandler.DEMO_READ:
             await self.runtime.demos.resume_persisted(
                 run.id, correlation_id=correlation, worker_id=self.worker_id
             )
+        else:
+            raise ValueError("runtime_workflow_handler_invalid")
 
     async def _fail(self, claim: RunClaim) -> None:
         run_id = claim.run_id

@@ -1,0 +1,493 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-03",
+  "matrix_statement_sha256": "4f603dd96ccf6ab12e646691452b7e05b56d9b90fb7e707aa3d258a44ea27875",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/openapi.json",
+      "apps/api/src/marketing_agents/api/routes/instance_configuration.py",
+      "apps/api/src/marketing_agents/api/schemas/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/orchestration/effect_planner.py",
+      "apps/api/src/marketing_agents/application/orchestration/executable_workflows.py",
+      "apps/api/src/marketing_agents/application/ports/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/services/plan_persistence.py",
+      "apps/api/src/marketing_agents/application/services/local_artifact_executor.py",
+      "apps/api/src/marketing_agents/application/services/proposal_preview_executor.py",
+      "apps/api/src/marketing_agents/application/services/schedule_*.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/entities/runtime.py",
+      "apps/api/src/marketing_agents/domain/instance_configuration.py",
+      "apps/api/src/marketing_agents/domain/runtime_policy.py",
+      "apps/api/src/marketing_agents/domain/planner_output.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/catalog_role*.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/env.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0007_bound_scheduled_input.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0008_local_artifact_outputs.py",
+      "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/step.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/execution_control.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/instance_configuration.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py",
+      "apps/api/src/marketing_agents/infrastructure/manual_work.py",
+      "apps/api/src/marketing_agents/infrastructure/webhook_ingress.py",
+      "apps/api/src/marketing_agents/infrastructure/executable_workflows.py",
+      "apps/api/src/marketing_agents/infrastructure/runtime/catalog_*.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "apps/api/src/marketing_agents/workers/runtime/composition.py",
+      "apps/api/src/marketing_agents/workers/runtime/run_loop.py",
+      "apps/api/src/marketing_agents/workers/runtime/scheduler.py",
+      "apps/web/e2e/web-03-agent-details.spec.ts",
+      "apps/web/src/api/agentInstanceDetail.test.ts",
+      "apps/web/src/api/instanceConfiguration*.ts",
+      "apps/web/src/api/generated/schema.ts",
+      "apps/web/src/features/dry-run/ArrayField.tsx",
+      "apps/web/src/features/dry-run/ObjectField.tsx",
+      "apps/web/src/features/dry-run/SchemaField.tsx",
+      "apps/web/src/features/dry-run/SchemaForm.test.tsx",
+      "apps/web/src/features/instance-detail/InstanceConfigurationEditor*.tsx",
+      "apps/web/src/features/org-chart/OrgChartPage.test.tsx",
+      "tests/contract/test_obj_03_catalog_roles.py",
+      "tests/integration/api/test_api_03_instance_configuration.py",
+      "tests/integration/db/test_del_04_migrations.py",
+      "tests/integration/db/test_obj_03_*.py",
+      "tests/integration/runtime/test_del_05_process_composition.py",
+      "tests/integration/runtime/test_obj_03_*.py",
+      "tests/integration/scheduler/test_obj_03_configuration_binding.py",
+      "tests/unit/application/test_orch_06_planning_budgets.py",
+      "tests/unit/application/test_obj_03_*.py",
+      "scripts/del_05_replay_fixture.py",
+      "tests/tooling/test_del_05_clean_state_fixture.py",
+      "docs/verification/requirements/OBJ-03.*",
+      "docs/verification.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/orchestration/executable_workflows.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/runtime/catalog_workflows.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/runtime/catalog_write_workflows.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/proposal_preview_executor.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_configuration.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0008_local_artifact_outputs.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/instance-detail/InstanceConfigurationEditor.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/runtime/test_obj_03_catalog_workflows.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/runtime/test_obj_03_catalog_writes.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/scheduler/test_obj_03_configuration_binding.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_obj_03_artifact_migration.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/application/test_obj_03_preview_planning.py"
+        ]
+      },
+      {
+        "kind": "journey",
+        "one_of": [
+          "apps/web/e2e/web-03-agent-details.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "shared-executable-catalog-contracts",
+      "type": "contract",
+      "statement": "Manual, webhook and schedule resolution and the worker share immutable schema- and catalog-bound executable definitions for 36 templates and 43 instances. Unknown identities, unsupported modes, schema aliases and drift fail closed; the five existing demo contracts retain their original hashes and handlers.",
+      "test_refs": [
+        "tests/unit/application/test_obj_03_executable_workflows.py"
+      ]
+    },
+    {
+      "id": "role-specific-read-simulation",
+      "type": "positive",
+      "statement": "All 37 read-role instances complete actual API admission and restarted-worker dry runs under their own catalog contracts: 31 use the deterministic mock model adapter and six use authorized local transforms. Role outputs use supplied business evidence, retain advisory restrictions and budgets, and do not invent absent metrics or dispatch generated proposals.",
+      "test_refs": [
+        "tests/contract/test_obj_03_catalog_roles.py",
+        "tests/integration/runtime/test_obj_03_catalog_workflows.py"
+      ]
+    },
+    {
+      "id": "write-role-dry-runs-have-no-authority",
+      "type": "negative_control",
+      "statement": "The six write-only instances across four roles produce explicitly labeled typed proposal documents in DRY_RUN. Their real catalog WRITE capability is described by a reserved planner-output NO_CALL step, not executed or replaced with a model/artifact capability. Plan, persistence and execution reject real-execution mode or connector/approval authority; no calls, actions, approvals or receipts are created.",
+      "test_refs": [
+        "tests/unit/application/test_obj_03_preview_planning.py",
+        "tests/unit/application/test_obj_03_planner_preview.py",
+        "tests/integration/db/test_obj_03_planner_preview_constraints.py",
+        "tests/integration/runtime/test_obj_03_proposal_previews.py"
+      ]
+    },
+    {
+      "id": "explicit-approved-mock-writes",
+      "type": "positive",
+      "statement": "In explicit mock execution, all six write-only instances accept only versioned typed operator commands, wait for the exact independent approval and complete through the controlled connector dispatcher. Durable receipts and one tool call prove the local mock action; catalog result artifacts are not fabricated. Restart, rejection, cancellation, stale snapshots, definition drift and retry ceilings remain guarded.",
+      "test_refs": [
+        "tests/integration/runtime/test_obj_03_catalog_writes.py"
+      ]
+    },
+    {
+      "id": "explicit-signed-scheduled-input",
+      "type": "contract",
+      "statement": "Installation-keyed input binding covers the exact instance, workflow definition, input schema, key version, dry_run mode and payload. Separate atomic configuration-revision and claim fences keep schedule synchronization and redacted audit consistent, reject altered bindings and make stale claims no-ops. Due occurrences retain explicit input through restarted-worker completion. Schedules are dry_run-only; legacy schedules without explicit input stay readable but do not execute.",
+      "test_refs": [
+        "tests/integration/scheduler/test_obj_03_configuration_binding.py",
+        "tests/integration/runtime/test_obj_03_scheduler_liveness.py",
+        "tests/integration/runtime/test_obj_03_catalog_workflows.py",
+        "tests/integration/api/test_api_03_instance_configuration.py"
+      ]
+    },
+    {
+      "id": "restricted-schema-bound-configuration-editor",
+      "type": "journey",
+      "statement": "The administrator-only editor loads the restricted current configuration and revision, renders schema-bound scheduled input, requires explicit valid input to enable a dry_run-only schedule, preserves drafts, and exposes storage semantics. Field identifiers remain stable for nested editors. Unit contracts cover the new input path; the WEB-03 browser gate protects existing inspector, revision, conflict and layout behavior.",
+      "test_refs": [
+        "apps/web/src/features/instance-detail/InstanceConfigurationEditor.test.tsx",
+        "apps/web/src/api/instanceConfiguration.test.ts",
+        "apps/web/src/features/dry-run/SchemaForm.test.tsx",
+        "apps/web/e2e/web-03-agent-details.spec.ts"
+      ]
+    },
+    {
+      "id": "atomic-no-call-output-and-replay",
+      "type": "negative_control",
+      "statement": "Local artifacts commit their schema-bound provenance, successful step and distinct audit event in one real SQLite transaction with zero attempts, operation policies, rate windows or call counters. Restart and concurrent completion reuse one output; cancellation fences and schema, byte, exact-deadline, renderer, late-CAS and audit failures preserve every prior row. Preview audit additionally requires its exact planner provider.",
+      "test_refs": [
+        "tests/integration/runtime/test_obj_03_local_artifacts.py",
+        "tests/integration/runtime/test_obj_03_proposal_previews.py",
+        "tests/unit/application/test_obj_03_planner_preview.py",
+        "tests/integration/db/test_obj_03_planner_preview_constraints.py"
+      ]
+    },
+    {
+      "id": "populated-failure-safe-schema-upgrades",
+      "type": "negative_control",
+      "statement": "Frozen 0007/0008 upgrades preserve legacy schedule/configuration integrity and populated linked runs, steps, artifacts, approvals, actions, receipts, audit ordering and row versions. SQLite copy/drop faults and a final foreign-key violation after rebuild/revision advance restore the exact prior data, schema, indexes and revision, with foreign_keys enabled on the same reused connection. Repeated upgrades are inert.",
+      "test_refs": [
+        "tests/integration/db/test_obj_03_artifact_migration.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/scheduler/test_obj_03_configuration_binding.py"
+      ]
+    },
+    {
+      "id": "contract-and-layer-regression-controls",
+      "type": "contract",
+      "statement": "Generated contracts describe restricted configuration; architecture checks retain layer direction and frontend API ownership. Existing demo and budget tests retain workflow behavior and NO_CALL accounting. The verification-only replay fixture uses explicitly bound dry-run input and the registered workflow, preserving zero-write reseed and occurrence identity across restart.",
+      "test_refs": [
+        "tests/integration/runtime/test_del_05_process_composition.py",
+        "tests/tooling/test_del_05_clean_state_fixture.py",
+        "tests/unit/application/test_orch_06_planning_budgets.py",
+        "apps/web/src/api/agentInstanceDetail.test.ts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-03-registry-and-renderers",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_obj_03_executable_workflows.py",
+        "tests/contract/test_obj_03_catalog_roles.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_required",
+      "covers": [
+        "shared-executable-catalog-contracts",
+        "role-specific-read-simulation"
+      ]
+    },
+    {
+      "id": "obj-03-read-and-preview-runtime",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/runtime/test_obj_03_catalog_workflows.py",
+        "tests/integration/runtime/test_obj_03_proposal_previews.py",
+        "tests/unit/application/test_obj_03_preview_planning.py",
+        "tests/unit/application/test_obj_03_planner_preview.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": [
+        "role-specific-read-simulation",
+        "write-role-dry-runs-have-no-authority",
+        "explicit-signed-scheduled-input",
+        "atomic-no-call-output-and-replay"
+      ]
+    },
+    {
+      "id": "obj-03-approved-mock-writes",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/runtime/test_obj_03_catalog_writes.py",
+        "tests/integration/runtime/test_del_05_process_composition.py",
+        "tests/tooling/test_del_05_clean_state_fixture.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": [
+        "explicit-approved-mock-writes",
+        "contract-and-layer-regression-controls"
+      ]
+    },
+    {
+      "id": "obj-03-configuration-and-schedules",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/scheduler/test_obj_03_configuration_binding.py",
+        "tests/integration/runtime/test_obj_03_scheduler_liveness.py",
+        "tests/integration/api/test_api_03_instance_configuration.py",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py",
+        "tests/integration/db/test_del_04_trigger_projection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": [
+        "explicit-signed-scheduled-input",
+        "populated-failure-safe-schema-upgrades",
+        "restricted-schema-bound-configuration-editor"
+      ]
+    },
+    {
+      "id": "obj-03-local-output-and-migrations",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/runtime/test_obj_03_local_artifacts.py",
+        "tests/integration/db/test_obj_03_artifact_migration.py",
+        "tests/integration/db/test_obj_03_planner_preview_constraints.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/unit/application/test_orch_06_planning_budgets.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": [
+        "atomic-no-call-output-and-replay",
+        "populated-failure-safe-schema-upgrades",
+        "write-role-dry-runs-have-no-authority",
+        "contract-and-layer-regression-controls"
+      ]
+    },
+    {
+      "id": "obj-03-production-no-call-witness",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_obj_03_preview_planning.py::test_planner_output_family_is_never_a_model_or_tool_call"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "write-role-dry-runs-have-no-authority"
+      ]
+    },
+    {
+      "id": "obj-03-web-unit-and-static",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "web-test",
+        "web-format-check",
+        "web-lint",
+        "web-typecheck",
+        "web-build",
+        "PYTHON=python3"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "restricted-schema-bound-configuration-editor",
+        "contract-and-layer-regression-controls"
+      ]
+    },
+    {
+      "id": "obj-03-web-03-browser",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-web-03-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "restricted-schema-bound-configuration-editor"
+      ]
+    },
+    {
+      "id": "obj-03-generated-contract-and-architecture",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "api-contract-check",
+        "verify-architecture",
+        "lint",
+        "typecheck",
+        "PYTHON=python3"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_required",
+      "covers": [
+        "contract-and-layer-regression-controls"
+      ]
+    },
+    {
+      "id": "obj-03-contract-and-architecture-negative-controls",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/contract/test_del_07_openapi_snapshot.py",
+        "tests/unit/architecture/test_arch_08_repository_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "contract-and-layer-regression-controls"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/domain/runtime_policy.py"
+    ],
+    "gate_id": "obj-03-production-no-call-witness"
+  },
+  "limitations": [
+    "GitHub CI remains manually disabled by user direction. No workflow, remote branch or separate CI repair work is part of this requirement.",
+    "All execution evidence is local and mock-only. No real model/provider delivery or external business-state mutation is claimed. Mock receipts report that no external side effect occurred.",
+    "Read-role behavior uses operator-supplied content and explicitly supplied structured evidence. It is not live social, CRM, spreadsheet, CMS or fulfillment monitoring, and missing evidence is not replaced with fabricated metrics.",
+    "All 43 manual dry-run instances comprise 37 read-role simulations and six write-role proposal previews. Preview proposed_actions are document content only; explicit mock execution and independent approval are separate boundaries.",
+    "An already-planned inert preview retains its admitted configuration snapshot; later instance configuration changes do not automatically revoke it. Explicit run cancellation is the stop boundary. A write's current-configuration check does not revoke a call already in flight.",
+    "Write-only mock completion is represented by durable connector receipts, not a fabricated catalog output artifact. This requirement does not claim live delivery or additional capabilities for those roles.",
+    "Legacy schedules remain retained but cannot become executable without an explicit schema-valid saved input and mode. Supported trigger/mode combinations remain registry constrained.",
+    "New scheduled-input editor behavior is unit/API/process-tested. The WEB-03 browser gate uses production frontend rendering with real hierarchy/detail reads and route-mocked configuration responses; it does not prove browser-to-worker scheduled or approved-write completion.",
+    "SQLite populated migration/rollback behavior is executed. PostgreSQL offline DDL compilation is not PostgreSQL runtime verification; optional PostgreSQL skips are not compatibility passes.",
+    "The matrix records scoped locally tested behavior, not a commit-bound attestation or whole-system acceptance. Every declared gate and the restored-base connection witness must independently pass against the frozen feature before merge; generated attestation remains outside Git."
+  ]
+}
