@@ -11,7 +11,80 @@ import {
   normalizeHierarchy,
 } from "./normalizeHierarchy";
 
+function fixtureEntry<T>(entry: T | undefined): T {
+  if (entry === undefined) throw new Error("OBJ-02 fixture entry missing");
+  return entry;
+}
+
 describe("WEB-01 hierarchy normalization", () => {
+  it.each([
+    "unsupported singleton ordinal",
+    "instance ordinal mismatch",
+    "instance template mismatch",
+    "template outside function",
+    "function outside department",
+    "unknown source department",
+    "unknown source function",
+    "malformed role slug",
+    "Community pair outside function",
+  ])("OBJ-02 rejects count-preserving %s", (defect) => {
+    const payload = makeHierarchyPayload();
+    const departments = payload.departments as {
+      id: string;
+      functions: {
+        id: string;
+        instances: { id: string; templateId: string; sourceOrdinal: number }[];
+      }[];
+    }[];
+    const department = fixtureEntry(departments[0]);
+    const agentFunction = fixtureEntry(department.functions[0]);
+    const instance = fixtureEntry(agentFunction.instances[0]);
+    if (defect === "unsupported singleton ordinal") {
+      instance.sourceOrdinal = 2;
+      instance.id = instance.id.replace(/\.01$/u, ".02");
+    } else if (defect === "instance ordinal mismatch") {
+      instance.id = instance.id.replace(/\.01$/u, ".02");
+    } else if (defect === "instance template mismatch") {
+      instance.id = "inst.social-media.new-content.unrelated-role.01";
+    } else if (defect === "template outside function") {
+      instance.templateId = "tpl.social-media.research.misplaced-role";
+      instance.id = "inst.social-media.research.misplaced-role.01";
+    } else if (defect === "function outside department") {
+      agentFunction.id = "func.email.new-content";
+    } else if (defect === "unknown source department") {
+      department.id = "dept.invented";
+      fixtureEntry(
+        (payload.departmentCounts as { departmentId: string }[])[0],
+      ).departmentId = "dept.invented";
+    } else if (defect === "unknown source function") {
+      agentFunction.id = "func.social-media.invented";
+    } else if (defect === "malformed role slug") {
+      instance.templateId += ".invented";
+      instance.id = `inst.${instance.templateId.slice(4)}.01`;
+    } else {
+      const community = fixtureEntry(departments[3]);
+      const events = fixtureEntry(community.functions[0]).instances;
+      const education = fixtureEntry(community.functions[1]).instances;
+      [events[0], education[0]] = [
+        fixtureEntry(education[0]),
+        fixtureEntry(events[0]),
+      ];
+      [events[1], education[1]] = [
+        fixtureEntry(education[1]),
+        fixtureEntry(events[1]),
+      ];
+    }
+
+    // Every mutation preserves the arithmetic contract. Identity must still fail.
+    expect(payload.counts).toEqual({
+      departments: 5,
+      functions: 12,
+      templates: 36,
+      instances: 43,
+    });
+    expect(() => normalizeHierarchy(payload)).toThrow(HierarchyContractError);
+  });
+
   it("ORCH-01 rejects reserved root and control-plane identities across source nodes", () => {
     for (const reservedId of [
       MARKETING_AGENTS_ROOT.id,

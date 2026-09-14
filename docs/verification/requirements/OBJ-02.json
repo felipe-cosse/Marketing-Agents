@@ -1,0 +1,142 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-02",
+  "matrix_statement_sha256": "dfb1328d5aea49fc04a14152994811238ff41ba29977a3571e27b7e18fcf678d",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/web/src/api/normalizeCatalogHierarchy.ts",
+      "apps/web/src/contracts/catalogHierarchy.ts",
+      "apps/web/src/features/org-chart/normalizeHierarchy.test.ts",
+      "apps/web/e2e/web-01-org-chart.spec.ts",
+      "apps/web/scripts/run-obj-02-witness.mjs",
+      "apps/web/scripts/run-obj-02-browser.mjs",
+      "docs/verification/requirements/OBJ-02.json",
+      "docs/verification/requirements/OBJ-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": ["apps/web/src/api/normalizeCatalogHierarchy.ts"]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/org-chart/normalizeHierarchy.test.ts",
+          "apps/web/e2e/web-01-org-chart.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "source-identity-contract",
+      "type": "contract",
+      "statement": "The frontend normalizes exact ordered 5/12/36/43 source counts, canonical department/function identities, function-owned template namespaces and template-derived instance identities. Community retains seven independently selectable ordinal pairs; other deployments require ordinal one. Shuffled transport order is restored and presentation-only changes do not alter layout identity.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/normalizeHierarchy.test.ts",
+        "apps/web/scripts/run-obj-02-witness.mjs",
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 renders the complete ordered API hierarchy with no external requests"
+      ]
+    },
+    {
+      "id": "count-preserving-drift-rejection",
+      "type": "negative_control",
+      "statement": "Count-preserving ordinal, instance/template, role-slug, containing-function and source-identity corruption fails closed before graph or tree rendering. The explicit retry boundary accepts a subsequent valid real API response and restores the interactive hierarchy without a page reload.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/normalizeHierarchy.test.ts::OBJ-02 rejects count-preserving",
+        "apps/web/scripts/run-obj-02-witness.mjs",
+        "apps/web/e2e/web-01-org-chart.spec.ts::OBJ-02 rejects a count-preserving source ordinal corruption and recovers the real interactive hierarchy"
+      ]
+    },
+    {
+      "id": "interactive-responsive-hierarchy",
+      "type": "journey",
+      "statement": "The production frontend retains bounded pan/zoom/fit, source-ordered search/filter results, independent Community selection and real detail identities, mobile semantic-tree navigation, focus preservation and accessibility/reflow behavior. Four complete existing browser specifications run without name filters through the unchanged local-only network guard.",
+      "test_refs": [
+        "apps/web/e2e/web-01-org-chart.spec.ts::WEB-01 zoom, pan, fit, and duplicate selection remain bounded and local",
+        "apps/web/e2e/web-01-org-chart.spec.ts::OBJ-02 rejects a count-preserving source ordinal corruption and recovers the real interactive hierarchy",
+        "apps/web/scripts/run-obj-02-browser.mjs"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-02-frontend-unit",
+      "runner": "argv",
+      "argv": ["node_modules/.bin/vitest", "run"],
+      "cwd": "apps/web",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "source-identity-contract",
+        "count-preserving-drift-rejection",
+        "interactive-responsive-hierarchy"
+      ]
+    },
+    {
+      "id": "obj-02-frontend-lint",
+      "runner": "argv",
+      "argv": ["node_modules/.bin/eslint", ".", "--max-warnings=0"],
+      "cwd": "apps/web",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["source-identity-contract", "interactive-responsive-hierarchy"]
+    },
+    {
+      "id": "obj-02-source-api",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/integration/api/test_api_02_catalog_hierarchy.py",
+        "tests/unit/application/test_obj_01_five_department_organization.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["source-identity-contract"]
+    },
+    {
+      "id": "obj-02-identity-witness",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-obj-02-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": ["source-identity-contract", "count-preserving-drift-rejection"]
+    },
+    {
+      "id": "obj-02-browser",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-obj-02-browser.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "source-identity-contract",
+        "count-preserving-drift-rejection",
+        "interactive-responsive-hierarchy"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/api/normalizeCatalogHierarchy.ts",
+      "apps/web/src/contracts/catalogHierarchy.ts"
+    ],
+    "gate_id": "obj-02-identity-witness"
+  },
+  "limitations": [
+    "The catalog-only browser API returns exact service_unavailable 503 problems for approval counts and instance status. The new journey asserts these responses, corresponding console errors and honest unavailable controls; it permits no other response or console errors.",
+    "Frontend validation enforces source department/function identities and relational template/instance integrity, not an independent hardcoded inventory of all 36 role names and purposes. The real API and catalog remain authoritative for those values.",
+    "Browser evidence uses pinned Playwright-managed Chromium with desktop/mobile viewport emulation, not physical devices, other engines, screen readers or a production deployment.",
+    "The OBJ-02 journey injects only its first malformed hierarchy response. Existing WEB-02 status and WEB-08 operational response fixtures retain their documented scope; this gate does not prove worker execution or external delivery.",
+    "The dependency-free restored-base witness must fail by assertion after successful imports, not because frontend dependencies are absent from the isolated Git archive.",
+    "CI remains disabled; workflow files and remote branches are unchanged. Verification is local and does not claim whole-system acceptance."
+  ]
+}

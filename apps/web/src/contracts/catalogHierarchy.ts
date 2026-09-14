@@ -73,6 +73,30 @@ export const EXPECTED_COUNTS = Object.freeze({
   instances: 43,
 } as const);
 
+// Stable source identities, independent of editable presentation metadata.
+export const EXPECTED_DEPARTMENT_IDS = Object.freeze([
+  "dept.social-media",
+  "dept.blog-seo",
+  "dept.email",
+  "dept.community",
+  "dept.partnerships",
+] as const);
+
+export const EXPECTED_FUNCTION_IDS = Object.freeze([
+  "func.social-media.new-content",
+  "func.social-media.research",
+  "func.social-media.tracking-analysis",
+  "func.blog-seo.new-content",
+  "func.blog-seo.tracking-analysis",
+  "func.email.newsletter",
+  "func.email.lifecycle-marketing",
+  "func.community.events",
+  "func.community.education",
+  "func.community.discussion",
+  "func.partnerships.implementation-partners",
+  "func.partnerships.integration-partners",
+] as const);
+
 export const EXPECTED_DEPARTMENT_INSTANCE_COUNTS = Object.freeze([
   12, 6, 5, 14, 6,
 ] as const);
