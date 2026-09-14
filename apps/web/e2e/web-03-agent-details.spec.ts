@@ -1,4 +1,5 @@
 // WEB-03 browser evidence uses the production Vite preview and real hierarchy/detail APIs.
+// OBJ-03 retains inspector and configuration regression coverage with mocked save responses.
 import {
   expect,
   test,
@@ -161,6 +162,7 @@ function configurationSchema(
           additionalProperties: false,
         },
         schedule: nullSchema(),
+        scheduledInput: nullSchema(),
       },
     },
   };
@@ -274,6 +276,32 @@ async function installBoundary(page: Page): Promise<{
       );
       const cached = detailCache.get(instanceId);
       if (cached === undefined) throw new Error("detail must load before edit");
+      if (request.method() === "GET") {
+        const instance = cached.body.instance as Record<string, unknown>;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: {
+            ETag: String(instance.configurationEtag),
+            "Cache-Control": "no-store",
+            Vary: "Authorization",
+          },
+          body: JSON.stringify({
+            projectionVersion: "instance-configuration-v1",
+            configuration: {
+              instanceId,
+              enabled: instance.enabled,
+              variantLabel: instance.variantLabel,
+              triggerBindings: instance.triggerBindings,
+              connectorBindings: instance.connectorBindings,
+              schedule: instance.schedule,
+              configurationRevision: instance.configurationRevision,
+              scheduledInput: null,
+            },
+          }),
+        });
+        return;
+      }
       const patch = jsonBody(route);
       observation.patches.push({ headers: request.headers(), body: patch });
       if (conflict) {
@@ -315,6 +343,7 @@ async function installBoundary(page: Page): Promise<{
             connectorBindings: instance.connectorBindings,
             schedule: instance.schedule,
             configurationRevision: 2,
+            scheduledInput: null,
           },
         }),
       });

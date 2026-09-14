@@ -151,6 +151,14 @@ class ScheduleRepositoryConflict(RuntimeError):
 class ScheduleRepository(Protocol):
     async def get(self, schedule_id: str) -> Schedule | None: ...
 
+    async def compare_and_swap_configuration(
+        self,
+        previous: Schedule,
+        replacement: Schedule,
+    ) -> bool:
+        """Update a bound schedule and invalidate its lease in the caller's transaction."""
+        ...
+
     async def get_claim(self, schedule_id: str) -> ScheduleClaim | None: ...
 
     async def fence_claim(
@@ -176,6 +184,7 @@ class ScheduleRepository(Protocol):
         *,
         now: datetime,
         limit: int,
+        configuration_bound_only: bool = False,
     ) -> tuple[Schedule, ...]: ...
 
     async def try_claim(
@@ -416,6 +425,14 @@ class ExecutionControlRepository(Protocol):
     ) -> ExecutionControlInsertResult: ...
 
     async def get(self, run_id: str) -> RunExecutionControl | None: ...
+
+    async def fence_active(
+        self,
+        *,
+        run_id: str,
+        expected_control_version: int,
+        occurred_at: datetime,
+    ) -> bool: ...
 
     async def get_operation(
         self,

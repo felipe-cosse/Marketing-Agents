@@ -284,8 +284,11 @@ class AuditEventRecord(Base):
             "step_transition_sequence IS NULL AND action_id IS NULL AND "
             "action_attempt_number IS NULL AND receipt_id IS NULL AND "
             "approval_request_id IS NULL AND approval_decision_id IS NULL) OR "
-            "(aggregate_type = 'artifact' AND event_type = 'artifact.persisted' AND "
-            "step_id IS NOT NULL AND attempt_id IS NOT NULL AND artifact_id IS NOT NULL AND "
+            "(aggregate_type = 'artifact' AND "
+            "((event_type = 'artifact.persisted' AND attempt_id IS NOT NULL) OR "
+            "(event_type IN ('artifact.transformed','artifact.previewed') "
+            "AND attempt_id IS NULL)) AND "
+            "step_id IS NOT NULL AND artifact_id IS NOT NULL AND "
             "aggregate_id = artifact_id AND outcome = 'accepted' AND mutation_version = 1 AND "
             "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
             "action_id IS NULL AND action_attempt_number IS NULL AND receipt_id IS NULL AND "
@@ -358,7 +361,9 @@ class AuditEventRecord(Base):
             "'action.dispatch_reserved','action.cancelled','approval.approved',"
             "'approval.rejected','approval.consumed','approval.superseded') OR "
             "approval_decision_id IS NULL) AND "
-            "(event_type IN ('attempt.completed','artifact.persisted') OR artifact_id IS NULL)",
+            "(event_type IN ('attempt.completed','artifact.persisted','artifact.transformed',"
+            "'artifact.previewed') "
+            "OR artifact_id IS NULL)",
             name="ck_audit_events_future_links_null",
         ),
         CheckConstraint(
@@ -393,7 +398,8 @@ class AuditEventRecord(Base):
             name="ck_audit_events_attempt_shape",
         ),
         CheckConstraint(
-            "(event_type = 'artifact.persisted' AND mutation_version = 1 AND "
+            "(event_type IN ('artifact.persisted','artifact.transformed','artifact.previewed') "
+            "AND mutation_version = 1 AND "
             "previous_state IS NULL AND new_state = 'persisted' AND artifact_id IS NOT NULL AND "
             "reason_code IS NULL) OR aggregate_type <> 'artifact'",
             name="ck_audit_events_artifact_shape",

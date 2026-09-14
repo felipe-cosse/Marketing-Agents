@@ -38,7 +38,7 @@ from marketing_agents.domain.entities._validation import (
     require_id,
     require_json_pointers,
 )
-from marketing_agents.domain.enums import Effect
+from marketing_agents.domain.enums import Effect, WorkMode
 from marketing_agents.domain.graph import DependencyGraph
 from marketing_agents.domain.plan_hash import (
     EFFECT_PLAN_HASH_DOMAIN as _DOMAIN_EFFECT_PLAN_HASH,
@@ -46,6 +46,11 @@ from marketing_agents.domain.plan_hash import (
 from marketing_agents.domain.plan_hash import (
     EffectPlanStepHashMaterial,
     effect_plan_hash,
+)
+from marketing_agents.domain.planner_output import (
+    PLANNER_OUTPUT_FAMILY,
+    PROPOSAL_PREVIEW_CAPABILITIES,
+    PROPOSAL_PREVIEW_KIND,
 )
 from marketing_agents.domain.run_lifecycle import PlanDispositionContext
 from marketing_agents.domain.runtime_policy import (
@@ -432,6 +437,27 @@ class EffectPlannedStep:
             or not 1 <= self.connector_timeout_seconds <= 120
         ):
             raise ValueError("connector timeout must be from 1 through 120 seconds")
+        preview = self.connector_family == PLANNER_OUTPUT_FAMILY
+        if (self.kind == PROPOSAL_PREVIEW_KIND) != preview:
+            raise ValueError("proposal preview kind and family must agree")
+        if preview and (
+            self.capability_id not in PROPOSAL_PREVIEW_CAPABILITIES
+            or self.effect is not Effect.READ
+            or self.binding_id is not None
+            or self.binding_configuration_revision is not None
+            or self.request_schema_id is None
+            or self.result_schema_id is None
+            or self.result_schema_hash is None
+            or self.connector_timeout_seconds is not None
+            or self.idempotency_support != "not_applicable"
+            or self.request_redaction_fields
+            or self.result_redaction_fields
+            or self.approval_required_roles
+            or self.approval_required_scopes
+            or self.approval_expires_after_seconds is not None
+            or self.approval_allow_self_approval is not None
+        ):
+            raise ValueError("planner proposal output cannot carry execution authority")
 
 
 @dataclass(frozen=True, slots=True)
@@ -514,8 +540,17 @@ class EffectPlan:
                 for step in self.steps
             ),
         )
+        previews = tuple(
+            step for step in self.steps if step.connector_family == PLANNER_OUTPUT_FAMILY
+        )
+        if previews and (
+            len(self.steps) != 1
+            or self.run_policy.max_model_calls != 0
+            or self.run_policy.max_tool_calls != 0
+        ):
+            raise ValueError("proposal outputs require a standalone zero-call plan")
         for step in self.steps:
-            if step.connector_family in _NON_CONNECTOR_FAMILIES:
+            if step.connector_family in _NON_CONNECTOR_FAMILIES | {PLANNER_OUTPUT_FAMILY}:
                 if (
                     step.binding_id is not None
                     or step.binding_configuration_revision is not None
@@ -531,9 +566,11 @@ class EffectPlan:
                 ):
                     raise ValueError("model plan steps require their template schema pair")
                 if step.connector_family == "artifact" and (
-                    step.request_schema_id is not None or step.result_schema_id is not None
+                    (step.request_schema_id is None) != (step.result_schema_id is None)
                 ):
-                    raise ValueError("artifact no-call steps cannot retain call schema IDs")
+                    raise ValueError(
+                        "local artifact steps require a complete schema pair or neither"
+                    )
             elif (
                 step.binding_id is None
                 or step.binding_configuration_revision != step.configuration_revision
@@ -703,6 +740,33 @@ class EffectAwarePlanner:
         self._validate_snapshot_parity()
 
     def plan(self, request: EffectPlanRequest) -> EffectPlan:
+        if any(step.kind == PROPOSAL_PREVIEW_KIND for step in request.steps):
+            raise EffectPlanningError(
+                "preview_entrypoint_required", "proposal outputs require explicit dry-run planning"
+            )
+        return self._plan(request, preview=False)
+
+    def plan_proposal_preview(self, request: EffectPlanRequest, *, mode: WorkMode) -> EffectPlan:
+        """Plan a local proposal document, never execution of its referenced WRITE.
+
+        Mode is revalidated against the persisted WorkItem at plan commit. The
+        capability remains the actual catalog WRITE being described; the sealed
+        step kind/family identify a separate planner-owned, no-call operation.
+        """
+        if mode is not WorkMode.DRY_RUN or len(request.steps) != 1:
+            raise EffectPlanningError("preview_mode_invalid", "preview requires one dry-run step")
+        if (
+            len(request.routing.selected_instances) != 1
+            or request.steps[0].kind != PROPOSAL_PREVIEW_KIND
+            or request.steps[0].binding_id is not None
+            or request.steps[0].write_intent is not None
+        ):
+            raise EffectPlanningError(
+                "preview_authority_invalid", "preview cannot carry connector or write authority"
+            )
+        return self._plan(request, preview=True)
+
+    def _plan(self, request: EffectPlanRequest, *, preview: bool) -> EffectPlan:
         ordered_specs = self._validate_graph_coverage(request)
         route_instances = {item.instance_id: item for item in request.routing.selected_instances}
         assignments = {item.slot_key: item for item in request.routing.assignments}
@@ -738,6 +802,60 @@ class EffectAwarePlanner:
                     "capability_not_allowed", "template does not allow the requested capability"
                 )
             self._validate_route_binding(request.routing, spec, selected.template_id, assignments)
+            if preview:
+                if (
+                    capability.id not in PROPOSAL_PREVIEW_CAPABILITIES
+                    or capability.effect is not Effect.WRITE
+                    or template.operation_classification != "mutating"
+                    or capability.idempotency_support != "required"
+                    or not self._operations[capability.id].enabled
+                ):
+                    raise EffectPlanningError(
+                        "preview_capability_invalid", "preview requires an enabled catalog WRITE"
+                    )
+                self._write_policy(template)
+                planned = EffectPlannedStep(
+                    runtime_step_id=spec.runtime_step_id,
+                    step_key=spec.step_key,
+                    kind=PROPOSAL_PREVIEW_KIND,
+                    selected_instance_id=selected.instance_id,
+                    routing_slot_key=spec.routing_slot_key,
+                    template_id=selected.template_id,
+                    configuration_revision=selected.configuration_revision,
+                    capability_id=capability.id,
+                    effect=Effect.READ,
+                    connector_family=PLANNER_OUTPUT_FAMILY,
+                    binding_id=None,
+                    binding_configuration_revision=None,
+                    request_schema_id=template.input_schema_id,
+                    result_schema_id=template.output_schema_id,
+                    result_schema_hash=template.output_schema_hash,
+                    request_redaction_fields=(),
+                    result_redaction_fields=(),
+                    data_classification=DataClassification.INTERNAL,
+                    idempotency_support="not_applicable",
+                    connector_timeout_seconds=None,
+                    approval_policy_id=template.approval_policy_id,
+                    approval_required_roles=(),
+                    approval_required_scopes=(),
+                    approval_expires_after_seconds=None,
+                    approval_allow_self_approval=None,
+                    runtime_policy=StepRuntimePolicy(
+                        operation_key=runtime_operation_key(
+                            workflow_id=request.routing.workflow_id,
+                            workflow_version=request.routing.workflow_version,
+                            step_key=spec.step_key,
+                        ),
+                        attempt_kind=attempt_kind_for_connector(PLANNER_OUTPUT_FAMILY),
+                        retry=template.retry_policy,
+                        timeout=template.timeout_policy,
+                        budget=template.budget_policy,
+                        rate_limit=template.rate_limit_policy,
+                    ),
+                )
+                planned_steps.append(planned)
+                resolved.append((spec, planned, template, None, None))
+                continue
             operation = self._validate_operation(capability, spec)
             binding = self._validate_binding(
                 spec,
@@ -766,21 +884,21 @@ class EffectAwarePlanner:
                     operation.request_schema_id
                     if operation
                     else template.input_schema_id
-                    if capability.connector_family == "model"
+                    if capability.connector_family in _NON_CONNECTOR_FAMILIES
                     else None
                 ),
                 result_schema_id=(
                     operation.result_schema_id
                     if operation
                     else template.output_schema_id
-                    if capability.connector_family == "model"
+                    if capability.connector_family in _NON_CONNECTOR_FAMILIES
                     else None
                 ),
                 result_schema_hash=(
                     operation.result_schema_hash
                     if operation
                     else template.output_schema_hash
-                    if capability.connector_family == "model"
+                    if capability.connector_family in _NON_CONNECTOR_FAMILIES
                     else None
                 ),
                 request_redaction_fields=(operation.request_redaction_fields if operation else ()),
@@ -835,6 +953,8 @@ class EffectAwarePlanner:
             ) from exc
         run_policy = replace(
             self._run_policy,
+            max_model_calls=0 if preview else self._run_policy.max_model_calls,
+            max_tool_calls=0 if preview else self._run_policy.max_tool_calls,
             run_timeout_seconds=min(
                 self._run_policy.run_timeout_seconds,
                 *selected_run_timeouts,
@@ -1187,6 +1307,10 @@ class EffectAwarePlanner:
                 require_id(source.connector_family, "capability connector family")
             except ValueError as exc:
                 raise EffectPlanningError("invalid_capability", str(exc)) from exc
+            if source.connector_family == PLANNER_OUTPUT_FAMILY:
+                raise EffectPlanningError(
+                    "reserved_capability_family", "planner outputs are not catalog capabilities"
+                )
             if source.id in result:
                 raise EffectPlanningError(
                     "duplicate_capability", "capability metadata must be unique"

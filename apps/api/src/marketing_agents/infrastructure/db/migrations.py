@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from marketing_agents.infrastructure.db.schema import schema_matches_metadata
 from marketing_agents.infrastructure.db.session import DatabaseRuntime
 
-HEAD_REVISION = "0006"
+HEAD_REVISION = "0008"
 REVISION_TABLES: dict[str, frozenset[str]] = {
+    "0008": frozenset(),
+    "0007": frozenset(),
     "0006": frozenset({"run_worker_claims"}),
     "0001": frozenset(
         {
@@ -172,14 +174,34 @@ def _upgrade(connection: Connection, revision: str) -> str:
 @asynccontextmanager
 async def migration_transaction(runtime: DatabaseRuntime) -> AsyncIterator[AsyncConnection]:
     """Serialize migration owners and protect SQLite DDL from legacy autocommit."""
-    async with runtime.engine.connect() as connection, connection.begin():
-        if connection.dialect.name == "sqlite":
-            await connection.exec_driver_sql("BEGIN IMMEDIATE")
-        elif connection.dialect.name == "postgresql":
-            await connection.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK}
-            )
-        yield connection
+    async with runtime.engine.connect() as connection:
+        sqlite = connection.dialect.name == "sqlite"
+        if sqlite:
+            # SQLite cannot rebuild a referenced table with foreign_keys enabled.
+            # This connection is exclusively owned by the serialized migration;
+            # existing data and copied tables are checked before its one commit.
+            await connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            await connection.commit()
+        try:
+            async with connection.begin():
+                if sqlite:
+                    await connection.exec_driver_sql("BEGIN IMMEDIATE")
+                    if (await connection.exec_driver_sql("PRAGMA foreign_key_check")).first():
+                        raise DatabaseMigrationError("migration_foreign_key_violation")
+                elif connection.dialect.name == "postgresql":
+                    await connection.execute(
+                        text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK}
+                    )
+                yield connection
+                if (
+                    sqlite
+                    and (await connection.exec_driver_sql("PRAGMA foreign_key_check")).first()
+                ):
+                    raise DatabaseMigrationError("migration_foreign_key_violation")
+        finally:
+            if sqlite:
+                await connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                await connection.commit()
 
 
 async def upgrade_database(runtime: DatabaseRuntime, revision: str = "head") -> str:

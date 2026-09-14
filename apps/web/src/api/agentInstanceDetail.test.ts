@@ -1,3 +1,4 @@
+// OBJ-03 preserves the public detail contract while scheduled input stays restricted.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "./client";
@@ -354,6 +355,7 @@ describe("WEB-03 agent instance detail normalization", () => {
               connectorBindings: instance.connectorBindings,
               schedule: instance.schedule,
               configurationRevision: instance.configurationRevision,
+              scheduledInput: null,
             },
           }),
           {

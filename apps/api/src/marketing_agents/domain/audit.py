@@ -141,6 +141,8 @@ _EVENT_AGGREGATES = {
     "attempt.reserved": "execution_attempt",
     "attempt.completed": "execution_attempt",
     "artifact.persisted": "artifact",
+    "artifact.transformed": "artifact",
+    "artifact.previewed": "artifact",
     "action.proposed": "external_action",
     "action.awaiting_approval": "external_action",
     "action.approved": "external_action",
@@ -386,6 +388,22 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
         }
     ),
     "artifact.persisted": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
+        }
+    ),
+    "artifact.transformed": frozenset(
+        {
+            "data_classification",
+            "output_schema_hash",
+            "output_schema_id",
+            "output_schema_version",
+        }
+    ),
+    "artifact.previewed": frozenset(
         {
             "data_classification",
             "output_schema_hash",
@@ -1162,9 +1180,11 @@ class AuditEventDraft:
         ):
             raise ValueError("attempt audit aggregate requires its attempt and step links")
         if self.aggregate_type == "artifact" and (
-            self.aggregate_id != self.artifact_id or self.step_id is None or self.attempt_id is None
+            self.aggregate_id != self.artifact_id
+            or self.step_id is None
+            or (self.event_type == "artifact.persisted" and self.attempt_id is None)
         ):
-            raise ValueError("artifact audit aggregate requires artifact, attempt, and step links")
+            raise ValueError("artifact audit aggregate requires its producer and artifact links")
         rejection_observation_fields = (
             self.attempted_command,
             self.expected_version,
@@ -1373,7 +1393,7 @@ class AuditEventDraft:
         elif self.aggregate_type == "artifact":
             if (
                 self.step_id is None
-                or self.attempt_id is None
+                or (self.event_type == "artifact.persisted" and self.attempt_id is None)
                 or self.artifact_id is None
                 or self.action_id is not None
                 or self.action_attempt_number is not None
@@ -1617,9 +1637,11 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
     }
     if attempt_link_event != (draft.attempt_id is not None):
         raise ValueError("attempt link does not match its event family")
-    artifact_link_event = draft.event_type == "artifact.persisted" or (
-        draft.event_type == "attempt.completed" and draft.new_state == "succeeded"
-    )
+    artifact_link_event = draft.event_type in {
+        "artifact.persisted",
+        "artifact.transformed",
+        "artifact.previewed",
+    } or (draft.event_type == "attempt.completed" and draft.new_state == "succeeded")
     if artifact_link_event != (draft.artifact_id is not None):
         raise ValueError("artifact link does not match its event family")
     required_decision_witness = draft.event_type in {
@@ -1958,7 +1980,7 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             or draft.reason_code is not None
         ):
             raise ValueError("attempt completion audit has an invalid terminal state")
-    elif draft.event_type == "artifact.persisted":
+    elif draft.event_type in {"artifact.persisted", "artifact.transformed", "artifact.previewed"}:
         if (
             draft.mutation_version != 1
             or draft.previous_state is not None

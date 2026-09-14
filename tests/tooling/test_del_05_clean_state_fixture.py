@@ -1,5 +1,7 @@
 """Verify the clean smoke's real persisted fixture setup and source authority."""
 
+# OBJ-03 verifies exact bound schedule input and occurrence provenance across restart.
+
 from __future__ import annotations
 
 import hmac
@@ -8,11 +10,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from marketing_agents.application.services.schedule_configuration import (
+    bind_scheduled_input,
+    verify_scheduled_input,
+)
 from marketing_agents.config import Settings
+from marketing_agents.domain.enums import TriggerKind, WorkMode
+from marketing_agents.domain.instance_configuration import ScheduledInput
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.seed import seed_catalog
 from marketing_agents.infrastructure.db import create_database_runtime
 from marketing_agents.infrastructure.db.local_installation import migrate_local_database
+from marketing_agents.infrastructure.instance_configuration_constraints import (
+    CompiledCatalogInstanceConfigurationConstraintProvider,
+)
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
 from marketing_agents.infrastructure.webhook_signatures import WEBHOOK_SIGNATURE_DOMAIN
 from marketing_agents.workers.runtime.composition import build_runtime
@@ -57,7 +68,9 @@ async def test_del_05_fixture_preserves_seed_and_replays_after_composition_resta
     await seed_catalog(catalog, database, CroniterRecurrenceCalculator())
     monkeypatch.setattr(fixture, "fixture_settings", lambda: settings)
     try:
+        prepare_started = datetime.now(UTC)
         assert (await fixture.prepare())["configurations_changed"] == 2
+        prepare_finished = datetime.now(UTC)
         before = database_snapshot(
             tmp_path / "data" / "local.db", settings.marketing_agents_digest_key_path
         )
@@ -75,9 +88,67 @@ async def test_del_05_fixture_preserves_seed_and_replays_after_composition_resta
             == before
         )
         receipts = []
+        schedule_receipts = []
+        expected_payload = {
+            "request_id": "request-del05-scheduled-verification",
+            "source_content": (
+                '{"events":[{"attended":3,"event":"Local verification session","registrations":4}]}'
+            ),
+        }
+        initial_due = None
         for attempt in range(2):
             runtime = await build_runtime(settings)
             try:
+                constraints = await CompiledCatalogInstanceConfigurationConstraintProvider(
+                    runtime.catalog
+                ).get(fixture.SCHEDULE_INSTANCE)
+                assert constraints is not None
+                definition = runtime.workflows.for_catalog_role(
+                    constraints.template_id, TriggerKind.SCHEDULE
+                )
+                expected_input = bind_scheduled_input(
+                    ScheduledInput(expected_payload, WorkMode.DRY_RUN),
+                    constraints,
+                    runtime.workflows,
+                    runtime.digest_key,
+                )
+                async with runtime.dependencies.unit_of_work() as unit:
+                    configuration = await unit.configurations.get(fixture.SCHEDULE_INSTANCE)
+                    schedule = await unit.schedules.get(fixture.SCHEDULE_ID)
+                    assert configuration is not None and schedule is not None
+                    assert (
+                        configuration.configuration_revision == schedule.configuration_revision == 2
+                    )
+                    assert schedule.workflow_id == definition.id
+                    assert configuration.scheduled_input == expected_input
+                    assert configuration.scheduled_input.mode is WorkMode.DRY_RUN
+                    assert configuration.scheduled_input.admitted_payload == expected_payload
+                    verify_scheduled_input(
+                        fixture.SCHEDULE_INSTANCE,
+                        configuration.scheduled_input,
+                        runtime.digest_key,
+                    )
+                    assert expected_input.authority is not None
+                    assert (
+                        expected_input.authority.workflow_definition_hash
+                        == definition.definition_hash
+                    )
+                    assert expected_input.authority.input_schema_id == definition.input_schema_id
+                    assert (
+                        expected_input.authority.input_schema_hash == definition.input_schema_hash
+                    )
+                    if attempt == 0:
+                        initial_due = schedule.next_run_at_utc
+                        assert (initial_due.second, initial_due.microsecond) == (0, 0)
+                        assert initial_due <= runtime.dependencies.clock.now()
+                        assert (
+                            prepare_started.replace(second=0, microsecond=0)
+                            <= initial_due
+                            <= prepare_finished
+                        )
+                    else:
+                        assert initial_due is not None
+                        assert schedule.next_run_at_utc == initial_due + timedelta(days=1)
                 timestamp = str(int(runtime.dependencies.clock.now().timestamp()))
                 body = json.dumps(
                     {
@@ -113,10 +184,27 @@ async def test_del_05_fixture_preserves_seed_and_replays_after_composition_resta
                 assert await SchedulerWorker(
                     runtime, f"worker.del05.fixture.{attempt}"
                 ).drain_once() is (attempt == 0)
+                async with runtime.dependencies.unit_of_work() as unit:
+                    assert initial_due is not None
+                    occurrence = await unit.schedules.get_occurrence_by_schedule_due(
+                        fixture.SCHEDULE_ID, initial_due
+                    )
+                    assert occurrence is not None and occurrence.work_item_id is not None
+                    work = await unit.works.get(occurrence.work_item_id)
+                    assert work is not None
+                    assert work.instance_id == fixture.SCHEDULE_INSTANCE
+                    assert work.workflow_id == definition.id
+                    assert work.configuration_revision == 2
+                    assert work.mode is WorkMode.DRY_RUN
+                    assert work.admitted_payload == expected_payload
+                    assert work.input_schema_id == definition.input_schema_id
+                    assert work.input_schema_hash == definition.input_schema_hash
+                    schedule_receipts.append((occurrence, work))
             finally:
                 await runtime.database.dispose()
         assert receipts[0]["receiptId"] == receipts[1]["receiptId"]
         assert receipts[0]["deliveries"] == receipts[1]["deliveries"]
+        assert schedule_receipts[0] == schedule_receipts[1]
         after = database_snapshot(
             tmp_path / "data" / "local.db", settings.marketing_agents_digest_key_path
         )

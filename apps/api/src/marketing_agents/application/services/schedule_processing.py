@@ -21,7 +21,7 @@ from marketing_agents.domain.entities import (
     ScheduleOccurrence,
     WorkItem,
 )
-from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState, RunState
+from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState, RunState, TriggerKind
 from marketing_agents.domain.run_lifecycle import initial_received_transition
 from marketing_agents.domain.schedule_misfire import (
     ScheduleDisposition,
@@ -40,6 +40,7 @@ from .incoming_work_validation import (
     IncomingWorkValidator,
     _validated_parts,
 )
+from .schedule_configuration import ScheduleConfigurationError, verify_scheduled_input
 from .schedule_misfire import ScheduleMisfireError, ScheduleMisfirePlanner
 from .schedule_occurrence_ingress import (
     ScheduleOccurrenceCommand,
@@ -152,6 +153,8 @@ class ScheduleClaimProcessingService:
                     "schedule_missing",
                     "claimed schedule no longer exists",
                 )
+            if schedule.configuration_revision is not None:
+                await self._fence_configuration(unit_of_work, schedule, command)
             plan = self._planner.resolve(schedule=schedule, claim=claim)
 
             fence_attempted_at = self._dependencies.utc_now()
@@ -265,6 +268,86 @@ class ScheduleClaimProcessingService:
                 run=run,
                 audit_events=(audit_events[0], audit_events[1]),
                 disposition=ScheduleClaimProcessingDisposition.PROCESSED,
+            )
+
+    async def _fence_configuration(
+        self,
+        unit_of_work: UnitOfWork,
+        schedule: Schedule,
+        command: ScheduleOccurrenceCommand,
+    ) -> None:
+        """Use the same config→schedule lock order as configuration CAS synchronization."""
+        configuration = await unit_of_work.configurations.get_for_update(schedule.instance_id)
+        snapshot = None if configuration is None else configuration.scheduled_input
+        if (
+            configuration is None
+            or not configuration.enabled
+            or snapshot is None
+            or snapshot.authority is None
+            or configuration.schedule is None
+            or configuration.configuration_revision != schedule.configuration_revision
+            or configuration.configuration_revision != command.configuration_revision
+            or not any(
+                item.kind is TriggerKind.SCHEDULE and item.enabled
+                for item in configuration.trigger_bindings
+            )
+            or snapshot.authority.workflow_id != schedule.workflow_id
+            or snapshot.mode is not command.mode
+            or command.brief_id is not None
+            or command.brief_revision is not None
+            or canonical_json_bytes(snapshot.admitted_payload)
+            != canonical_json_bytes(command.admitted_payload)
+            or (
+                configuration.schedule.cron,
+                configuration.schedule.timezone,
+                configuration.schedule.misfire_policy,
+                configuration.schedule.misfire_grace_seconds,
+            )
+            != (
+                schedule.cron,
+                schedule.timezone,
+                schedule.misfire_policy,
+                schedule.misfire_grace_seconds,
+            )
+        ):
+            raise ScheduleClaimProcessingError(
+                "configuration_fence_lost", "scheduled configuration binding changed"
+            )
+        try:
+            verify_scheduled_input(schedule.instance_id, snapshot, self._digest_key)
+        except ScheduleConfigurationError:
+            raise ScheduleClaimProcessingError(
+                "configuration_fence_lost", "scheduled input binding is invalid"
+            ) from None
+        if not await unit_of_work.configurations.fence_revision(configuration):
+            raise ScheduleClaimProcessingError(
+                "configuration_fence_lost", "scheduled configuration changed before fencing"
+            )
+        incoming = self._validator.validate(
+            AdmissionEnvelope(
+                source="schedule",
+                event_id=schedule_occurrence_id(
+                    schedule.id,
+                    command.claim.scheduled_for_utc,
+                    recurrence_version=schedule.recurrence_version,
+                ),
+                instance_id=schedule.instance_id,
+                trigger_id=schedule.trigger_id,
+                workflow_id=schedule.workflow_id,
+                mode=command.mode,
+                brief_id=None,
+                brief_revision=None,
+                configuration_revision=command.configuration_revision,
+                admitted_payload=command.admitted_payload,
+            )
+        )
+        observed = _validated_parts(incoming)[1]
+        if (observed.input_schema_id, observed.input_schema_hash) != (
+            snapshot.authority.input_schema_id,
+            snapshot.authority.input_schema_hash,
+        ):
+            raise ScheduleClaimProcessingError(
+                "configuration_fence_lost", "scheduled input schema changed"
             )
 
     async def _load_committed_result(

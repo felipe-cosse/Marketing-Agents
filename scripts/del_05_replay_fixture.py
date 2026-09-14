@@ -1,5 +1,7 @@
 """Verification-only local webhook/schedule admission fixtures, never startup seeds."""
 
+# OBJ-03 keeps verification schedules explicitly input-bound like normal configured schedules.
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +30,22 @@ TRIGGER = "trigger.webhook.del05.events.v1"
 SCHEDULE_ID = "schedule.del05.clean-restart"
 WEBHOOK_INSTANCE = "inst.community.events.attendee-scheduler.01"
 SCHEDULE_INSTANCE = "inst.community.events.event-stats-tracker.02"
+
+
+def scheduled_fixture_payload() -> dict:
+    """Explicit synthetic event evidence for the registered event-stats dry run."""
+    return {
+        "request_id": "request-del05-scheduled-verification",
+        "source_content": json.dumps(
+            {
+                "events": [
+                    {"event": "Local verification session", "registrations": 4, "attended": 3}
+                ]
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+    }
 
 
 def daily_fixture_timing(now: datetime) -> tuple[str, datetime]:
@@ -62,17 +80,33 @@ def fixture_settings():
 
 
 async def prepare() -> dict:
+    from marketing_agents.application.services.schedule_configuration import bind_scheduled_input
     from marketing_agents.domain.entities import Schedule
-    from marketing_agents.domain.enums import MisfirePolicy, TriggerKind
+    from marketing_agents.domain.enums import MisfirePolicy, TriggerKind, WorkMode
     from marketing_agents.domain.instance_configuration import (
         InstanceSchedule,
         InstanceTriggerBinding,
+        ScheduledInput,
     )
     from marketing_agents.domain.schedule_occurrence_identity import SCHEDULE_RECURRENCE_VERSION
+    from marketing_agents.infrastructure.instance_configuration_constraints import (
+        CompiledCatalogInstanceConfigurationConstraintProvider,
+    )
     from marketing_agents.workers.runtime.composition import build_runtime
 
     runtime = await build_runtime(fixture_settings())
     try:
+        constraints = await CompiledCatalogInstanceConfigurationConstraintProvider(
+            runtime.catalog
+        ).get(SCHEDULE_INSTANCE)
+        require(constraints is not None, "fixture_schedule_instance_unknown")
+        scheduled_input = bind_scheduled_input(
+            ScheduledInput(scheduled_fixture_payload(), WorkMode.DRY_RUN),
+            constraints,
+            runtime.workflows,
+            runtime.digest_key,
+        )
+        require(scheduled_input.authority is not None, "fixture_schedule_input_unbound")
         cron, due = daily_fixture_timing(runtime.dependencies.clock.now())
         async with runtime.dependencies.unit_of_work() as unit:
             require(
@@ -103,6 +137,7 @@ async def prepare() -> dict:
                         current,
                         configuration_revision=2,
                         schedule=schedule,
+                        scheduled_input=scheduled_input,
                         trigger_bindings=(
                             InstanceTriggerBinding(
                                 kind=TriggerKind.SCHEDULE,
@@ -122,13 +157,14 @@ async def prepare() -> dict:
                     id=SCHEDULE_ID,
                     trigger_id="trigger.del05.clean-schedule",
                     instance_id=SCHEDULE_INSTANCE,
-                    workflow_id="workflow.del05.scheduled-admission.v1",
+                    workflow_id=scheduled_input.authority.workflow_id,
                     cron=cron,
                     timezone="UTC",
                     next_run_at_utc=due,
                     misfire_policy=MisfirePolicy.RUN_ONCE,
                     misfire_grace_seconds=86400,
                     enabled=True,
+                    configuration_revision=2,
                     recurrence_version=SCHEDULE_RECURRENCE_VERSION,
                 )
             )

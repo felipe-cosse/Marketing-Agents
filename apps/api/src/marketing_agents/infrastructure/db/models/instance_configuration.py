@@ -54,5 +54,6 @@ class AgentInstanceConfigurationRecord(Base):
     trigger_bindings_json: Mapped[str] = mapped_column(Text, nullable=False)
     connector_bindings_json: Mapped[str] = mapped_column(Text, nullable=False)
     schedule_json: Mapped[str] = mapped_column(Text, nullable=False)
+    scheduled_input_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     integrity_digest: Mapped[str] = mapped_column(String(64), nullable=False)

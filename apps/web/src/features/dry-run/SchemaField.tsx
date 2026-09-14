@@ -20,6 +20,7 @@ export interface SchemaFieldProps {
   readonly issues: readonly SchemaValidationIssue[];
   readonly formId: string;
   readonly disabled: boolean;
+  readonly sensitiveValueNotice?: string;
   readonly onChange: (value: unknown) => void;
 }
 
@@ -54,6 +55,7 @@ function PrimitiveField({
   formId,
   disabled,
   onChange,
+  sensitiveValueNotice = "Sensitive value. Kept only in this open form.",
 }: SchemaFieldProps & {
   readonly schema: Exclude<
     CompiledSchema,
@@ -222,7 +224,7 @@ function PrimitiveField({
       ) : null}
       {schema.sensitive ? (
         <p id={sensitiveNoteId} className="schema-form__sensitive-note">
-          Sensitive value. Kept only in this open form.
+          {sensitiveValueNotice}
         </p>
       ) : null}
       <FieldError id={errorId} messages={messages} />

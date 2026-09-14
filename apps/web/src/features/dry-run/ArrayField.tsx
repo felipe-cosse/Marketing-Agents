@@ -20,6 +20,7 @@ export interface ArrayFieldProps {
   readonly issues: readonly SchemaValidationIssue[];
   readonly formId: string;
   readonly disabled: boolean;
+  readonly sensitiveValueNotice?: string;
   readonly onChange: (value: unknown) => void;
 }
 
@@ -32,6 +33,7 @@ export function ArrayField({
   formId,
   disabled,
   onChange,
+  sensitiveValueNotice,
 }: ArrayFieldProps): React.JSX.Element {
   const fieldsetRef = useRef<HTMLFieldSetElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
@@ -108,6 +110,9 @@ export function ArrayField({
                 issues={issues}
                 formId={formId}
                 disabled={disabled}
+                {...(sensitiveValueNotice === undefined
+                  ? {}
+                  : { sensitiveValueNotice })}
                 onChange={(nextValue) => {
                   const nextItems = [...items];
                   nextItems[index] = nextValue;

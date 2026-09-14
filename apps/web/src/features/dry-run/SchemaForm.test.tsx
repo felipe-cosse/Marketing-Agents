@@ -1,3 +1,4 @@
+// OBJ-03 preserves nested schema-field identity for explicit scheduled input editing.
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -5,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSchemaDefaults } from "./schemaDefaults";
 import { SchemaForm } from "./SchemaForm";
+import { SchemaField } from "./SchemaField";
 import { compileInputSchema, type SchemaDraftObject } from "./schemaModel";
 import type { SchemaValidationIssue } from "./schemaValidation";
 
@@ -91,6 +93,60 @@ const RAW_SCHEMA = {
 } as const;
 
 const COMPILED_SCHEMA = compileInputSchema(RAW_SCHEMA);
+
+it("keeps saved-input privacy notices through nested objects and arrays", () => {
+  const schema = compileInputSchema({
+    type: "object",
+    additionalProperties: false,
+    required: ["items"],
+    properties: {
+      items: {
+        type: "array",
+        minItems: 1,
+        maxItems: 2,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["content"],
+          properties: {
+            content: {
+              type: "string",
+              title: "Nested content",
+              minLength: 1,
+              maxLength: 100,
+              "x-sensitive": true,
+            },
+          },
+        },
+      },
+    },
+  });
+  render(
+    <SchemaField
+      schema={schema}
+      pointer="/input"
+      value={{ items: [{ content: "saved-local-canary" }] }}
+      required
+      issues={[]}
+      formId="saved-test"
+      disabled={false}
+      onChange={vi.fn()}
+      sensitiveValueNotice="Saving stores this input locally for scheduled runs."
+    />,
+  );
+  expect(
+    screen.getByText("Saving stores this input locally for scheduled runs."),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("Sensitive value. Kept only in this open form."),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("textbox", { name: /Nested content/u }),
+  ).toHaveAccessibleDescription(
+    "Saving stores this input locally for scheduled runs.",
+  );
+});
+
 const SOURCE_ISSUE: SchemaValidationIssue = {
   pointer: "/input/source_content",
   code: "required",

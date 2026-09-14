@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.planner_output import PLANNER_OUTPUT_FAMILY
 from marketing_agents.domain.validation import require_id
 
 RUN_RUNTIME_POLICY_HASH_DOMAIN = b"marketing-agents:run-runtime-policy:v1\x00"
@@ -356,7 +357,7 @@ def attempt_kind_for_connector(connector_family: str) -> AttemptKind:
     require_id(connector_family, "runtime connector family")
     if connector_family == "model":
         return AttemptKind.MODEL
-    if connector_family == "artifact":
+    if connector_family in {"artifact", PLANNER_OUTPUT_FAMILY}:
         return AttemptKind.NO_CALL
     return AttemptKind.TOOL
 

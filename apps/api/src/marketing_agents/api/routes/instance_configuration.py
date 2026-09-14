@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
@@ -29,6 +30,7 @@ from marketing_agents.api.schemas.instance_configuration import (
     InstanceConfigurationSchemaResponse,
     InstanceConfigurationView,
     ScheduleBindingView,
+    ScheduledInputInput,
     TriggerBindingView,
 )
 from marketing_agents.api.strict_json import (
@@ -43,7 +45,7 @@ from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationUpdateResult,
     UpdateInstanceConfigurationCommand,
 )
-from marketing_agents.domain.enums import MisfirePolicy, TriggerKind
+from marketing_agents.domain.enums import MisfirePolicy, TriggerKind, WorkMode
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.instance_configuration import (
     InstanceConfiguration,
@@ -52,6 +54,7 @@ from marketing_agents.domain.instance_configuration import (
     InstanceSchedule,
     InstanceTriggerBinding,
     PatchValue,
+    ScheduledInput,
 )
 
 _INSTANCE_ID_PATTERN = r"^inst\.[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+\.[0-9]{2}$"
@@ -238,11 +241,28 @@ def _configuration_view(configuration: InstanceConfiguration) -> InstanceConfigu
             )
         ),
         configuration_revision=configuration.configuration_revision,
+        scheduled_input=(
+            None
+            if configuration.scheduled_input is None
+            else ScheduledInputInput(
+                input=dict(configuration.scheduled_input.admitted_payload),
+                executionMode=configuration.scheduled_input.mode.value,
+            )
+        ),
     )
 
 
 def _response(configuration: InstanceConfiguration) -> InstanceConfigurationResponse:
     return InstanceConfigurationResponse(configuration=_configuration_view(configuration))
+
+
+def _client_configuration(configuration: InstanceConfiguration) -> InstanceConfiguration:
+    """Compare client-owned fields without pretending the client can issue a keyed binding."""
+    snapshot = configuration.scheduled_input
+    return replace(
+        configuration,
+        scheduled_input=None if snapshot is None else replace(snapshot, authority=None),
+    )
 
 
 def _problem_response(
@@ -475,6 +495,18 @@ def _patch(body: InstanceConfigurationPatchInput) -> InstanceConfigurationPatch:
             PatchValue.of(connectors) if "connector_bindings" in supplied else PatchValue.omitted()
         ),
         schedule=(PatchValue.of(schedule) if "schedule" in supplied else PatchValue.omitted()),
+        scheduled_input=(
+            PatchValue.of(
+                None
+                if body.scheduled_input is None
+                else ScheduledInput(
+                    admitted_payload=body.scheduled_input.input,
+                    mode=WorkMode(body.scheduled_input.execution_mode),
+                )
+            )
+            if "scheduled_input" in supplied
+            else PatchValue.omitted()
+        ),
     )
 
 
@@ -516,6 +548,64 @@ async def get_instance_configuration_schema(
         status_code=status.HTTP_200_OK,
         content=response.model_dump(mode="json", by_alias=True),
         headers={"Cache-Control": _NO_STORE, "Vary": _VARY},
+    )
+
+
+@router.get(
+    "/{instance_id}/configuration",
+    response_model=InstanceConfigurationResponse,
+    operation_id="getAgentInstanceConfiguration",
+    responses={
+        **_SCHEMA_RESPONSES,
+        status.HTTP_200_OK: {
+            "description": "Administrator-only deployment configuration and saved scheduled input.",
+            "headers": _SUCCESS_HEADERS,
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": InstanceConfigurationHttpError | InstanceConfigurationProblem,
+            "description": "Saved execution input requires a configuration administrator.",
+        },
+    },
+)
+async def get_instance_configuration(
+    instance_id: Annotated[str, Path(pattern=_INSTANCE_ID_PATTERN)],
+    principal: Annotated[
+        AuthenticatedPrincipal,
+        Depends(require_instance_configuration_admin_principal),
+    ],
+    executor: Annotated[
+        InstanceConfigurationExecutor,
+        Depends(get_instance_configuration_executor),
+    ],
+) -> JSONResponse:
+    """Explicit sensitive view; the ordinary catalog projection never includes this input."""
+    try:
+        configuration = await asyncio.wait_for(
+            executor.read(instance_id, principal=principal),
+            timeout=_QUERY_TIMEOUT_SECONDS,
+        )
+        if (
+            type(configuration) is not InstanceConfiguration
+            or configuration.instance_id != instance_id
+        ):
+            raise TypeError("configuration service returned an invalid projection")
+        response = _response(configuration)
+    except InstanceConfigurationServiceError as error:
+        return _service_problem(error)
+    except Exception:
+        return _problem_response(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="configuration_unavailable",
+            message="instance configuration is temporarily unavailable",
+        )
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=response.model_dump(mode="json", by_alias=True),
+        headers={
+            "Cache-Control": _NO_STORE,
+            "ETag": instance_configuration_etag(configuration.configuration_revision),
+            "Vary": _VARY,
+        },
     )
 
 
@@ -567,12 +657,6 @@ async def update_instance_configuration(
     try:
         patch = _patch(body)
         expected_candidate = patch.apply(current)
-        expected_changed = expected_candidate != current
-        expected_configuration = (
-            expected_candidate.with_revision(current.configuration_revision + 1)
-            if expected_changed
-            else current
-        )
         command = UpdateInstanceConfigurationCommand(
             instance_id=instance_id,
             expected_revision=current.configuration_revision,
@@ -598,11 +682,22 @@ async def update_instance_configuration(
             code="configuration_unavailable",
             message="instance configuration is temporarily unavailable",
         )
-    if (
-        type(result) is not InstanceConfigurationUpdateResult
-        or result.changed is not expected_changed
-        or result.configuration != expected_configuration
-    ):
+    valid = type(result) is InstanceConfigurationUpdateResult
+    if valid:
+        observed = result.configuration
+        expected_revision = current.configuration_revision + int(result.changed)
+        valid = (
+            _client_configuration(observed)
+            == _client_configuration(expected_candidate).with_revision(expected_revision)
+            and result.changed
+            == (observed.with_revision(current.configuration_revision) != current)
+            and (observed.scheduled_input is None or observed.scheduled_input.authority is not None)
+            and (
+                patch.scheduled_input.provided
+                or observed.scheduled_input == current.scheduled_input
+            )
+        )
+    if not valid:
         return _problem_response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="configuration_unavailable",

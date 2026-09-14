@@ -72,6 +72,11 @@ class ScheduleBindingInput(InstanceConfigurationInputModel):
     misfire_grace_seconds: StrictInt = Field(ge=0, le=86_400)
 
 
+class ScheduledInputInput(InstanceConfigurationInputModel):
+    input: dict[str, Any] = Field(min_length=1, max_length=64)
+    execution_mode: Literal["dry_run"] = "dry_run"
+
+
 class InstanceConfigurationPatchInput(InstanceConfigurationInputModel):
     """Partial replacement request; explicit null clears nullable deployment fields."""
 
@@ -91,6 +96,7 @@ class InstanceConfigurationPatchInput(InstanceConfigurationInputModel):
         json_schema_extra=_nonnullable_optional_json_schema,
     )
     schedule: ScheduleBindingInput | None = None
+    scheduled_input: ScheduledInputInput | None = None
 
     @model_validator(mode="after")
     def validate_patch_shape(self) -> Self:
@@ -134,6 +140,7 @@ class InstanceConfigurationView(InstanceConfigurationApiModel):
     connector_bindings: dict[str, ConnectorBindingView]
     schedule: ScheduleBindingView | None
     configuration_revision: int = Field(ge=1)
+    scheduled_input: ScheduledInputInput | None = None
 
 
 class InstanceConfigurationResponse(InstanceConfigurationApiModel):

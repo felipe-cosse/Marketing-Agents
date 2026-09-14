@@ -2577,6 +2577,12 @@
               { "type": "null" }
             ]
           },
+          "scheduledInput": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ScheduledInputInput" },
+              { "type": "null" }
+            ]
+          },
           "triggerBindings": {
             "items": { "$ref": "#/components/schemas/TriggerBindingInput" },
             "maxItems": 16,
@@ -2717,6 +2723,12 @@
           "schedule": {
             "anyOf": [
               { "$ref": "#/components/schemas/ScheduleBindingView" },
+              { "type": "null" }
+            ]
+          },
+          "scheduledInput": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ScheduledInputInput" },
               { "type": "null" }
             ]
           },
@@ -4503,6 +4515,27 @@
         "title": "ScheduleBindingView",
         "type": "object"
       },
+      "ScheduledInputInput": {
+        "additionalProperties": false,
+        "properties": {
+          "executionMode": {
+            "const": "dry_run",
+            "default": "dry_run",
+            "title": "Executionmode",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "maxProperties": 64,
+            "minProperties": 1,
+            "title": "Input",
+            "type": "object"
+          }
+        },
+        "required": ["input"],
+        "title": "ScheduledInputInput",
+        "type": "object"
+      },
       "SessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5533,6 +5566,120 @@
       }
     },
     "/api/v1/agent-instances/{instance_id}/configuration": {
+      "get": {
+        "description": "Explicit sensitive view; the ordinary catalog projection never includes this input.",
+        "operationId": "getAgentInstanceConfiguration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "pattern": "^inst\\.[a-z0-9-]+\\.[a-z0-9-]+\\.[a-z0-9-]+\\.[0-9]{2}$",
+              "title": "Instance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceConfigurationResponse"
+                }
+              }
+            },
+            "description": "Administrator-only deployment configuration and saved scheduled input.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Configuration responses must not be stored.",
+                "schema": { "const": "no-store", "type": "string" }
+              },
+              "ETag": {
+                "description": "Strong revision validator required by the next PATCH.",
+                "schema": {
+                  "maxLength": 200,
+                  "pattern": "^\"instance-configuration-v1-[1-9][0-9]*\"$",
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Shared caches must separate authorization contexts.",
+                "schema": { "const": "Authorization", "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "The authentication header shape is malformed."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Authentication is required."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Saved execution input requires a configuration administrator."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "The selected agent instance does not exist.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Configuration responses must not be stored.",
+                "schema": { "const": "no-store", "type": "string" }
+              },
+              "Vary": {
+                "description": "Shared caches must separate authorization contexts.",
+                "schema": { "const": "Authorization", "type": "string" }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "The instance path parameter is invalid."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "The configuration service is unavailable or violated its contract."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Get Instance Configuration",
+        "tags": ["instance-configuration"]
+      },
       "patch": {
         "operationId": "updateAgentInstanceConfiguration",
         "parameters": [

@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from marketing_agents.application.orchestration.executable_workflows import (
+    ExecutableWorkflowDefinition,
+    ExecutableWorkflowRegistry,
+    ExecutableWorkflowRegistryError,
+    catalog_role_workflow_id,
+)
 from marketing_agents.application.policies.runtime_guard import (
     CapabilityPolicy,
     RuntimePolicyGuard,
@@ -20,10 +26,8 @@ from marketing_agents.application.ports.webhooks import (
     require_webhook_trigger_id,
 )
 from marketing_agents.application.services.incoming_work_validation import (
-    CampaignBriefPolicy,
     ConfiguredIncomingTrigger,
     IncomingWorkValidator,
-    WorkflowAdmissionDefinition,
 )
 from marketing_agents.domain.enums import TriggerKind, WorkMode
 from marketing_agents.domain.instance_configuration import InstanceConfiguration
@@ -34,6 +38,7 @@ from marketing_agents.infrastructure.catalog.models import (
     CompiledCatalog,
     ToolCapabilityRecord,
 )
+from marketing_agents.infrastructure.executable_workflows import build_executable_workflow_registry
 from marketing_agents.infrastructure.instance_configuration_constraints import (
     InstanceConfigurationConstraintError,
     validate_mock_connector_bindings,
@@ -75,7 +80,13 @@ class _EffectiveWebhookInstance:
 class CompiledCatalogWebhookAdmissionResolver:
     """Resolve every explicitly bound target without consulting webhook payload text."""
 
-    def __init__(self, catalog: CompiledCatalog, *, mock_connectors_active: bool) -> None:
+    def __init__(
+        self,
+        catalog: CompiledCatalog,
+        *,
+        mock_connectors_active: bool,
+        workflows: ExecutableWorkflowRegistry | None = None,
+    ) -> None:
         if type(catalog) is not CompiledCatalog:
             raise ValueError("webhook admission resolver requires one compiled catalog")
         if type(mock_connectors_active) is not bool:
@@ -88,6 +99,13 @@ class CompiledCatalogWebhookAdmissionResolver:
         )
         self._catalog = catalog
         self._mock_connectors_active = mock_connectors_active
+        if workflows is not None and type(workflows) is not ExecutableWorkflowRegistry:
+            raise ValueError("webhook admission resolver requires an exact executable registry")
+        self._workflows = (
+            build_executable_workflow_registry(catalog) if workflows is None else workflows
+        )
+        if self._workflows.catalog_content_hash != catalog.content_hash:
+            raise ValueError("webhook executable registry belongs to a different catalog")
         self._instances = _unique_index(catalog.instances, label="instance")
         self._templates = _unique_index(catalog.templates, label="template")
         self._capabilities = _unique_index(catalog.tool_capabilities, label="capability")
@@ -179,8 +197,20 @@ class CompiledCatalogWebhookAdmissionResolver:
             configuration.instance_id,
             configuration.connector_bindings,
         )
-        workflow_id = self._workflow_id(template.id)
         mode = WorkMode.MOCK_EXECUTION
+        try:
+            definition = self._workflows.for_catalog_role(template.id, TriggerKind.WEBHOOK)
+            self._workflows.require_match(
+                definition.id,
+                instance_id=configuration.instance_id,
+                template_id=template.id,
+                trigger_kind=TriggerKind.WEBHOOK,
+                mode=mode,
+                catalog_content_hash=self._catalog.content_hash,
+            )
+        except ExecutableWorkflowRegistryError:
+            raise _unavailable() from None
+        workflow_id = definition.id
         return WebhookAdmissionBinding(
             source=source,
             trigger_id=trigger_id,
@@ -194,7 +224,7 @@ class CompiledCatalogWebhookAdmissionResolver:
                 source=source,
                 trigger_id=trigger_id,
                 workflow_id=workflow_id,
-                mode=mode,
+                definition=definition,
             ),
         )
 
@@ -206,11 +236,9 @@ class CompiledCatalogWebhookAdmissionResolver:
         source: str,
         trigger_id: str,
         workflow_id: str,
-        mode: WorkMode,
+        definition: ExecutableWorkflowDefinition,
     ) -> IncomingWorkValidator:
-        schema = self._catalog.input_schema_by_template.get(template.id)
-        if schema is None:
-            raise _unavailable()
+        schema = definition.input_schema
         capabilities = self._selected_capabilities(template)
         budget = template.budget_policy
         timeout = template.timeout_policy
@@ -231,8 +259,12 @@ class CompiledCatalogWebhookAdmissionResolver:
                 max_json_depth=64,
                 max_content_parts=256,
                 max_content_characters=min(budget.max_input_bytes, 1_000_000),
-                max_model_calls=budget.max_model_calls,
-                max_tool_calls=budget.max_tool_calls,
+                max_model_calls=definition.expected_model_calls,
+                max_tool_calls=(
+                    budget.max_tool_calls
+                    if definition.expected_connector_calls is None
+                    else definition.expected_connector_calls
+                ),
                 rate_window_max_calls=rate_limit.max_calls,
                 rate_window_seconds=rate_limit.window_seconds,
                 step_timeout_seconds=timeout.step_seconds,
@@ -259,16 +291,7 @@ class CompiledCatalogWebhookAdmissionResolver:
                     workflow_ids=(workflow_id,),
                 ),
             ),
-            workflows=(
-                WorkflowAdmissionDefinition(
-                    id=workflow_id,
-                    eligible_template_ids=(template.id,),
-                    eligible_trigger_kinds=(TriggerKind.WEBHOOK,),
-                    allowed_modes=(mode,),
-                    input_schema_ids_by_template={template.id: template.input_schema_id},
-                    campaign_brief_policy=CampaignBriefPolicy.FORBIDDEN,
-                ),
-            ),
+            workflows=(definition.admission_definition(),),
             campaign_brief_revisions=(),
             guard=guard,
         )
@@ -289,9 +312,7 @@ class CompiledCatalogWebhookAdmissionResolver:
 
     @staticmethod
     def _workflow_id(template_id: str) -> str:
-        identifier = f"workflow.webhook.{template_id.removeprefix('tpl.')}.v1"
-        require_id(identifier, "webhook workflow ID")
-        return identifier
+        return catalog_role_workflow_id(template_id, TriggerKind.WEBHOOK)
 
 
 __all__ = ["CompiledCatalogWebhookAdmissionResolver"]

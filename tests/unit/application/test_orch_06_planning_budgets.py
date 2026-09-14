@@ -1,5 +1,7 @@
 """ORCH-06: planning snapshots every effective runtime bound before authority."""
 
+# OBJ-03 retains exact artifact-schema planning with NO_CALL budget accounting.
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -29,6 +31,7 @@ from marketing_agents.domain.runtime_policy import (
     runtime_operation_key,
     runtime_rate_limit_key,
 )
+from marketing_agents.domain.schema_hash import canonical_schema_hash
 from pydantic import BaseModel
 
 CATALOG_HASH = "catalog-sha256-v1:" + "a" * 64
@@ -284,8 +287,9 @@ def test_orch_06_planner_snapshots_exact_policy_and_derives_effective_run_timeou
     assert by_family["model"].result_schema_id == "schema:template:runtime:output:v1"
     assert by_family["model"].data_classification is DataClassification.INTERNAL
     assert by_family["artifact"].connector_timeout_seconds is None
-    assert by_family["artifact"].request_schema_id is None
-    assert by_family["artifact"].result_schema_id is None
+    assert by_family["artifact"].request_schema_id == "schema:template:runtime:input:v1"
+    assert by_family["artifact"].result_schema_id == "schema:template:runtime:output:v1"
+    assert by_family["artifact"].result_schema_hash == canonical_schema_hash({"type": "object"})
 
 
 def test_orch_06_retry_authority_does_not_multiply_logical_planning_budget() -> None:

@@ -1,5 +1,7 @@
 """API-03: safe mutable instance configuration over immutable seeded templates."""
 
+# OBJ-03 covers explicit scheduled-input validation and restricted configuration responses.
+
 from __future__ import annotations
 
 import hashlib
@@ -52,6 +54,7 @@ MUTABLE_FIELDS = {
     "triggerBindings",
     "connectorBindings",
     "schedule",
+    "scheduledInput",
 }
 IMMUTABLE_FIELD_CANARY = "immutable-prompt-secret-canary"
 
@@ -144,6 +147,7 @@ class InMemoryConfigurationExecutor:
                     "triggerBindings": {"type": "array"},
                     "connectorBindings": {"type": "object"},
                     "schedule": {"type": ["object", "null"]},
+                    "scheduledInput": {"type": ["object", "null"]},
                 },
             },
         )
@@ -779,6 +783,7 @@ async def test_api_03_patch_preserves_omissions_supports_null_clear_and_reports_
         "triggerBindings",
         "connectorBindings",
         "schedule",
+        "scheduledInput",
         "configurationRevision",
     }
     assert changed_body["configuration"]["variantLabel"] == "Blue Café deployment"

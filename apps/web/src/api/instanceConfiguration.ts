@@ -43,6 +43,7 @@ const CONFIGURATION_PROPERTY_FIELDS = new Set([
   "triggerBindings",
   "connectorBindings",
   "schedule",
+  "scheduledInput",
 ]);
 const TRIGGER_PROPERTY_FIELDS = new Set([
   "type",
@@ -72,6 +73,7 @@ const CONFIGURATION_FIELDS = new Set([
   "connectorBindings",
   "schedule",
   "configurationRevision",
+  "scheduledInput",
 ]);
 const TRIGGER_VIEW_FIELDS = new Set([
   "type",
@@ -173,6 +175,12 @@ export interface InstanceConfigurationPatch {
   readonly triggerBindings?: readonly TriggerBindingPatch[];
   readonly connectorBindings?: Readonly<Record<string, ConnectorBindingPatch>>;
   readonly schedule?: SchedulePatch | null;
+  readonly scheduledInput?: ScheduledInput | null;
+}
+
+export interface ScheduledInput {
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly executionMode: "dry_run";
 }
 
 export interface InstanceTriggerBinding {
@@ -210,6 +218,7 @@ export interface InstanceConfigurationResult {
     >;
     readonly schedule: InstanceSchedule | null;
     readonly configurationRevision: number;
+    readonly scheduledInput: ScheduledInput | null;
   };
   readonly configurationEtag: string;
 }
@@ -908,6 +917,7 @@ export function normalizeInstanceConfigurationSchema(
     properties.connectorBindings,
   );
   const scheduleSupported = normalizeScheduleSupported(properties.schedule);
+  assertScheduledInputSchema(properties.scheduledInput, scheduleSupported);
   if (supportedTriggerTypes.includes("schedule") !== scheduleSupported) {
     throw new ContractViolation(
       "schedule support does not match the supported trigger schemas",
@@ -924,6 +934,139 @@ export function normalizeInstanceConfigurationSchema(
     maxTriggerBindings: 16,
     maxConnectorBindings: 16,
   });
+}
+
+function assertScheduledInputSchema(value: unknown, supported: boolean): void {
+  const label = "configurationSchema.properties.scheduledInput";
+  if (!supported) {
+    assertNullSchema(value, label);
+    return;
+  }
+  const union = asRecord(value, label);
+  assertExactFields(union, new Set(["oneOf"]), label);
+  if (!Array.isArray(union.oneOf) || union.oneOf.length !== 2) {
+    throw new ContractViolation(
+      "scheduled input schema must have exactly two alternatives",
+    );
+  }
+  assertNullSchema(union.oneOf[0], label);
+  const object = asRecord(union.oneOf[1], label);
+  assertExactFields(
+    object,
+    new Set(["type", "additionalProperties", "required", "properties"]),
+    label,
+  );
+  assertLiteral(object.type, "object", label);
+  assertLiteral(object.additionalProperties, false, label);
+  assertStringArray(object.required, ["input"], label);
+  const properties = asRecord(object.properties, label);
+  assertExactFields(properties, new Set(["input", "executionMode"]), label);
+  const input = asRecord(properties.input, label);
+  assertExactFields(
+    input,
+    new Set(["type", "minProperties", "maxProperties"]),
+    label,
+  );
+  assertLiteral(input.type, "object", label);
+  assertLiteral(input.minProperties, 1, label);
+  assertLiteral(input.maxProperties, 64, label);
+  const mode = asRecord(properties.executionMode, label);
+  assertExactFields(mode, new Set(["type", "enum", "default"]), label);
+  assertLiteral(mode.type, "string", label);
+  assertStringArray(mode.enum, ["dry_run"], label);
+  assertLiteral(mode.default, "dry_run", label);
+}
+
+function normalizeScheduledInput(value: unknown): ScheduledInput | null {
+  if (value === null) return null;
+  const snapshot = asRecord(value, "scheduled input");
+  assertAllowedAndRequiredFields(
+    snapshot,
+    new Set(["input", "executionMode"]),
+    new Set(["input"]),
+    "scheduled input",
+  );
+  const input = asRecord(snapshot.input, "scheduled input payload");
+  if (Object.keys(input).length < 1 || Object.keys(input).length > 64) {
+    throw new ContractViolation(
+      "scheduled input payload is outside its property limit",
+    );
+  }
+  const active = new WeakSet<object>();
+  let remainingNodes = 32_768;
+  const clone = (item: unknown, depth: number): unknown => {
+    if (depth > 64 || --remainingNodes < 0)
+      throw new ContractViolation(
+        "scheduled input exceeds its structural budget",
+      );
+    if (typeof item === "string" && item.length > 32_768)
+      throw new ContractViolation(
+        "scheduled input string exceeds its storage budget",
+      );
+    if (item === null || typeof item === "string" || typeof item === "boolean")
+      return item;
+    if (typeof item === "number" && Number.isFinite(item)) return item;
+    if (typeof item !== "object" || active.has(item)) {
+      throw new ContractViolation(
+        "scheduled input must contain finite JSON values",
+      );
+    }
+    if (
+      !Array.isArray(item) &&
+      Object.getPrototypeOf(item) !== Object.prototype &&
+      Object.getPrototypeOf(item) !== null
+    ) {
+      throw new ContractViolation("scheduled input must contain plain objects");
+    }
+    const keys = Reflect.ownKeys(item);
+    if (
+      keys.length > 32_769 ||
+      (Array.isArray(item) &&
+        (Object.getPrototypeOf(item) !== Array.prototype ||
+          keys.length !== item.length + 1 ||
+          keys.some(
+            (key) =>
+              key !== "length" &&
+              (typeof key !== "string" ||
+                !/^(0|[1-9][0-9]*)$/u.test(key) ||
+                Number(key) >= item.length),
+          )))
+    )
+      throw new ContractViolation("scheduled input collection is invalid");
+    active.add(item);
+    const entries: [string, unknown][] = [];
+    for (const key of keys) {
+      if (Array.isArray(item) && key === "length") continue;
+      const descriptor = Object.getOwnPropertyDescriptor(item, key);
+      if (
+        typeof key !== "string" ||
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable ||
+        ["__proto__", "prototype", "constructor"].includes(key)
+      ) {
+        throw new ContractViolation("scheduled input has an unsafe property");
+      }
+      entries.push([key, clone(descriptor.value, depth + 1)]);
+    }
+    active.delete(item);
+    return Object.freeze(
+      Array.isArray(item)
+        ? entries.map(([, child]) => child)
+        : Object.fromEntries(entries),
+    );
+  };
+  const payload = clone(input, 1) as Readonly<Record<string, unknown>>;
+  if (new TextEncoder().encode(JSON.stringify(payload)).length > 32_768) {
+    throw new ContractViolation("scheduled input exceeds its storage budget");
+  }
+  const mode = hasOwn(snapshot, "executionMode")
+    ? snapshot.executionMode
+    : "dry_run";
+  if (mode !== "dry_run") {
+    throw new ContractViolation("scheduled input mode is unsupported");
+  }
+  return Object.freeze({ input: payload, executionMode: mode });
 }
 
 function normalizeMisfirePolicy(value: unknown, label: string): MisfirePolicy {
@@ -1156,6 +1299,19 @@ export function serializeInstanceConfigurationPatch(
       result.connectorBindings = Object.freeze(normalized);
     }
     let schedule: InstanceSchedule | null | undefined;
+    if (hasOwn(record, "scheduledInput")) {
+      const scheduledInput = normalizeScheduledInput(record.scheduledInput);
+      if (
+        scheduledInput !== null &&
+        schema !== undefined &&
+        !schema.scheduleSupported
+      ) {
+        throw new ContractViolation(
+          "scheduled input is unsupported for this template",
+        );
+      }
+      result.scheduledInput = scheduledInput;
+    }
     if (hasOwn(record, "schedule")) {
       schedule =
         record.schedule === null
@@ -1421,6 +1577,7 @@ function normalizeConfigurationResult(
       connectorBindings,
       schedule,
       configurationRevision,
+      scheduledInput: normalizeScheduledInput(configuration.scheduledInput),
     }),
     configurationEtag: expectedEtag,
   });
@@ -1601,6 +1758,41 @@ function validateConfigurationEtag(value: string): string {
     );
   }
   return value;
+}
+
+export async function fetchInstanceConfiguration(
+  instanceId: string,
+  signal?: AbortSignal,
+): Promise<InstanceConfigurationResult> {
+  try {
+    validateIdentifier(instanceId, INSTANCE_ID_PATTERN, "instance ID");
+  } catch {
+    throw new InstanceConfigurationRequestError(
+      0,
+      "invalid_configuration_identity",
+      "The selected instance configuration identity is invalid.",
+    );
+  }
+  const path = `/api/v1/agent-instances/${encodeURIComponent(instanceId)}${CONFIGURATION_SUFFIX}`;
+  const response = await sameOriginFetch(
+    path,
+    getRequestInit("GET", { Accept: "application/json" }, signal),
+  );
+  if (!response.ok) throw await responseError(response);
+  assertJsonSuccess(response, "instance configuration response");
+  try {
+    return normalizeConfigurationResult(
+      await response.json(),
+      instanceId,
+      response.headers.get("ETag"),
+    );
+  } catch {
+    throw new InstanceConfigurationRequestError(
+      response.status,
+      "invalid_configuration_response",
+      "The local API returned an invalid instance configuration response.",
+    );
+  }
 }
 
 export async function updateInstanceConfiguration(input: {

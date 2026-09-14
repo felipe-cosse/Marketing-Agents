@@ -24,9 +24,11 @@ import {
   makeViewerSessionPayload,
 } from "../../test/agentDetailFixture";
 import {
+  fetchInstanceConfiguration,
   fetchInstanceConfigurationSchema,
   fetchLocalSession,
   type InstanceConfigurationSchema,
+  type InstanceConfigurationResult,
   type LocalSession,
 } from "../../api/instanceConfiguration";
 import type * as InstanceConfigurationApi from "../../api/instanceConfiguration";
@@ -41,6 +43,7 @@ vi.mock("../../api/instanceConfiguration", async () => {
   return {
     ...actual,
     fetchLocalSession: vi.fn(),
+    fetchInstanceConfiguration: vi.fn(),
     fetchInstanceConfigurationSchema: vi.fn(),
   };
 });
@@ -65,6 +68,7 @@ const ADMIN_SESSION: LocalSession = {
 
 const fetchSessionMock = vi.mocked(fetchLocalSession);
 const fetchSchemaMock = vi.mocked(fetchInstanceConfigurationSchema);
+const fetchConfigurationMock = vi.mocked(fetchInstanceConfiguration);
 
 interface MatchMediaController {
   readonly matchMedia: (query: string) => MediaQueryList;
@@ -132,6 +136,19 @@ function configurationSchema(
 function resetConfigurationMocks(): void {
   fetchSessionMock.mockReset();
   fetchSchemaMock.mockReset();
+  fetchConfigurationMock.mockReset();
+  fetchConfigurationMock.mockImplementation((instanceId) =>
+    Promise.resolve({
+      projectionVersion: "instance-configuration-v1",
+      configurationEtag: '"instance-configuration-v1-1"',
+      configuration: {
+        ...(fixtureDetail(instanceId)
+          .instance as InstanceConfigurationResult["configuration"]),
+        instanceId,
+        scheduledInput: null,
+      },
+    }),
+  );
   fetchSessionMock.mockResolvedValue(VIEWER_SESSION);
   fetchSchemaMock.mockImplementation(({ instanceId, templateId }) =>
     Promise.resolve(configurationSchema(instanceId, templateId)),

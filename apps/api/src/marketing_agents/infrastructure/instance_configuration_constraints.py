@@ -67,6 +67,8 @@ def _constraints_for(
             TriggerKind(trigger_type) for trigger_type in template.supported_trigger_types
         ),
         allowed_connector_families=families,
+        input_max_bytes=template.budget_policy.max_input_bytes,
+        input_max_field_bytes=template.budget_policy.max_input_field_bytes,
     )
 
 
