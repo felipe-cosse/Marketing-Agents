@@ -508,3 +508,269 @@ test("WEB-01 refits all 43 cards at a compact desktop viewport", async ({
   await expectCompleteHierarchyVisible(page);
   await expect(page.getByText("14 deployments · 7 templates")).toBeVisible();
 });
+
+test("OBJ-02 rejects a count-preserving source ordinal corruption and recovers the real interactive hierarchy", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  const browserProblems: { type: string; text: string; url: string }[] = [];
+  const failedResponses: Response[] = [];
+  // The declared browser runner starts the catalog-only API factory. Its
+  // approval and live-status services really return 503; assert those precise
+  // responses and honest unavailable UI, rather than fixture success or hide
+  // unrelated console failures. Hierarchy and instance details remain real.
+  const unavailableRuntimeUrls = [
+    "http://127.0.0.1:4173/api/v1/approvals?status=pending&limit=100",
+    "http://127.0.0.1:4173/api/v1/agent-instances/status-summary",
+  ];
+  const mutationMethods: string[] = [];
+  const sourceBodies: HierarchyResponseBody[] = [];
+  let hierarchyRequestCount = 0;
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "warning" || message.type() === "error") {
+      browserProblems.push({
+        type: message.type(),
+        text: message.text(),
+        url: message.location().url,
+      });
+    }
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) failedResponses.push(response);
+  });
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname.startsWith("/api/") &&
+      !["GET", "HEAD"].includes(request.method())
+    ) {
+      mutationMethods.push(request.method());
+    }
+  });
+
+  await page.route("**/api/v1/catalog/hierarchy", async (route) => {
+    hierarchyRequestCount += 1;
+    if (hierarchyRequestCount !== 1) {
+      await route.continue();
+      return;
+    }
+    // Only this first response is a malformed fixture. The original body and
+    // every subsequent hierarchy/detail read come from the real local API.
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    const source = (await response.json()) as HierarchyResponseBody;
+    sourceBodies.push(source);
+    const target = source.departments.find(
+      (department) => department.displayName !== "Community",
+    )?.functions[0]?.instances[0];
+    if (target === undefined) throw new Error("OBJ-02 source instance missing");
+    expect(target.sourceOrdinal).toBe(1);
+    const malformed = {
+      ...source,
+      departments: source.departments.map((department) => ({
+        ...department,
+        functions: department.functions.map((agentFunction) => ({
+          ...agentFunction,
+          instances: agentFunction.instances.map((instance) =>
+            instance.id === target.id
+              ? { ...instance, sourceOrdinal: 2 }
+              : instance,
+          ),
+        })),
+      })),
+    };
+    expect(malformed.counts).toEqual(source.counts);
+    await route.fulfill({ response, json: malformed });
+  });
+
+  await page.goto("/");
+  await expect(page).toHaveURL("http://127.0.0.1:4173/");
+  await expect(page).toHaveTitle("Organization chart | Marketing Agents");
+  await expect(
+    page.getByRole("heading", {
+      name: "Marketing agent organization",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const unavailable = page.getByRole("alert").filter({
+    hasText: "The hierarchy is unavailable",
+  });
+  await expect(unavailable).toBeVisible();
+  await expect(page.getByTestId("org-chart-viewport")).toHaveCount(0);
+  await expect(page.getByRole("tree")).toHaveCount(0);
+  await expect(page.locator('[data-node-kind="instance"]')).toHaveCount(0);
+  expect(hierarchyRequestCount).toBe(1);
+  await page.screenshot({
+    path: testInfo.outputPath("obj-02-malformed-hierarchy-unavailable.png"),
+  });
+
+  const retryResponsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/v1/catalog/hierarchy" &&
+      response.request().method() === "GET",
+  );
+  await unavailable.getByRole("button", { name: "Try again" }).click();
+  const retryResponse = await retryResponsePromise;
+  expect(retryResponse.status()).toBe(200);
+  const source = sourceBodies[0];
+  if (source === undefined)
+    throw new Error("OBJ-02 real hierarchy not observed");
+  expect(await retryResponse.json()).toEqual(source);
+  expect(source.counts).toEqual({
+    departments: 5,
+    functions: 12,
+    templates: 36,
+    instances: 43,
+  });
+  await expect(unavailable).toHaveCount(0);
+  await expectCompleteHierarchyVisible(page);
+  await expect(page.locator('[data-node-kind="department"]')).toHaveCount(5);
+  await expect.poll(() => failedResponses.length).toBe(2);
+  for (const response of failedResponses) {
+    expect(unavailableRuntimeUrls).toContain(response.url());
+    expect(response.request().method()).toBe("GET");
+    expect(response.status()).toBe(503);
+    expect(response.headers()["content-type"]).toContain(
+      "application/problem+json",
+    );
+    expect(await response.json()).toMatchObject({
+      type: "urn:marketing-agents:problem:service_unavailable",
+      title: "Service Unavailable",
+      status: 503,
+      code: "service_unavailable",
+      detail: "The service is temporarily unavailable.",
+    });
+  }
+  const approvalsLink = page
+    .getByRole("navigation", { name: "Primary navigation" })
+    .getByRole("link", { name: "Approvals", exact: true });
+  await expect(approvalsLink).toBeVisible();
+  await expect(approvalsLink.getByRole("status")).toHaveCount(0);
+  await page.getByRole("button", { name: "Filters", exact: true }).click();
+  const filters = page.getByRole("dialog", { name: "Catalog filters" });
+  await expect(
+    filters.getByRole("combobox", { name: "Recent run state" }),
+  ).toBeDisabled();
+  await expect(
+    filters.getByText("Recent run status is unavailable.", { exact: true }),
+  ).toBeVisible();
+  await filters.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(filters).toHaveCount(0);
+  const sourceInstanceIds = source.departments.flatMap((department) =>
+    department.functions.flatMap((agentFunction) =>
+      agentFunction.instances.map((instance) => instance.id),
+    ),
+  );
+  expect(
+    await page
+      .locator('[data-node-kind="instance"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-instance-id")),
+      ),
+  ).toEqual(sourceInstanceIds);
+
+  const viewport = page.getByTestId("org-chart-viewport");
+  const initialZoom = await viewport.getAttribute("data-viewport-zoom");
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(viewport).not.toHaveAttribute(
+    "data-viewport-zoom",
+    initialZoom ?? "",
+  );
+  await page.getByRole("button", { name: "Fit hierarchy" }).click();
+  await expect(viewport).toHaveAttribute(
+    "data-viewport-zoom",
+    initialZoom ?? "",
+  );
+  await expectCompleteHierarchyVisible(page);
+  await page.screenshot({
+    path: testInfo.outputPath("obj-02-recovered-desktop-hierarchy.png"),
+  });
+
+  const pair = source.departments
+    .find((department) => department.displayName === "Community")
+    ?.functions[0]?.instances.slice(0, 2);
+  const first = pair?.[0];
+  const second = pair?.[1];
+  if (first === undefined || second === undefined) {
+    throw new Error("OBJ-02 Community source pair missing");
+  }
+  expect(first.id).not.toBe(second.id);
+  expect(first.templateId).toBe(second.templateId);
+  expect([first.sourceOrdinal, second.sourceOrdinal]).toEqual([1, 2]);
+  const inspector = page.locator("#agent-inspector");
+  for (const instance of [first, second]) {
+    const detailResponsePromise = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/v1/agent-instances/${instance.id}` &&
+        response.request().method() === "GET",
+    );
+    const card = page.locator(`[data-instance-id="${instance.id}"]`);
+    await expect(card).toHaveAccessibleName(
+      new RegExp(`Instance ${String(instance.sourceOrdinal)} of 2`, "u"),
+    );
+    await card.click();
+    expect((await detailResponsePromise).status()).toBe(200);
+    await expect(card).toHaveAttribute("aria-pressed", "true");
+    await expect(inspector.getByRole("heading", { level: 2 })).toContainText(
+      `Instance ${String(instance.sourceOrdinal)} of 2`,
+    );
+    await expect(
+      inspector.getByRole("region", { name: "Deployment & configuration" }),
+    ).toContainText(instance.id);
+    await expect(
+      inspector.getByRole("region", { name: "Template", exact: true }),
+    ).toContainText(instance.templateId);
+    await expect(
+      inspector.getByRole("region", { name: "Recent runs", exact: true }),
+    ).toContainText("Recent run data is unavailable for this local runtime.");
+  }
+  await expect(
+    page.locator(`[data-instance-id="${first.id}"]`),
+  ).toHaveAttribute("aria-pressed", "false");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const tree = page.getByRole("tree", {
+    name: "Marketing Agents organization tree",
+  });
+  await expect(tree).toBeVisible();
+  await expect(page.getByTestId("org-chart-viewport")).toHaveCount(0);
+  await expect(tree.locator('[data-node-kind="department"]')).toHaveCount(5);
+  await expect(tree.locator('[data-node-kind="function"]')).toHaveCount(12);
+  const selected = tree.locator(`[data-instance-id="${second.id}"]`);
+  await expect(selected).toHaveAttribute("aria-selected", "true");
+  await expect(selected).toHaveAttribute("aria-level", "4");
+  await expect(tree.locator('[aria-selected="true"]')).toHaveCount(1);
+  await expect(
+    tree.locator(`[data-instance-id="${first.id}"]`),
+  ).toHaveAttribute("aria-selected", "false");
+  await expect(
+    page.getByRole("dialog", { name: /Instance 2 of 2/u }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("obj-02-recovered-mobile-selection.png"),
+  });
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await expect(page).toHaveURL("http://127.0.0.1:4173/");
+  await expect(page).toHaveTitle("Organization chart | Marketing Agents");
+  await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+  expect(hierarchyRequestCount).toBe(2);
+  expect(mutationMethods).toEqual([]);
+  expect(failedResponses.map((response) => response.url()).sort()).toEqual(
+    [...unavailableRuntimeUrls].sort(),
+  );
+  expect(pageErrors).toEqual([]);
+  expect(
+    browserProblems.sort((left, right) => left.url.localeCompare(right.url)),
+  ).toEqual(
+    unavailableRuntimeUrls
+      .map((url) => ({
+        type: "error",
+        text: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+        url,
+      }))
+      .sort((left, right) => left.url.localeCompare(right.url)),
+  );
+});

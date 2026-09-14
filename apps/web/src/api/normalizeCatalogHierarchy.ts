@@ -1,7 +1,9 @@
 import {
   EXPECTED_COUNTS,
+  EXPECTED_DEPARTMENT_IDS,
   EXPECTED_DEPARTMENT_INSTANCE_COUNTS,
   EXPECTED_FUNCTION_COUNTS,
+  EXPECTED_FUNCTION_IDS,
   EXPECTED_FUNCTION_INSTANCE_COUNTS,
   MARKETING_AGENTS_ROOT,
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
@@ -326,6 +328,51 @@ function assertExpectedStructure(
     throw new HierarchyContractError(
       "computed hierarchy counts must equal 5/12/36/43",
     );
+  }
+
+  if (
+    departments.some(
+      (department, index) => department.id !== EXPECTED_DEPARTMENT_IDS[index],
+    ) ||
+    functions.some(
+      (agentFunction, index) =>
+        agentFunction.id !== EXPECTED_FUNCTION_IDS[index],
+    )
+  ) {
+    throw new HierarchyContractError(
+      "department and function identities must follow authoritative source order",
+    );
+  }
+
+  for (const department of departments) {
+    for (const agentFunction of department.functions) {
+      const templatePrefix = `tpl.${agentFunction.id.slice("func.".length)}.`;
+      for (const instance of agentFunction.instances) {
+        if (
+          department.id !== "dept.community" &&
+          instance.sourceOrdinal !== 1
+        ) {
+          throw new HierarchyContractError(
+            "non-Community instances must expose source ordinal 1",
+          );
+        }
+        const roleSlug = instance.templateId.slice(templatePrefix.length);
+        if (
+          !instance.templateId.startsWith(templatePrefix) ||
+          !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(roleSlug)
+        ) {
+          throw new HierarchyContractError(
+            "template identity must belong to its containing source function",
+          );
+        }
+        const expectedId = `inst.${instance.templateId.slice("tpl.".length)}.${String(instance.sourceOrdinal).padStart(2, "0")}`;
+        if (instance.id !== expectedId) {
+          throw new HierarchyContractError(
+            "instance identity must match its template and source ordinal",
+          );
+        }
+      }
+    }
   }
 
   const community = departments[3];
