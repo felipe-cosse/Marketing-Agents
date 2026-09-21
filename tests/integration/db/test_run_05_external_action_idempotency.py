@@ -1885,7 +1885,14 @@ async def test_run_05_gateway_suppresses_validation_and_provider_secret_causes(
         async def leak_provider_body(_command):  # type: ignore[no-untyped-def]
             raise RuntimeError(provider_secret)
 
-        gateway._bundle.community.send_message = leak_provider_body  # type: ignore[method-assign]
+        # OBJ-05 snapshots explicit handlers. Inject this provider fault after
+        # valid composition, preserving the gateway's exact binding selection.
+        binding = gateway._bindings.resolve(action.connector_binding_id)
+        object.__setattr__(
+            binding,
+            "handlers",
+            {**binding.handlers, action.envelope.capability_id: leak_provider_body},
+        )
         with pytest.raises(ConnectorDeliveryFailure) as provider_failure:
             await gateway.execute(_authorize_action(action, action.idempotency_key))
         assert provider_failure.value.code == "connector_delivery_uncertain"

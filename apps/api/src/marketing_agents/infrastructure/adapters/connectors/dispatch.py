@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from inspect import iscoroutinefunction
 from types import MappingProxyType
 from typing import Literal, cast
 
@@ -39,7 +40,12 @@ from marketing_agents.domain.execution_control import OperationExecutionPolicy
 from marketing_agents.domain.runtime_policy import AttemptKind
 from marketing_agents.domain.schema_hash import canonical_schema_hash
 
-from .mock.families import MockConnectorBundle
+from .bindings import (
+    ConnectorBindingRegistration,
+    ConnectorBindingRegistry,
+    ConnectorBindingSource,
+    ConnectorHandler,
+)
 from .registry import (
     ConnectorBundleConfigurationError,
     ConnectorOperationRegistration,
@@ -69,34 +75,64 @@ _SAFE_READ_CONNECTOR_CODES = frozenset(
 )
 
 
+def _configured_bindings(
+    registry: ConnectorOperationRegistry,
+    source: ConnectorBindingSource,
+    revisions: Mapping[str, int],
+    *,
+    direction: Literal["READ", "WRITE"],
+) -> tuple[ConnectorBindingRegistry, Mapping[str, int]]:
+    bindings = source.binding_registry
+    if bindings.registry is not registry:
+        raise ConnectorBundleConfigurationError(
+            f"{direction} adapter registry must be the bundle's exact registry"
+        )
+    configured_revisions = dict(revisions)
+    for binding_id, revision in configured_revisions.items():
+        if (
+            not isinstance(binding_id, str)
+            or not binding_id
+            or binding_id != binding_id.strip()
+            or type(revision) is not int
+            or revision < 1
+        ):
+            raise ConnectorBundleConfigurationError(
+                f"{direction} adapter binding revisions must be normalized positive values"
+            )
+        bindings.resolve(binding_id)
+    return bindings, MappingProxyType(configured_revisions)
+
+
+def _resolve_handler(
+    bindings: ConnectorBindingRegistry,
+    binding_id: str,
+    registration: ConnectorOperationRegistration,
+) -> tuple[ConnectorBindingRegistration, ConnectorHandler]:
+    binding = bindings.resolve(binding_id)
+    if binding.connector_family != registration.metadata.connector_family:
+        raise ConnectorBundleConfigurationError("connector binding family mismatch")
+    handler = binding.handlers.get(registration.metadata.capability_id)
+    if not iscoroutinefunction(handler):
+        raise ConnectorBundleConfigurationError(
+            "registered connector implementation is unavailable"
+        )
+    return binding, cast(ConnectorHandler, handler)
+
+
 class RegistryConnectorReadAdapter:
     """Resolve one sealed external READ through the immutable connector registry."""
 
     def __init__(
         self,
         registry: ConnectorOperationRegistry,
-        bundle: MockConnectorBundle,
+        bundle: ConnectorBindingSource,
         *,
         binding_configuration_revisions: Mapping[str, int],
     ) -> None:
-        if bundle.registry is not registry:
-            raise ConnectorBundleConfigurationError(
-                "READ adapter registry must be the bundle's exact registry"
-            )
-        revisions = dict(binding_configuration_revisions)
-        for binding_id, revision in revisions.items():
-            if (
-                not binding_id
-                or binding_id != binding_id.strip()
-                or type(revision) is not int
-                or revision < 1
-            ):
-                raise ConnectorBundleConfigurationError(
-                    "READ adapter binding revisions must be normalized positive values"
-                )
         self._registry = registry
-        self._bundle = bundle
-        self._binding_revisions = MappingProxyType(revisions)
+        self._bindings, self._binding_revisions = _configured_bindings(
+            registry, bundle, binding_configuration_revisions, direction="READ"
+        )
 
     def contract_for(self, operation: OperationExecutionPolicy) -> ReadAdapterContract:
         """Project current registry and binding facts for pre-reservation comparison."""
@@ -126,6 +162,12 @@ class RegistryConnectorReadAdapter:
                 "adapter_contract_invalid",
                 "write connector operations cannot execute as controlled READs",
             )
+        try:
+            _resolve_handler(self._bindings, operation.binding_id, registration)
+        except ConnectorBundleConfigurationError:
+            raise ReadAdapterPermanentError(
+                "adapter_contract_unavailable", "connector READ binding is unavailable"
+            ) from None
         result_type = registration.result_type
         if not isinstance(result_type, type) or not issubclass(result_type, BaseModel):
             raise ReadAdapterPermanentError(
@@ -179,15 +221,20 @@ class RegistryConnectorReadAdapter:
             if not isinstance(result_type, type) or not issubclass(result_type, BaseModel):
                 raise TypeError("registered READ result type is not a model")
             schema = result_type.model_json_schema()
+            binding, _ = _resolve_handler(
+                self._bindings, cast(str, operation.binding_id), registration
+            )
             return RuntimeOutputContract(
                 schema_id=contract.result_schema_id,
                 schema_version="v1",
                 schema=schema,
                 classification=contract.data_classification,
                 provider_kind="connector",
-                provider_mode="mock",
-                provider_name=contract.connector_family,
-                provider_version=result_type.__name__,
+                provider_mode=binding.provider_mode,
+                provider_name=binding.provider_name,
+                provider_version=binding.operation_provider_versions.get(
+                    operation.capability_id, binding.provider_version
+                ),
             )
         except (ConnectorBundleConfigurationError, TypeError, ValueError):
             raise ReadAdapterPermanentError(
@@ -229,7 +276,6 @@ class RegistryConnectorReadAdapter:
                 "connector READ requires an exact adapter request",
             )
         registration = self._registration_for_request(request)
-        metadata = registration.metadata
         try:
             context = ConnectorCallContext(
                 binding_id=cast(str, request.binding_id),
@@ -250,8 +296,9 @@ class RegistryConnectorReadAdapter:
                 ),
                 strict=True,
             )
-            connector = getattr(self._bundle, metadata.connector_family)
-            method = getattr(connector, registration.method_name)
+            _, method = _resolve_handler(
+                self._bindings, cast(str, request.binding_id), registration
+            )
         except (AttributeError, ConnectorBundleConfigurationError):
             raise ReadAdapterPermanentError(
                 "adapter_contract_unavailable",
@@ -390,17 +437,22 @@ class RegistryConnectorWriteGateway:
     def __init__(
         self,
         registry: ConnectorOperationRegistry,
-        bundle: MockConnectorBundle,
+        bundle: ConnectorBindingSource,
         *,
         binding_configuration_revisions: Mapping[str, int],
     ) -> None:
-        if not bundle.ledger.durable:
-            raise ConnectorBundleConfigurationError(
-                "external-write dispatch requires a durable connector receipt ledger"
-            )
         self._registry = registry
-        self._bundle = bundle
-        self._binding_revisions = MappingProxyType(dict(binding_configuration_revisions))
+        self._bindings, self._binding_revisions = _configured_bindings(
+            registry, bundle, binding_configuration_revisions, direction="WRITE"
+        )
+        for binding in self._bindings.bindings:
+            if not binding.durable_receipts and any(
+                registry.resolve(capability_id).metadata.effect is Effect.WRITE
+                for capability_id in binding.handlers
+            ):
+                raise ConnectorBundleConfigurationError(
+                    "external-write dispatch requires durable connector receipt support"
+                )
 
     def contract_for(self, action: ExternalAction) -> ConnectorDeliveryContract:
         resolution_failure: ConnectorDeliveryFailure | None = None
@@ -422,6 +474,14 @@ class RegistryConnectorWriteGateway:
                 "read connector operations cannot dispatch an external write",
                 request_may_have_left_process=False,
             )
+        try:
+            _resolve_handler(self._bindings, action.connector_binding_id, registration)
+        except ConnectorBundleConfigurationError:
+            raise ConnectorDeliveryFailure(
+                "delivery_contract_unavailable",
+                "connector delivery binding is unavailable",
+                request_may_have_left_process=False,
+            ) from None
         contract = ConnectorDeliveryContract(
             capability_id=metadata.capability_id,
             connector_family=metadata.connector_family,
@@ -456,11 +516,20 @@ class RegistryConnectorWriteGateway:
         request_failure: ConnectorDeliveryFailure | None = None
         try:
             registration = self._registry.resolve(action.capability_id)
+            revision = self._binding_revisions[action.binding_id]
+            if (
+                registration.metadata.effect is not Effect.WRITE
+                or registration.metadata.connector_family != action.connector_family
+                or type(revision) is not int
+                or revision < 1
+            ):
+                raise ConnectorBundleConfigurationError(
+                    "authorized WRITE binding does not match the registered operation"
+                )
             command = registration.request_type.model_validate_json(
                 canonical_json_bytes(action.minimized_payload), strict=True
             )
-            connector = getattr(self._bundle, action.connector_family)
-            method = getattr(connector, registration.method_name)
+            _, method = _resolve_handler(self._bindings, action.binding_id, registration)
         except (ConnectorBundleConfigurationError, ConnectorPortError, ValidationError) as exc:
             code = getattr(exc, "code", "connector_request_rejected")
             request_failure = ConnectorDeliveryFailure(

@@ -43,6 +43,10 @@ from marketing_agents.application.ports.connectors import (
     ConnectorObservation,
     ConnectorWriteResult,
 )
+from marketing_agents.infrastructure.adapters.connectors.bindings import (
+    ConnectorBindingRegistration,
+    ConnectorBindingRegistry,
+)
 from marketing_agents.infrastructure.adapters.connectors.mock.base import (
     InMemoryMockReceiptLedger,
     MockReceiptLedger,
@@ -290,6 +294,41 @@ class MockConnectorBundle:
     community: MockCommunityConnector
     spreadsheet: MockSpreadsheetConnector
     fulfillment: MockFulfillmentConnector
+
+    @property
+    def binding_registry(self) -> ConnectorBindingRegistry:
+        """Project explicit mock bindings without coupling generic dispatch to mocks."""
+
+        registrations = []
+        families = {item.metadata.connector_family for item in self.registry.operations}
+        for family in sorted(families):
+            connector = getattr(self, family)
+            operations = tuple(
+                item
+                for item in self.registry.operations
+                if item.metadata.connector_family == family
+                and item.metadata.enabled
+                and hasattr(connector, item.method_name)
+            )
+            registrations.append(
+                ConnectorBindingRegistration(
+                    binding_id=f"mock.{family}.default",
+                    connector_family=family,
+                    handlers={
+                        item.metadata.capability_id: getattr(connector, item.method_name)
+                        for item in operations
+                    },
+                    provider_mode="mock",
+                    provider_name=family,
+                    provider_version="v1",
+                    durable_receipts=self.ledger.durable,
+                    operation_provider_versions={
+                        item.metadata.capability_id: item.result_type.__name__
+                        for item in operations
+                    },
+                )
+            )
+        return ConnectorBindingRegistry(self.registry, registrations)
 
     @classmethod
     def create(

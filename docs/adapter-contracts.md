@@ -91,6 +91,44 @@ registered execution path. `cap.model.generate-structured` and
 external connector operations. Evidence:
 [ARCH-07](verification/requirements/ARCH-07.md).
 
+## Substituting an implementation
+
+Claim: Implemented and verified —
+[`ConnectorBindingRegistry`](../apps/api/src/marketing_agents/infrastructure/adapters/connectors/bindings.py)
+maps an exact binding ID to an immutable registration of async capability handlers,
+family, provider mode/name/version, and durable-receipt support. Two bindings in
+the same family can select different implementations. Neither bridge imports a
+concrete mock or selects an implementation by family alone. Registrations retain
+the application-owned request/result DTOs; catalog validation rejects replacement
+DTOs or method declarations even if their schema labels still match.
+
+Infrastructure composition supplies that registry to `RegistryConnectorReadAdapter`
+or `RegistryConnectorWriteGateway`, with the configured binding revisions. The
+existing `MockConnectorBundle` implements the same binding-source protocol and
+retains its mock identities and per-operation version provenance. Independent
+providers declare their own provenance; the generic READ bridge no longer labels
+all results as mocks. There is no dynamic plugin loader or automatic fallback.
+
+For a model implementation, compose an application `LLMProvider` with
+`StructuredLLMReadAdapter` and exact trusted `LLMReadBinding` declarations. The
+existing controlled executor still validates output independently and owns budgets,
+deadlines, schema enforcement and artifact persistence.
+
+Claim: Implemented and verified — [OBJ-05](verification/requirements/OBJ-05.md)
+qualifies independent **offline test implementations** through migrated-database
+services and `RunWorker`, without changing application/domain code. It includes
+model-output rejection, approved connector writes, durable receipt replay after
+reconstruction, and no-call controls for absent approval and changed binding
+configuration. These tests inject infrastructure composition; they do not enable
+live providers in the shipped runtime.
+
+A `durable_receipts` declaration is not approval authority or evidence that a
+receipt was actually persisted. A new write implementation must independently
+validate the sealed command and persist the exact receipt through the receipt-store
+contract before reporting success. The unchanged dispatcher requires a matching
+durable receipt. Provider-specific idempotency and reconciliation remain the
+implementer's responsibility, not a guarantee supplied by the registration.
+
 ## Reads, writes, and durable receipts
 
 Claim: Implemented and verified — a
