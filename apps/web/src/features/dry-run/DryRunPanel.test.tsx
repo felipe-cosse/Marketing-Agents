@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -181,6 +188,7 @@ function renderPanel(
     readonly detail?: AgentInstanceDetail;
     readonly onDirtyChange?: (dirty: boolean) => void;
     readonly onRuntimeMayHaveChanged?: () => Promise<void>;
+    readonly onOpenRun?: (runId: string) => void;
   } = {},
 ): ReturnType<typeof render> {
   return render(
@@ -188,6 +196,7 @@ function renderPanel(
       <DryRunPanel
         detail={options.detail ?? makeDetail()}
         onDirtyChange={options.onDirtyChange ?? vi.fn()}
+        onOpenRun={options.onOpenRun ?? vi.fn()}
         onRuntimeMayHaveChanged={
           options.onRuntimeMayHaveChanged ??
           vi.fn().mockResolvedValue(undefined)
@@ -393,6 +402,7 @@ describe("WEB-04 DryRunPanel", () => {
 
   it("stops waiting without claiming cancellation and safely reuses the retry key", async () => {
     const user = userEvent.setup();
+    const onOpenRun = vi.fn();
     const onRuntimeMayHaveChanged = vi.fn().mockResolvedValue(undefined);
     createDryRunMock
       .mockImplementationOnce(
@@ -406,7 +416,7 @@ describe("WEB-04 DryRunPanel", () => {
           }),
       )
       .mockResolvedValueOnce(RECEIPT);
-    renderPanel({ onRuntimeMayHaveChanged });
+    renderPanel({ onRuntimeMayHaveChanged, onOpenRun });
 
     await user.type(
       await screen.findByRole("textbox", { name: /source content/iu }),
@@ -421,6 +431,7 @@ describe("WEB-04 DryRunPanel", () => {
     );
     expect(notice).not.toHaveTextContent(/cancel/iu);
     expect(onRuntimeMayHaveChanged).toHaveBeenCalledOnce();
+    expect(onOpenRun).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Create dry run" }));
     await screen.findByRole("heading", { name: "Dry run accepted" });
@@ -453,6 +464,75 @@ describe("WEB-04 DryRunPanel", () => {
     expect(
       await screen.findByText(/refreshed inspector status is not available/iu),
     ).toBeVisible();
+  });
+
+  it("OBJ-06 opens only an accepted run after clearing this draft, without waiting for refresh", async () => {
+    const user = userEvent.setup();
+    const refresh = deferred<undefined>();
+    const callbacks: string[] = [];
+    const onOpenRun = vi.fn((runId: string) => callbacks.push(`open:${runId}`));
+    renderPanel({
+      onDirtyChange: (dirty) => callbacks.push(`dirty:${String(dirty)}`),
+      onOpenRun,
+      onRuntimeMayHaveChanged: () => refresh.promise,
+    });
+    await user.type(
+      await screen.findByRole("textbox", { name: /source content/iu }),
+      "OBJ-06 accepted input",
+    );
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    await screen.findByRole("heading", { name: "Dry run accepted" });
+    expect(onOpenRun).toHaveBeenCalledExactlyOnceWith(RECEIPT.runId);
+    const openedAt = callbacks.indexOf(`open:${RECEIPT.runId}`);
+    expect(callbacks[openedAt - 1]).toBe("dirty:false");
+    const link = screen.getByRole("link", {
+      name: "Open accepted run resource",
+    });
+    for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+      let preventedByApplication = true;
+      // Observe the native-link behavior after React has handled the click,
+      // then stop jsdom from attempting its unsupported document navigation.
+      document.addEventListener(
+        "click",
+        (event) => {
+          preventedByApplication = event.defaultPrevented;
+          event.preventDefault();
+        },
+        { once: true },
+      );
+      fireEvent.click(link, { [modifier]: true });
+      expect(preventedByApplication).toBe(false);
+    }
+    expect(onOpenRun).toHaveBeenCalledTimes(1);
+    await user.click(link);
+    expect(onOpenRun).toHaveBeenNthCalledWith(2, RECEIPT.runId);
+    expect(createDryRunMock).toHaveBeenCalledOnce();
+    await act(async () => {
+      refresh.resolve(undefined);
+      await refresh.promise;
+    });
+  });
+
+  it("OBJ-06 does not open a run while admission is pending or failed", async () => {
+    const user = userEvent.setup();
+    const admission = deferred<ManualDryRunReceipt>();
+    createDryRunMock.mockReturnValueOnce(admission.promise);
+    const onOpenRun = vi.fn();
+    renderPanel({ onOpenRun });
+    await user.type(
+      await screen.findByRole("textbox", { name: /source content/iu }),
+      "OBJ-06 pending input",
+    );
+    await user.click(screen.getByRole("button", { name: "Create dry run" }));
+    expect(onOpenRun).not.toHaveBeenCalled();
+    act(() => {
+      admission.reject(new Error("Admission unavailable"));
+    });
+    expect(await screen.findByText("Admission unavailable")).toBeVisible();
+    expect(onOpenRun).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("textbox", { name: /source content/iu }),
+    ).toHaveValue("OBJ-06 pending input");
   });
 
   it("shows the ambiguous-abort notice before a deferred runtime refresh finishes", async () => {

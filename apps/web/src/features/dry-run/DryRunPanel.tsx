@@ -44,6 +44,7 @@ export interface DryRunPanelProps {
   readonly detail: AgentInstanceDetail;
   readonly onDirtyChange: (dirty: boolean) => void;
   readonly onRuntimeMayHaveChanged: () => Promise<void>;
+  readonly onOpenRun: (runId: string) => void;
 }
 
 function compile(raw: unknown): InputCompilation {
@@ -90,9 +91,11 @@ function manualGate(detail: AgentInstanceDetail): string | null {
 function Receipt({
   receipt,
   refreshWarning,
+  onOpenRun,
 }: {
   readonly receipt: ManualDryRunReceipt;
   readonly refreshWarning: boolean;
+  readonly onOpenRun: (runId: string) => void;
 }): React.JSX.Element {
   return (
     <section
@@ -118,7 +121,22 @@ function Receipt({
         <dt>Run ID</dt>
         <dd>{receipt.runId}</dd>
       </dl>
-      <a href={`/runs/${encodeURIComponent(receipt.runId)}`}>
+      <a
+        href={`/runs/${encodeURIComponent(receipt.runId)}`}
+        onClick={(event) => {
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          )
+            return;
+          event.preventDefault();
+          onOpenRun(receipt.runId);
+        }}
+      >
         Open accepted run resource
       </a>
       {refreshWarning ? (
@@ -135,6 +153,7 @@ export function DryRunPanel({
   detail,
   onDirtyChange,
   onRuntimeMayHaveChanged,
+  onOpenRun,
 }: DryRunPanelProps): React.JSX.Element {
   const compilation = useMemo(
     () => compile(detail.inputSchema),
@@ -279,22 +298,15 @@ export function DryRunPanel({
     setReceipt(null);
     setRefreshWarning(false);
 
+    let accepted: ManualDryRunReceipt;
     try {
-      const accepted = await createManualDryRun({
+      accepted = await createManualDryRun({
         instanceId: detail.instance.id,
         input: validation.input,
         executionMode: effectiveExecutionMode,
         idempotencyKey,
         signal: controller.signal,
       });
-      if (!mountedRef.current) return;
-      retryTokenRef.current = null;
-      controllerRef.current = null;
-      setDraft(createSchemaDefaults(compilation.schema));
-      setPending(false);
-      setDirty(false);
-      setReceipt(accepted);
-      refreshRuntimeInBackground();
     } catch (error) {
       if (isAbortError(error)) {
         if (!mountedRef.current) return;
@@ -320,7 +332,20 @@ export function DryRunPanel({
         }
       }
       setRequestError(messageFrom(error));
+      return;
     }
+    if (!mountedRef.current) return;
+    retryTokenRef.current = null;
+    controllerRef.current = null;
+    setDraft(createSchemaDefaults(compilation.schema));
+    setPending(false);
+    setDirty(false);
+    setReceipt(accepted);
+    // Admission consumed this draft, not any separate configuration edits.
+    // Report it before navigation so the router sees the current dirty state.
+    onDirtyChange(false);
+    refreshRuntimeInBackground();
+    onOpenRun(accepted.runId);
   };
 
   const gate = manualGate(detail);
@@ -396,7 +421,11 @@ export function DryRunPanel({
         </p>
       ) : null}
       {receipt === null ? null : (
-        <Receipt receipt={receipt} refreshWarning={refreshWarning} />
+        <Receipt
+          receipt={receipt}
+          refreshWarning={refreshWarning}
+          onOpenRun={onOpenRun}
+        />
       )}
 
       {sessionQuery.data !== undefined &&

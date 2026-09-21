@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InstanceLayout } from "./layout";
 import type { AgentInstance } from "./model";
 import { AgentCard } from "./AgentCard";
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 
 const INSTANCE = {
   id: "inst.community.events.live-session-reminder.01",
@@ -75,7 +76,7 @@ describe("AgentCard", () => {
     );
     for (const card of cards) {
       expect(card).toHaveAccessibleDescription(
-        "Department: Community. Function: Events. Hierarchy level 4.",
+        "Department: Community. Function: Events. Hierarchy level 4. Latest run: Unavailable.",
       );
     }
 
@@ -93,5 +94,51 @@ describe("AgentCard", () => {
         expect(document.getElementById(descriptionId)).toHaveClass("sr-only");
       }
     }
+  });
+
+  it("OBJ-06 keeps observed runtime separate from deployment and unknown data", () => {
+    const runtimeStatus: InstanceRuntimeStatus = {
+      instanceId: INSTANCE.id,
+      status: "awaiting_approval",
+      latestRunId: "run.obj-06.latest",
+      latestRunState: "awaiting_approval",
+      latestRunCreatedAt: "2026-09-21T10:00:00Z",
+      latestRunUpdatedAt: "2026-09-21T10:01:00Z",
+      instanceUrl: `/api/v1/agent-instances/${INSTANCE.id}`,
+      latestRunUrl: "/api/v1/runs/run.obj-06.latest",
+    };
+    const props = {
+      instance: { ...INSTANCE, enabled: false },
+      departmentLabel: "Community",
+      functionLabel: "Events",
+      placement: PLACEMENT,
+      selected: false,
+      onSelect: vi.fn(),
+      tabIndex: 0 as const,
+      onFocus: vi.fn(),
+      onNavigate: vi.fn(),
+    };
+    const { rerender } = render(
+      <AgentCard {...props} runtimeStatus={runtimeStatus} />,
+    );
+    const card = screen.getByRole("button");
+    expect(card).toHaveAccessibleName(/Disabled deployment\.$/u);
+    expect(card).toHaveAccessibleDescription(
+      /Latest run: Awaiting approval\.$/u,
+    );
+    expect(within(card).getByText("Disabled")).toBeVisible();
+    expect(within(card).getByText("Run: Awaiting approval")).toHaveAttribute(
+      "data-runtime-status",
+      "awaiting_approval",
+    );
+    expect(card).toHaveStyle({ width: "104px", height: "80px" });
+
+    rerender(<AgentCard {...props} />);
+    expect(within(card).getByText("Run: Unavailable")).toHaveAttribute(
+      "data-runtime-status",
+      "unavailable",
+    );
+    expect(within(card).queryByText(/Never run/u)).not.toBeInTheDocument();
+    expect(card).toHaveAccessibleDescription(/Latest run: Unavailable\.$/u);
   });
 });

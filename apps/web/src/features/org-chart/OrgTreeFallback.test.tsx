@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import { DEFAULT_ORG_CHART_FILTERS } from "./filters";
 import {
@@ -49,6 +50,50 @@ function item(nodeId: string): HTMLButtonElement {
 }
 
 describe("WEB-07 semantic organization tree", () => {
+  it("OBJ-06 updates runtime labels without changing expansion, selection, or tree semantics", () => {
+    const instanceId = "inst.community.education.agent-1.01";
+    const status: InstanceRuntimeStatus = {
+      instanceId,
+      status: "never_run",
+      latestRunId: null,
+      latestRunState: null,
+      latestRunCreatedAt: null,
+      latestRunUpdatedAt: null,
+      instanceUrl: `/api/v1/agent-instances/${instanceId}`,
+      latestRunUrl: null,
+    };
+    const props = {
+      hierarchy,
+      selectedInstanceId: instanceId,
+      onSelectionChange: vi.fn(),
+      onFocusSearch: vi.fn(),
+    };
+    const { rerender } = render(
+      <OrgTreeFallback
+        {...props}
+        runtimeStatusByInstanceId={new Map([[instanceId, status]])}
+      />,
+    );
+    const node = item(instanceId);
+    expect(node).toHaveAccessibleName(
+      /Enabled.*Latest run: Never run.*Instance 1 of 2/u,
+    );
+    expect(node).toHaveAttribute("aria-selected", "true");
+    const visibleIds = screen
+      .getAllByRole("treeitem")
+      .map((target) => target.dataset.nodeId);
+    const branch = item("func.community.education");
+    expect(branch).toHaveAttribute("aria-expanded", "true");
+
+    rerender(<OrgTreeFallback {...props} />);
+    expect(node).toHaveAccessibleName(/Latest run: Unavailable/u);
+    expect(node).not.toHaveTextContent("Never run");
+    expect(node).toHaveAttribute("aria-selected", "true");
+    expect(branch).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getAllByRole("treeitem").map((target) => target.dataset.nodeId),
+    ).toEqual(visibleIds);
+  });
   it("ORCH-01 marks the control plane on the source root without adding a tree item or card", () => {
     renderTree({ autoExpandMatches: true });
 

@@ -347,6 +347,15 @@
   border-radius: 5px;
 }
 
+.agent-card__operation {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 6.2px;
+  font-weight: 650;
+  color: #52657a;
+}
+
 .agent-card__icon svg {
   width: 10px;
   height: 10px;
@@ -391,10 +400,22 @@
 }
 
 .agent-card__footer {
+  gap: 3px;
   margin-top: auto;
   font-size: 6.2px;
   font-weight: 650;
   color: #52657a;
+}
+
+.agent-card__runtime {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card__footer .ordinal-chip {
+  flex-shrink: 0;
 }
 
 .ordinal-chip {

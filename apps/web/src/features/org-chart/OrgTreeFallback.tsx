@@ -7,13 +7,14 @@ import {
   type ReactNode,
 } from "react";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 import { AgentsIcon, ReadIcon, WriteIcon } from "./icons";
 import { describeTreeHierarchy } from "./hierarchyAccessibility";
 import {
   MARKETING_AGENTS_ROOT,
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
 } from "./model";
-import { presentPurpose } from "./presentation";
+import { presentPurpose, presentRuntimeStatus } from "./presentation";
 import type { ProjectedHierarchy } from "./projectHierarchy";
 import {
   buildOrgTreeModel,
@@ -33,6 +34,8 @@ interface OrgTreeFallbackProps {
   readonly emptyMessage?: string;
   readonly onClearFilters?: () => void;
   readonly onFocusSearch: () => void;
+  readonly runtimeStatusByInstanceId?:
+    ReadonlyMap<string, InstanceRuntimeStatus> | undefined;
 }
 
 const TYPEAHEAD_RESET_MS = 700;
@@ -88,7 +91,10 @@ function NodeIcon({ node }: { readonly node: OrgTreeNode }): React.JSX.Element {
   );
 }
 
-function nodeSummary(node: OrgTreeNode): ReactNode {
+function nodeSummary(
+  node: OrgTreeNode,
+  runtimeStatus?: InstanceRuntimeStatus,
+): ReactNode {
   if (node.kind === "root") {
     return (
       <span
@@ -127,6 +133,9 @@ function nodeSummary(node: OrgTreeNode): ReactNode {
         <span>
           {instance.operationClassification === "read_only" ? "Read" : "Write"}
         </span>
+        <span data-runtime-status={runtimeStatus?.status ?? "unavailable"}>
+          Latest run: {presentRuntimeStatus(runtimeStatus?.status)}
+        </span>
         {duplicated ? (
           <span>
             Instance {String(instance.sourceOrdinal)} of{" "}
@@ -148,6 +157,7 @@ export function OrgTreeFallback({
   emptyMessage = "No agents match your search and filters.",
   onClearFilters,
   onFocusSearch,
+  runtimeStatusByInstanceId,
 }: OrgTreeFallbackProps): React.JSX.Element {
   const model = useMemo(() => buildOrgTreeModel(hierarchy), [hierarchy]);
   const [expansionOverrides, setExpansionOverrides] = useState<
@@ -403,7 +413,10 @@ export function OrgTreeFallback({
                   <span className="org-tree-item__content">
                     <strong>{node.label}</strong>
                     <span className="org-tree-item__summary">
-                      {nodeSummary(node)}
+                      {nodeSummary(
+                        node,
+                        runtimeStatusByInstanceId?.get(node.id),
+                      )}
                     </span>
                   </span>
                 </button>

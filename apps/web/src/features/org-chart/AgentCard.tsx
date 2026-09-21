@@ -1,9 +1,10 @@
 import type { KeyboardEvent } from "react";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 import type { AgentInstance } from "./model";
 import type { InstanceLayout } from "./layout";
 import { ReadIcon, WriteIcon } from "./icons";
-import { presentPurpose } from "./presentation";
+import { presentPurpose, presentRuntimeStatus } from "./presentation";
 
 interface AgentCardProps {
   readonly instance: AgentInstance;
@@ -15,6 +16,7 @@ interface AgentCardProps {
   readonly tabIndex: 0 | -1;
   readonly onFocus: (instanceId: string) => void;
   readonly onNavigate: (instanceId: string, key: string) => void;
+  readonly runtimeStatus?: InstanceRuntimeStatus | undefined;
 }
 
 export function AgentCard({
@@ -27,9 +29,11 @@ export function AgentCard({
   tabIndex,
   onFocus,
   onNavigate,
+  runtimeStatus,
 }: AgentCardProps): React.JSX.Element {
   const duplicated = instance.deploymentCount > 1;
   const purpose = presentPurpose(instance.purpose);
+  const runStatus = presentRuntimeStatus(runtimeStatus?.status);
   const hierarchyDescriptionId = `agent-card-hierarchy-${encodeURIComponent(instance.id)}`;
   const accessibleOrdinal = duplicated
     ? `, Instance ${String(instance.sourceOrdinal)} of ${String(instance.deploymentCount)}`
@@ -79,15 +83,22 @@ export function AgentCard({
     >
       <span id={hierarchyDescriptionId} className="sr-only">
         Department: {departmentLabel}. Function: {functionLabel}. Hierarchy
-        level 4.
+        level 4. Latest run: {runStatus}.
       </span>
       <span className="agent-card__topline">
-        <span className="agent-card__icon" aria-hidden="true">
-          {instance.operationClassification === "read_only" ? (
-            <ReadIcon />
-          ) : (
-            <WriteIcon />
-          )}
+        <span className="agent-card__operation">
+          <span className="agent-card__icon" aria-hidden="true">
+            {instance.operationClassification === "read_only" ? (
+              <ReadIcon />
+            ) : (
+              <WriteIcon />
+            )}
+          </span>
+          <span>
+            {instance.operationClassification === "read_only"
+              ? "Read"
+              : "Write"}
+          </span>
         </span>
         <span
           className={`deployment-state ${instance.enabled ? "is-enabled" : "is-disabled"}`}
@@ -98,8 +109,12 @@ export function AgentCard({
       <span className="agent-card__name">{instance.displayName}</span>
       <span className="agent-card__purpose">{purpose}</span>
       <span className="agent-card__footer">
-        <span>
-          {instance.operationClassification === "read_only" ? "Read" : "Write"}
+        <span
+          className="agent-card__runtime"
+          data-runtime-status={runtimeStatus?.status ?? "unavailable"}
+          title={`Latest run: ${runStatus}`}
+        >
+          Run: {runStatus}
         </span>
         {duplicated ? (
           <span className="ordinal-chip">

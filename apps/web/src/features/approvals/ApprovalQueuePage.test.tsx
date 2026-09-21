@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { Link, MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -91,7 +92,13 @@ function Providers({
 function renderPage(): ReturnType<typeof render> {
   return render(
     <Providers>
-      <ApprovalQueuePage />
+      <MemoryRouter
+        initialEntries={[
+          `${window.location.pathname}${window.location.search}`,
+        ]}
+      >
+        <ApprovalQueuePage />
+      </MemoryRouter>
     </Providers>,
   );
 }
@@ -140,6 +147,55 @@ describe("WEB-05 ApprovalQueuePage", () => {
     await waitFor(() =>
       expect(fetchPageMock).toHaveBeenCalledWith(
         { status: "pending", runId: "run.demo-03.browser", limit: 25 },
+        expect.any(AbortSignal),
+      ),
+    );
+  });
+
+  it("OBJ-06 follows run query navigation and clears stale approval review and decision state", async () => {
+    const user = userEvent.setup();
+    render(
+      <Providers>
+        <MemoryRouter initialEntries={["/approvals?run_id=run.web05.email"]}>
+          <Link to="/approvals?run_id=run.obj-06.next">Review next run</Link>
+          <Link to="/approvals">Show all runs</Link>
+          <ApprovalQueuePage />
+        </MemoryRouter>
+      </Providers>,
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Review approval ${APPROVAL_ONE_ID}`,
+      }),
+    );
+    const panel = await screen.findByRole("complementary", {
+      name: "Exact action review",
+    });
+    await user.click(within(panel).getByRole("button", { name: "Approve" }));
+    expect(
+      screen.getByRole("button", { name: "Approve exact action" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("link", { name: "Review next run" }));
+    await waitFor(() =>
+      expect(fetchPageMock).toHaveBeenCalledWith(
+        { status: "pending", runId: "run.obj-06.next", limit: 25 },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(
+      screen.queryByRole("complementary", { name: "Exact action review" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Approve exact action" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Select an approval to review its exact action."),
+    ).toBeVisible();
+    expect(decideMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("link", { name: "Show all runs" }));
+    await waitFor(() =>
+      expect(fetchPageMock).toHaveBeenCalledWith(
+        { status: "pending", limit: 25 },
         expect.any(AbortSignal),
       ),
     );

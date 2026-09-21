@@ -17,6 +17,13 @@ export const BROWSER_RUNNERS = Object.freeze([
   "run-demo-03-e2e.mjs",
   "run-demo-04-e2e.mjs",
   "run-demo-05-e2e.mjs",
+  "run-obj-06-e2e.mjs",
+]);
+
+// OBJ-06 needs the real supervised runtime, not the discovery-only webServer.
+// This is one reviewed configuration, never a general CLI/filter escape hatch.
+const CONFIGURED_RUNNERS = new Map([
+  ["run-obj-06-e2e.mjs", "config/playwright-obj-06.config.ts"],
 ]);
 
 export class BrowserInventoryError extends Error {}
@@ -108,7 +115,16 @@ function playwrightArguments(source, runner) {
     throw new BrowserInventoryError(
       `${runner}: expected exactly one unfiltered Playwright invocation, found ${String(calls.length)}`,
     );
-  const [command, ...specs] = calls[0];
+  const [command, ...selection] = calls[0];
+  const requiredConfig = CONFIGURED_RUNNERS.get(runner);
+  let specs = selection;
+  if (requiredConfig !== undefined) {
+    if (selection[0] !== "--config" || selection[1] !== requiredConfig)
+      throw new BrowserInventoryError(
+        `${runner}: expected its exact reviewed runtime configuration`,
+      );
+    specs = selection.slice(2);
+  }
   if (
     command !== "test" ||
     specs.length === 0 ||

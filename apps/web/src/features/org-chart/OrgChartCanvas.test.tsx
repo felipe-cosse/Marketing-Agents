@@ -1,8 +1,10 @@
 // WEB-01 component evidence covers exact node counts, duplicate selection, and controls.
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useCallback, useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
+import * as hierarchyLayout from "./layout";
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import { DEFAULT_ORG_CHART_FILTERS } from "./filters";
 import {
@@ -147,8 +149,70 @@ describe("WEB-01 interactive org chart canvas", () => {
       '[data-instance-id="inst.social-media.new-content.agent-1.01"]',
     );
     expect(firstCard).toHaveAccessibleDescription(
-      "Department: Social media. Function: New content. Hierarchy level 4.",
+      "Department: Social media. Function: New content. Hierarchy level 4. Latest run: Unavailable.",
     );
+  });
+
+  it("OBJ-06 updates runtime state without recomputing hierarchy layout or moving the viewport", () => {
+    const layoutSpy = vi.spyOn(hierarchyLayout, "layoutHierarchy");
+    const instanceId = "inst.social-media.new-content.agent-1.01";
+    const status: InstanceRuntimeStatus = {
+      instanceId,
+      status: "executing",
+      latestRunId: "run.obj-06.canvas",
+      latestRunState: "executing",
+      latestRunCreatedAt: "2026-09-21T10:00:00Z",
+      latestRunUpdatedAt: "2026-09-21T10:01:00Z",
+      instanceUrl: `/api/v1/agent-instances/${instanceId}`,
+      latestRunUrl: "/api/v1/runs/run.obj-06.canvas",
+    };
+    const props = {
+      hierarchy,
+      selectedInstanceId: null,
+      onSelectionChange: vi.fn(),
+    };
+    try {
+      const { container, rerender } = render(
+        <OrgChartCanvas
+          {...props}
+          runtimeStatusByInstanceId={new Map([[instanceId, status]])}
+        />,
+      );
+      const viewport = screen.getByTestId("org-chart-viewport");
+      fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+      const transform = container
+        .querySelector(".org-chart-transform")
+        ?.getAttribute("style");
+      const card = container.querySelector(
+        `[data-instance-id="${instanceId}"]`,
+      );
+      expect(card).toHaveTextContent("Run: Executing");
+      const callsBeforeUpdate = layoutSpy.mock.calls.length;
+      expect(callsBeforeUpdate).toBe(1);
+
+      rerender(
+        <OrgChartCanvas
+          {...props}
+          runtimeStatusByInstanceId={
+            new Map([
+              [
+                instanceId,
+                { ...status, status: "completed", latestRunState: "completed" },
+              ],
+            ])
+          }
+        />,
+      );
+      expect(card).toHaveTextContent("Run: Completed");
+      expect(layoutSpy).toHaveBeenCalledTimes(callsBeforeUpdate);
+      expect(container.querySelector(".org-chart-transform")).toHaveAttribute(
+        "style",
+        transform,
+      );
+      expect(viewport).toHaveAttribute("data-viewport-intent", "manual");
+    } finally {
+      layoutSpy.mockRestore();
+    }
   });
 
   it("ARCH-02 describes an empty graph without inventing headings or agent controls", () => {

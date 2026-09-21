@@ -261,7 +261,9 @@ export function RunExecutionSnapshot({
                     Expired — no decision available
                   </span>
                 ) : (
-                  <Link to="/approvals">Review approval</Link>
+                  <Link to={`/approvals?run_id=${encodeURIComponent(run.id)}`}>
+                    Review approval
+                  </Link>
                 )}
               </li>
             ))}

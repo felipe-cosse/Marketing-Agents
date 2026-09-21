@@ -16,7 +16,15 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 
 import {
   AGENT_DETAIL_ETAG,
@@ -32,6 +40,12 @@ import {
   type LocalSession,
 } from "../../api/instanceConfiguration";
 import type * as InstanceConfigurationApi from "../../api/instanceConfiguration";
+import {
+  createManualDryRun,
+  generateManualDryRunIdempotencyKey,
+  type ManualDryRunReceipt,
+} from "../../api/manualDryRun";
+import type * as ManualDryRunApi from "../../api/manualDryRun";
 import { makeHierarchyPayload } from "../../test/hierarchyFixture";
 import { HIERARCHY_VIEW_MEDIA_QUERY } from "./hierarchyViewMode";
 import { OrgChartPage } from "./OrgChartPage";
@@ -45,6 +59,17 @@ vi.mock("../../api/instanceConfiguration", async () => {
     fetchLocalSession: vi.fn(),
     fetchInstanceConfiguration: vi.fn(),
     fetchInstanceConfigurationSchema: vi.fn(),
+  };
+});
+
+vi.mock("../../api/manualDryRun", async () => {
+  const actual = await vi.importActual<typeof ManualDryRunApi>(
+    "../../api/manualDryRun",
+  );
+  return {
+    ...actual,
+    createManualDryRun: vi.fn(),
+    generateManualDryRunIdempotencyKey: vi.fn(),
   };
 });
 
@@ -69,6 +94,7 @@ const ADMIN_SESSION: LocalSession = {
 const fetchSessionMock = vi.mocked(fetchLocalSession);
 const fetchSchemaMock = vi.mocked(fetchInstanceConfigurationSchema);
 const fetchConfigurationMock = vi.mocked(fetchInstanceConfiguration);
+const createDryRunMock = vi.mocked(createManualDryRun);
 
 interface MatchMediaController {
   readonly matchMedia: (query: string) => MediaQueryList;
@@ -134,6 +160,10 @@ function configurationSchema(
 }
 
 function resetConfigurationMocks(): void {
+  createDryRunMock.mockReset();
+  vi.mocked(generateManualDryRunIdempotencyKey).mockReturnValue(
+    "obj06-chart-retry-key",
+  );
   fetchSessionMock.mockReset();
   fetchSchemaMock.mockReset();
   fetchConfigurationMock.mockReset();
@@ -280,7 +310,7 @@ function fixtureDetail(instanceId: string): Record<string, unknown> {
         .flatMap(({ functions }) => functions)
         .flatMap(({ instances }) => instances)
         .filter(({ templateId }) => templateId === instance.templateId).length;
-      return makeAgentDetailPayload({
+      const detail = makeAgentDetailPayload({
         instanceId,
         templateId: instance.templateId,
         departmentId: department.id,
@@ -291,6 +321,13 @@ function fixtureDetail(instanceId: string): Record<string, unknown> {
         purpose: instance.purpose,
         runtime: instanceId.endsWith(".02") ? "static" : "completed",
       });
+      return {
+        ...detail,
+        inputSchema: {
+          ...(detail.inputSchema as Record<string, unknown>),
+          properties: { request_id: { type: "string", maxLength: 100 } },
+        },
+      };
     }
   }
   throw new Error(`Unknown fixture instance: ${instanceId}`);
@@ -303,7 +340,15 @@ function requestHeader(
   return new Headers(init?.headers).get(name);
 }
 
-function installFetch(completedId?: string): ReturnType<typeof vi.fn> {
+function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+}
+
+function installFetch(completedId?: string): Mock<typeof fetch> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string"
@@ -365,6 +410,32 @@ async function openFilters(
 
 const FIRST_DETAIL_ID = "inst.social-media.new-content.agent-1.01";
 const SECOND_DETAIL_ID = "inst.social-media.new-content.agent-2.01";
+
+const OBJ06_RECEIPT: ManualDryRunReceipt = {
+  status: "accepted",
+  disposition: "created",
+  eventId: `manual-event-hmac-sha256-v1:${"6".repeat(64)}`,
+  workId: "work.obj06.accepted",
+  runId: "run.obj06.accepted",
+  executionMode: "dry_run",
+  instanceUrl: `/api/v1/agent-instances/${FIRST_DETAIL_ID}`,
+  runUrl: "/api/v1/runs/run.obj06.accepted",
+};
+
+async function submitObj06DryRun(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const form = await screen.findByRole("form", {
+    name: "Manual dry-run input",
+  });
+  await user.type(
+    within(form).getByRole("textbox", { name: /request id/iu }),
+    "obj06 request",
+  );
+  await user.click(
+    within(form).getByRole("button", { name: "Create dry run" }),
+  );
+}
 
 function cardById(instanceId: string): HTMLButtonElement {
   const card = document.querySelector<HTMLButtonElement>(
@@ -430,12 +501,12 @@ describe("WEB-02 OrgChartPage integration", () => {
     expect(document.querySelectorAll(".function-group")).toHaveLength(2);
     expect(
       fetchMock.mock.calls.filter(([url]) =>
-        String(url).includes("catalog/hierarchy"),
+        requestUrl(url).includes("catalog/hierarchy"),
       ),
     ).toHaveLength(1);
     expect(
       fetchMock.mock.calls.filter(([url]) =>
-        String(url).includes("status-summary"),
+        requestUrl(url).includes("status-summary"),
       ),
     ).toHaveLength(1);
   });
@@ -494,7 +565,7 @@ describe("WEB-02 OrgChartPage integration", () => {
     expect(screen.getByLabelText("Current search")).toHaveTextContent("");
     expect(
       fetchMock.mock.calls.filter(([url]) =>
-        String(url).includes("catalog/hierarchy"),
+        requestUrl(url).includes("catalog/hierarchy"),
       ),
     ).toHaveLength(1);
   });
@@ -737,6 +808,149 @@ describe("WEB-03 OrgChartPage detail integration", () => {
     );
   });
 
+  it("OBJ-06 navigates after clean admission without a stale draft warning", async () => {
+    const user = userEvent.setup();
+    fetchSessionMock.mockResolvedValue({
+      ...ADMIN_SESSION,
+      roles: ["viewer", "local_admin", "operator"],
+    });
+    createDryRunMock.mockResolvedValue(OBJ06_RECEIPT);
+    installFetch();
+    renderPage();
+    await loaded();
+    await user.click(cardById(FIRST_DETAIL_ID));
+    await submitObj06DryRun(user);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+        /^\/runs\/run.obj06.accepted$/u,
+      ),
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(createDryRunMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["before submission", "while admission is pending"])(
+    "OBJ-06 keeps configuration changed %s across accepted-run navigation",
+    async (editTiming) => {
+      const user = userEvent.setup();
+      fetchSessionMock.mockResolvedValue({
+        ...ADMIN_SESSION,
+        roles: ["viewer", "local_admin", "operator"],
+      });
+      let accept: ((receipt: ManualDryRunReceipt) => void) | undefined;
+      createDryRunMock.mockReturnValue(
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+      );
+      const fetchMock = installFetch();
+      renderPage();
+      await loaded();
+      await user.click(cardById(FIRST_DETAIL_ID));
+      let variant: HTMLInputElement;
+      if (editTiming === "before submission") {
+        ({ variant } = await makeConfigurationDirty(user));
+        await submitObj06DryRun(user);
+      } else {
+        await submitObj06DryRun(user);
+        ({ variant } = await makeConfigurationDirty(user));
+      }
+      expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+        /^\/$/u,
+      );
+      act(() => {
+        accept?.(OBJ06_RECEIPT);
+      });
+      let dialog = await screen.findByRole("alertdialog", {
+        name: "Discard configuration changes?",
+      });
+      expect(dialog).toHaveTextContent("open run run.obj06.accepted");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Keep editing" }),
+      );
+      expect(variant).toHaveValue("Unsaved local override");
+      expect(
+        await screen.findByRole("heading", { name: "Dry run accepted" }),
+      ).toBeVisible();
+      expect(screen.getByRole("textbox", { name: /request id/iu })).toHaveValue(
+        "",
+      );
+      await user.click(
+        screen.getByRole("link", { name: "Open accepted run resource" }),
+      );
+      dialog = await screen.findByRole("alertdialog", {
+        name: "Discard configuration changes?",
+      });
+      await user.click(
+        within(dialog).getByRole("button", { name: "Discard changes" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+          /^\/runs\/run.obj06.accepted$/u,
+        ),
+      );
+      expect(createDryRunMock).toHaveBeenCalledOnce();
+      expect(
+        fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH"),
+      ).toHaveLength(0);
+    },
+  );
+
+  it.each(["status", "detail"])(
+    "OBJ-06 preserves acceptance and configuration when post-admission %s refresh fails",
+    async (failedResource) => {
+      const user = userEvent.setup();
+      fetchSessionMock.mockResolvedValue({
+        ...ADMIN_SESSION,
+        roles: ["viewer", "local_admin", "operator"],
+      });
+      const fetchMock = installFetch();
+      const originalFetch = fetchMock.getMockImplementation();
+      if (originalFetch === undefined) throw new Error("Missing fixture fetch");
+      let accepted = false;
+      fetchMock.mockImplementation((input, init) => {
+        if (
+          accepted &&
+          input ===
+            (failedResource === "status"
+              ? "/api/v1/agent-instances/status-summary"
+              : `/api/v1/agent-instances/${FIRST_DETAIL_ID}`)
+        ) {
+          return Promise.reject(new Error("OBJ-06 refresh unavailable"));
+        }
+        return originalFetch(input, init);
+      });
+      createDryRunMock.mockImplementation(() => {
+        accepted = true;
+        return Promise.resolve(OBJ06_RECEIPT);
+      });
+      renderPage();
+      await loaded();
+      await user.click(cardById(FIRST_DETAIL_ID));
+      const { variant } = await makeConfigurationDirty(user);
+      await submitObj06DryRun(user);
+      const dialog = await screen.findByRole("alertdialog", {
+        name: "Discard configuration changes?",
+      });
+      await user.click(
+        within(dialog).getByRole("button", { name: "Keep editing" }),
+      );
+      expect(
+        await screen.findByText(
+          /request was accepted, but refreshed inspector status is not available/iu,
+        ),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("heading", { name: "Dry run accepted" }),
+      ).toBeVisible();
+      expect(variant).toHaveValue("Unsaved local override");
+      expect(screen.getByLabelText("Current pathname")).toHaveTextContent(
+        /^\/$/u,
+      );
+      expect(createDryRunMock).toHaveBeenCalledOnce();
+    },
+  );
+
   it("blocks global, history, and unload navigation while editor state is dirty", async () => {
     const user = userEvent.setup();
     enableConfigurationEditing();
@@ -866,7 +1080,7 @@ describe("WEB-03 OrgChartPage detail integration", () => {
     await user.click(card);
     await screen.findByRole("complementary", { name: "Agent 1" });
     const detailCalls = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes(
+      requestUrl(input).includes(
         "/api/v1/agent-instances/inst.social-media.new-content.agent-1.01",
       ),
     );
