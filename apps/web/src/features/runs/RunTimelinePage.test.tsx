@@ -366,6 +366,35 @@ describe("WEB-06 RunTimelinePage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("OBJ-06 scopes each pending approval review link to the exact current run", async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRunResource({
+        pendingApprovals: Object.freeze([
+          Object.freeze({
+            id: "approval.obj-06.pending.01",
+            actionId: WEB_06_ACTION_ID,
+            stepId: WEB_06_STEP_ID,
+            status: "pending" as const,
+            destinationSummary: "Scoped mock CRM write",
+            requestedAt: "2026-09-21T10:00:00Z",
+            expiresAt: "2099-09-21T10:00:00Z",
+            isExpired: false,
+            approvalUrl: "/api/v1/approvals/approval.obj-06.pending.01",
+            actionUrl: `/api/v1/external-actions/${WEB_06_ACTION_ID}`,
+            stepUrl: `/api/v1/runs/${WEB_06_RUN_ID}/steps/${WEB_06_STEP_ID}`,
+          }),
+        ]),
+      }),
+    );
+    renderRunPage();
+    expect(
+      await screen.findByRole("link", { name: "Review approval" }),
+    ).toHaveAttribute(
+      "href",
+      `/approvals?run_id=${encodeURIComponent(WEB_06_RUN_ID)}`,
+    );
+  });
+
   it("loads timeline pages only through the bounded cursor request and appends their persisted order", async () => {
     const cursor = "run-timeline-v1.web06-next";
     const firstPage = makeTimelinePage(

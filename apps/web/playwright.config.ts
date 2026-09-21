@@ -5,6 +5,8 @@ const repositoryRoot = resolve(import.meta.dirname, "../..");
 
 export default defineConfig({
   testDir: "./e2e",
+  // OBJ-06 has a dedicated fresh-installation/runtime runner in the aggregate.
+  testIgnore: "**/obj-06-control-surface.spec.ts",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

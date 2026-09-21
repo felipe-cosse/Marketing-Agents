@@ -1,0 +1,367 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-06",
+  "matrix_statement_sha256": "c4217e54dd93c356b4d9386470839e68db935486d7552714035c22cbc025902c",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/web/config/obj-06-native-network.ts",
+      "apps/web/config/obj-06-network-canary.spec.ts",
+      "apps/web/config/playwright-obj-06-canary.config.ts",
+      "apps/web/config/playwright-obj-06.config.ts",
+      "apps/web/e2e/arch-02-frontend-architecture.spec.ts",
+      "apps/web/e2e/obj-06-control-surface.spec.ts",
+      "apps/web/e2e/obj-06-fixtures.ts",
+      "apps/web/e2e/web-04-dry-run.spec.ts",
+      "apps/web/playwright.config.ts",
+      "apps/web/scripts/browser-evidence-inventory.mjs",
+      "apps/web/scripts/run-arch-02-witness.mjs",
+      "apps/web/scripts/run-obj-06-e2e.mjs",
+      "apps/web/scripts/run-obj-06-witness.mjs",
+      "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx",
+      "apps/web/src/features/approvals/ApprovalQueuePage.tsx",
+      "apps/web/src/features/dry-run/DryRunPanel.test.tsx",
+      "apps/web/src/features/dry-run/DryRunPanel.tsx",
+      "apps/web/src/features/instance-detail/AgentDetailPane.tsx",
+      "apps/web/src/features/org-chart/AgentCard.test.tsx",
+      "apps/web/src/features/org-chart/AgentCard.tsx",
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+      "apps/web/src/features/org-chart/OrgChartCanvas.tsx",
+      "apps/web/src/features/org-chart/OrgChartPage.test.tsx",
+      "apps/web/src/features/org-chart/OrgChartPage.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/presentation.test.ts",
+      "apps/web/src/features/org-chart/presentation.ts",
+      "apps/web/src/features/runs/RunExecutionSnapshot.tsx",
+      "apps/web/src/features/runs/RunTimelinePage.test.tsx",
+      "apps/web/src/styles/org-chart.css",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/OBJ-06.json",
+      "docs/verification/requirements/OBJ-06.md",
+      "scripts/obj_06_browser_harness.py",
+      "tests/network/browser_network_policy.test.mjs",
+      "tests/network/obj_06_control_witness.test.mjs",
+      "tests/network/web_e2e_inventory.test.mjs",
+      "tests/tooling/test_obj_06_browser_harness.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/OrgChartPage.tsx",
+          "apps/web/src/features/dry-run/DryRunPanel.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/org-chart/OrgChartPage.test.tsx"
+        ]
+      },
+      {
+        "kind": "journey",
+        "one_of": [
+          "apps/web/e2e/obj-06-control-surface.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "chart-configuration-and-runtime",
+      "type": "positive",
+      "statement": "The chart's graph and tree show observed per-instance run status separately from deployment state, preserve hierarchy layout and viewport on status updates, and expose unavailable data honestly. Rendered configuration edits persist and disabled deployments withhold manual admission controls.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/AgentCard.test.tsx",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+        "apps/web/e2e/obj-06-control-surface.spec.ts"
+      ]
+    },
+    {
+      "id": "guarded-admission-navigation",
+      "type": "negative_control",
+      "statement": "Accepted manual runs open their exact timeline via guarded client navigation. Admission clears only submitted input; independent configuration drafts remain protected, including edits during pending admission. Errors do not navigate, repeat admission or claim refresh success. Receipt activation preserves native modified-click behavior.",
+      "test_refs": [
+        "apps/web/src/features/dry-run/DryRunPanel.test.tsx",
+        "apps/web/src/features/org-chart/OrgChartPage.test.tsx",
+        "apps/web/e2e/obj-06-control-surface.spec.ts",
+        "apps/web/e2e/web-04-dry-run.spec.ts"
+      ]
+    },
+    {
+      "id": "scoped-approval-and-results",
+      "type": "journey",
+      "statement": "A real fresh local installation supports chart configuration, mock admission, exact run-scoped approval review, explicit confirmation and a sequence-ordered completed receipt. Cancelling review causes no dispatch. A separate mobile READ journey opens a produced artifact. Route scope changes reset stale review state; no real delivery is asserted.",
+      "test_refs": [
+        "apps/web/e2e/obj-06-control-surface.spec.ts",
+        "apps/web/src/features/approvals/ApprovalQueuePage.test.tsx",
+        "apps/web/src/features/runs/RunTimelinePage.test.tsx"
+      ]
+    },
+    {
+      "id": "bounded-real-browser-evidence",
+      "type": "negative_control",
+      "statement": "The real-system browser harness preserves genuine browser Origin and Fetch Metadata, rejects unexpected off-origin transport and redirects before follow, uses temporary state with real API/workers, and reaps owned processes. Browser inventory retains explicit exhaustive ownership; the dependency-free witness rejects disconnected control wiring.",
+      "test_refs": [
+        "apps/web/config/obj-06-network-canary.spec.ts",
+        "tests/tooling/test_obj_06_browser_harness.py",
+        "tests/network/obj_06_control_witness.test.mjs",
+        "tests/network/web_e2e_inventory.test.mjs"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-06-web-unit",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 240,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-native-journey",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-obj-06-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-accessible-hierarchy-regression",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-arch-02-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-dry-run-regression",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-web-04-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "guarded-admission-navigation"
+      ]
+    },
+    {
+      "id": "obj-06-network-inventory-witness-controls",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "--test",
+        "tests/network/browser_network_policy.test.mjs",
+        "tests/network/web_e2e_inventory.test.mjs",
+        "tests/network/obj_06_control_witness.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 90,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-harness-cleanup",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/tooling/test_obj_06_browser_harness.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "deny",
+      "covers": [
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-types",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "-b",
+        "--pretty",
+        "false"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-web-lint",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        ".",
+        "--max-warnings=0"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-web-format",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/prettier/bin/prettier.cjs",
+        "--check",
+        "."
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 90,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-harness-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "scripts/obj_06_browser_harness.py",
+        "tests/tooling/test_obj_06_browser_harness.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-harness-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "scripts/obj_06_browser_harness.py",
+        "tests/tooling/test_obj_06_browser_harness.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-documentation",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/verify_product_docs.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    },
+    {
+      "id": "obj-06-architecture-witness-regression",
+      "runner": "argv",
+      "argv": ["node", "apps/web/scripts/run-arch-02-witness.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": ["chart-configuration-and-runtime", "bounded-real-browser-evidence"]
+    },
+    {
+      "id": "obj-06-control-connection-witness",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-obj-06-witness.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": [
+        "chart-configuration-and-runtime",
+        "guarded-admission-navigation",
+        "scoped-approval-and-results",
+        "bounded-real-browser-evidence"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/web/src/features/org-chart/OrgChartPage.tsx"
+    ],
+    "gate_id": "obj-06-control-connection-witness"
+  },
+  "limitations": [
+    "Browser proof uses Chromium at 1536x1024 and 390x844 against a fresh local SQLite installation with mock adapters. It does not qualify live providers, production authentication, every catalog workflow, other browsers or physical assistive technology.",
+    "The newsletter WRITE workflow intentionally produces a durable mock receipt, not an artifact. Artifact navigation is independently established by the READ-role journey. No external delivery or vendor SDK is enabled.",
+    "Connection witness executes the runtime formatter and checks bounded lexical React wiring after removing comments. It is not a TypeScript parser, React renderer or control-flow proof; component tests and real-browser journeys provide separate behavior evidence.",
+    "Browser native request and response guards plus instrumented Python child socket guards enforce the tested application-level network boundary. Vite's Node process is not kernel-isolated. Installed dependencies, pinned Node and cached pnpm are prerequisites; the harness performs no acquisition.",
+    "Legacy WEB-04 browser regression uses typed read-only configuration and admission-response fixtures. Its genuine full-system counterpart is the dedicated OBJ-06 journey, selected explicitly by the exhaustive aggregate browser inventory.",
+    "CI stays disabled; no remote publication, live integrations or final whole-system acceptance is claimed."
+  ]
+}

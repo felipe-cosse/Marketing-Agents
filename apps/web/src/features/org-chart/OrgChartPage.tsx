@@ -181,12 +181,22 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   );
   const [configurationDirty, setConfigurationDirty] = useState(false);
   const [dryRunDirty, setDryRunDirty] = useState(false);
+  const dirtyStateRef = useRef({ configuration: false, dryRun: false });
+  const handleConfigurationDirtyChange = useCallback((dirty: boolean) => {
+    dirtyStateRef.current.configuration = dirty;
+    setConfigurationDirty(dirty);
+  }, []);
+  const handleDryRunDirtyChange = useCallback((dirty: boolean) => {
+    dirtyStateRef.current.dryRun = dirty;
+    setDryRunDirty(dirty);
+  }, []);
   const [pendingDestination, setPendingDestination] =
     useState<PendingDestination | null>(null);
   const hasUnsavedChanges = configurationDirty || dryRunDirty;
   const navigationBlocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      hasUnsavedChanges && currentLocation.pathname !== nextLocation.pathname,
+      (dirtyStateRef.current.configuration || dirtyStateRef.current.dryRun) &&
+      currentLocation.pathname !== nextLocation.pathname,
   );
   const preventDirtyUnload = useCallback(
     (event: BeforeUnloadEvent) => {
@@ -412,8 +422,8 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
   const discardAndContinue = useCallback(() => {
     if (activeDestination === null) return;
     setPendingDestination(null);
-    setConfigurationDirty(false);
-    setDryRunDirty(false);
+    handleConfigurationDirtyChange(false);
+    handleDryRunDirtyChange(false);
     if (activeDestination.kind === "blocked") {
       if (navigationBlocker.state === "blocked") navigationBlocker.proceed();
       return;
@@ -425,7 +435,12 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       if (focusId !== null && focusInstanceCard(focusId)) return;
       searchRef.current?.focus();
     });
-  }, [activeDestination, navigationBlocker]);
+  }, [
+    activeDestination,
+    handleConfigurationDirtyChange,
+    handleDryRunDirtyChange,
+    navigationBlocker,
+  ]);
   const handleWorkspaceKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
   ): void => {
@@ -457,6 +472,9 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       {hierarchyView.mode === "graph" ? (
         <OrgChartCanvas
           hierarchy={projection.hierarchy}
+          runtimeStatusByInstanceId={
+            statusQuery.isError ? undefined : runtimeStatusByInstanceId
+          }
           selectedInstanceId={selectedInstanceId}
           onSelectionChange={handleSelectionChange}
           emptyTitle={emptyTitle}
@@ -504,6 +522,9 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
       ) : (
         <OrgTreeFallback
           hierarchy={projection.hierarchy}
+          runtimeStatusByInstanceId={
+            statusQuery.isError ? undefined : runtimeStatusByInstanceId
+          }
           selectedInstanceId={selectedInstanceId}
           onSelectionChange={handleSelectionChange}
           autoExpandMatches={hasActiveFilters(filterState.filters)}
@@ -559,8 +580,8 @@ function LoadedOrgChart({ hierarchy }: LoadedOrgChartProps): React.JSX.Element {
           )}
           onClose={closeInspector}
           onOpenRun={openRun}
-          onConfigurationDirtyChange={setConfigurationDirty}
-          onDryRunDirtyChange={setDryRunDirty}
+          onConfigurationDirtyChange={handleConfigurationDirtyChange}
+          onDryRunDirtyChange={handleDryRunDirtyChange}
           modal={hierarchyView.isNarrow}
         />
       )}

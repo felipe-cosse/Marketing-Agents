@@ -116,18 +116,27 @@ export function AgentDetailPane({
 
   const refreshAfterConfiguration = async (): Promise<void> => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: CATALOG_HIERARCHY_QUERY_KEY }),
-      queryClient.invalidateQueries({ queryKey, exact: true }),
+      queryClient.invalidateQueries(
+        { queryKey: CATALOG_HIERARCHY_QUERY_KEY },
+        { throwOnError: true },
+      ),
+      queryClient.invalidateQueries(
+        { queryKey, exact: true },
+        { throwOnError: true },
+      ),
     ]);
   };
 
   const refreshAfterDryRun = async (): Promise<void> => {
     await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: INSTANCE_STATUS_QUERY_KEY,
-        exact: true,
-      }),
-      queryClient.invalidateQueries({ queryKey, exact: true }),
+      queryClient.invalidateQueries(
+        { queryKey: INSTANCE_STATUS_QUERY_KEY, exact: true },
+        { throwOnError: true },
+      ),
+      queryClient.invalidateQueries(
+        { queryKey, exact: true },
+        { throwOnError: true },
+      ),
     ]);
   };
 
@@ -150,6 +159,7 @@ export function AgentDetailPane({
             detail={detailQuery.data}
             onDirtyChange={onDryRunDirtyChange}
             onRuntimeMayHaveChanged={refreshAfterDryRun}
+            onOpenRun={onOpenRun}
           />
         )
       }

@@ -233,16 +233,26 @@ test("DEL-07 WebSocket policy never connects an unapproved origin", async () => 
 test("DEL-07 every committed browser journey imports the automatic guarded fixture", () => {
   const root = fileURLToPath(new URL("../../apps/web/e2e", import.meta.url));
   const specs = readdirSync(root).filter((name) => name.endsWith(".spec.ts"));
-  assert.equal(specs.length, 15);
+  assert.equal(specs.length, 16);
   const guardedImport =
     /import\s*\{[^}]*\btest\b[^}]*\}\s*from\s*["']\.\/fixtures["']/;
   for (const spec of specs) {
     const source = readFileSync(join(root, spec), "utf8");
-    assert.match(source, guardedImport, spec);
+    // OBJ-06's native browser guard is separately canary-tested so genuine
+    // Fetch Metadata reaches the real API. Every other journey keeps DEL-07.
+    const fixture =
+      spec === "obj-06-control-surface.spec.ts"
+        ? "obj-06-fixtures"
+        : "fixtures";
+    const requiredImport =
+      spec === "obj-06-control-surface.spec.ts"
+        ? /import\s*\{[^}]*\btest\b[^}]*\}\s*from\s*["']\.\/obj-06-fixtures["']/
+        : guardedImport;
+    assert.match(source, requiredImport, spec);
     assert.doesNotMatch(source, /from\s*["']@playwright\/test["']/, spec);
     assert.equal(
-      guardedImport.test(
-        source.replaceAll('"./fixtures"', '"@playwright/test"'),
+      requiredImport.test(
+        source.replaceAll(`"./${fixture}"`, '"@playwright/test"'),
       ),
       false,
     );

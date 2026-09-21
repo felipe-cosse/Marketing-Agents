@@ -1,5 +1,6 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 import { CanvasControls } from "./CanvasControls";
 import { describeGraphHierarchy } from "./hierarchyAccessibility";
 import { HierarchyStage } from "./HierarchyStage";
@@ -16,6 +17,8 @@ interface OrgChartCanvasProps {
   readonly emptyMessage?: string;
   readonly onClearFilters?: () => void;
   readonly minimumAutoZoom?: number | undefined;
+  readonly runtimeStatusByInstanceId?:
+    ReadonlyMap<string, InstanceRuntimeStatus> | undefined;
 }
 
 const EMPTY_BOUNDS = Object.freeze({
@@ -34,6 +37,7 @@ export function OrgChartCanvas({
   emptyMessage = "No agents match your search and filters.",
   onClearFilters,
   minimumAutoZoom,
+  runtimeStatusByInstanceId,
 }: OrgChartCanvasProps): React.JSX.Element {
   const layout = useMemo(
     () =>
@@ -124,6 +128,7 @@ export function OrgChartCanvas({
               layout={layout}
               selectedInstanceId={selectedInstanceId}
               onSelect={onSelectionChange}
+              runtimeStatusByInstanceId={runtimeStatusByInstanceId}
             />
           </div>
         )}

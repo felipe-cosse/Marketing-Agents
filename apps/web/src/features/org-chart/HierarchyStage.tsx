@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from "react";
 
+import type { InstanceRuntimeStatus } from "../../api/instanceStatusSummary";
 import { AgentCard } from "./AgentCard";
 import { AgentsIcon } from "./icons";
 import type { HierarchyLayout } from "./layout";
@@ -14,6 +15,8 @@ interface HierarchyStageProps {
   readonly layout: HierarchyLayout;
   readonly selectedInstanceId: string | null;
   readonly onSelect: (instanceId: string) => void;
+  readonly runtimeStatusByInstanceId?:
+    ReadonlyMap<string, InstanceRuntimeStatus> | undefined;
 }
 
 function HierarchyStageComponent({
@@ -21,6 +24,7 @@ function HierarchyStageComponent({
   layout,
   selectedInstanceId,
   onSelect,
+  runtimeStatusByInstanceId,
 }: HierarchyStageProps): React.JSX.Element {
   const orderedInstanceIds = useMemo(
     () =>
@@ -225,6 +229,9 @@ function HierarchyStageComponent({
                         }
                         onFocus={setRovingInstanceId}
                         onNavigate={moveRovingFocus}
+                        runtimeStatus={runtimeStatusByInstanceId?.get(
+                          instance.id,
+                        )}
                       />
                     );
                   })}

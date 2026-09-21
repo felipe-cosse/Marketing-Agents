@@ -7,6 +7,11 @@ import { dirname, resolve } from "node:path";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
 
+import {
+  BROWSER_RUNNERS,
+  readBrowserInventory,
+} from "./browser-evidence-inventory.mjs";
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
     try {
@@ -166,7 +171,16 @@ for (const boundary of [
 assert.ok(page.includes('hierarchyView.mode === "graph" ? ('));
 assert.equal(page.match(/<OrgChartCanvas/gu)?.length, 1);
 assert.equal(page.match(/<OrgTreeFallback/gu)?.length, 1);
-assert.ok(aggregateBrowserRunner.includes('"run-arch-02-e2e.mjs"'));
+// DEL-07 centralized runner ownership; require both that inventory and the
+// aggregate's consumption of it, not a stale literal in the aggregate script.
+assert.ok(BROWSER_RUNNERS.includes("run-arch-02-e2e.mjs"));
+assert.ok(readBrowserInventory(webRoot).specCount > 0);
+assert.ok(
+  aggregateBrowserRunner.includes('"./browser-evidence-inventory.mjs"'),
+);
+assert.ok(
+  aggregateBrowserRunner.includes("for (const script of BROWSER_RUNNERS)"),
+);
 
 process.stdout.write(
   `ARCH-02 dependency-free witness passed: Node ${process.versions.node}, locked React/TypeScript/Vite wiring, projection summaries, card lineage, and exclusive graph/tree sources.\n`,

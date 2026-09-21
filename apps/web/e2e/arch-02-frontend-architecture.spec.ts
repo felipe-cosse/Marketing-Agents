@@ -85,8 +85,10 @@ test("ARCH-02 mounts one accessible graph or tree in the production frontend", a
       `[data-node-kind="instance"][data-instance-id="${expected.id}"]`,
     );
     await expect(card).toHaveCount(1);
+    // OBJ-06 appends observed runtime without replacing the hierarchy context.
+    const runtimeLabel = await card.locator(".agent-card__runtime").innerText();
     await expect(card).toHaveAccessibleDescription(
-      `Department: ${expected.departmentLabel}. Function: ${expected.functionLabel}. Hierarchy level 4.`,
+      `Department: ${expected.departmentLabel}. Function: ${expected.functionLabel}. Hierarchy level 4. Latest run: ${runtimeLabel.replace(/^Run: /u, "")}.`,
     );
   }
 
@@ -124,8 +126,11 @@ test("ARCH-02 mounts one accessible graph or tree in the production frontend", a
   await first.focus();
   await page.keyboard.press("ArrowDown");
   await expect(second).toBeFocused();
+  const secondRuntimeLabel = await second
+    .locator(".agent-card__runtime")
+    .innerText();
   await expect(second).toHaveAccessibleDescription(
-    `Department: ${secondExpected.departmentLabel}. Function: ${secondExpected.functionLabel}. Hierarchy level 4.`,
+    `Department: ${secondExpected.departmentLabel}. Function: ${secondExpected.functionLabel}. Hierarchy level 4. Latest run: ${secondRuntimeLabel.replace(/^Run: /u, "")}.`,
   );
 
   const search = page.getByRole("searchbox", { name: "Search agents" });

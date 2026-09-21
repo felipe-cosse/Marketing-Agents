@@ -20,8 +20,8 @@ const inventory = (text = source(), specs = [spec], runners = [runner]) =>
 
 test("DEL-07 inventories every existing browser spec exactly once, including ORCH-01 through WEB-01", () => {
   assert.deepEqual(readBrowserInventory(webRoot), {
-    runnerCount: 15,
-    specCount: 15,
+    runnerCount: 16,
+    specCount: 16,
   });
   assert.equal(BROWSER_RUNNERS.includes("run-orch-01-e2e.mjs"), false);
   assert.match(
@@ -31,6 +31,55 @@ test("DEL-07 inventories every existing browser spec exactly once, including ORC
     ),
     /test\("ORCH-01 /,
   );
+});
+
+test("ARCH-02 remains mandatory in the centralized browser inventory", () => {
+  assert.ok(BROWSER_RUNNERS.includes("run-arch-02-e2e.mjs"));
+  assert.throws(
+    () =>
+      readBrowserInventory(
+        webRoot,
+        BROWSER_RUNNERS.filter((name) => name !== "run-arch-02-e2e.mjs"),
+      ),
+    BrowserInventoryError,
+  );
+});
+
+test("OBJ-06 runtime configuration is exact and cannot add filters or exclude its journey", () => {
+  const nativeRunner = "run-obj-06-e2e.mjs";
+  const nativeSpec = "e2e/obj-06-control-surface.spec.ts";
+  const nativeConfig = "config/playwright-obj-06.config.ts";
+  const check = (args) =>
+    validateBrowserInventory(
+      [nativeRunner],
+      [nativeSpec],
+      new Map([[nativeRunner, source(args)]]),
+    );
+  assert.deepEqual(check(["test", "--config", nativeConfig, nativeSpec]), {
+    runnerCount: 1,
+    specCount: 1,
+  });
+  for (const args of [
+    ["test", nativeSpec],
+    ["test", "--config", "config/unreviewed.ts", nativeSpec],
+    ["test", "--config", nativeConfig, nativeSpec, "--grep", "subset"],
+    ["test", "--config", nativeConfig, nativeSpec, "--pass-with-no-tests"],
+    ["test", "--config", nativeConfig, nativeSpec, "--list"],
+  ])
+    assert.throws(() => check(args), BrowserInventoryError);
+  assert.throws(
+    () => inventory(source(["test", "--config", nativeConfig, spec])),
+    /no filters or zero-test overrides/,
+  );
+  const runtimeConfig = readFileSync(
+    new URL(
+      "../../apps/web/config/playwright-obj-06.config.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(runtimeConfig, /obj-06-control-surface\.spec\.ts/);
+  assert.doesNotMatch(runtimeConfig, /testIgnore|grepInvert|test\.skip/);
 });
 
 test("DEL-07 refuses zero runners or zero discovered browser specs", () => {
