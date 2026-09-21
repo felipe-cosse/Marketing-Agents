@@ -1,0 +1,149 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "OBJ-05",
+  "matrix_statement_sha256": "496207727f3041af9e58edfd600af289448031fe2da31c0e4077bf20e34795f3",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/bindings.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/registry.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py",
+      "tests/contract/test_obj_05_connector_bindings.py",
+      "tests/integration/runtime/test_obj_05_adapter_substitution.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/unit/application/test_del_07_connector_dispatch_guards.py",
+      "tests/tooling/test_obj_05_boundaries.py",
+      "scripts/verify_obj_05_boundaries.py",
+      "docs/adapter-contracts.md",
+      "docs/verification/requirements/OBJ-05.json",
+      "docs/verification/requirements/OBJ-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "implementation", "one_of": ["apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py"]},
+      {"kind": "test", "one_of": ["tests/contract/test_obj_05_connector_bindings.py", "tests/integration/runtime/test_obj_05_adapter_substitution.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "explicit-neutral-connector-bindings",
+      "type": "contract",
+      "statement": "Controlled READ and authorized WRITE bridges resolve explicit immutable binding registrations rather than concrete mock family attributes. Same-family implementations remain independently selectable and READ provenance comes from registered provider metadata. The mock composition preserves its existing provenance and offline defaults.",
+      "test_refs": ["tests/contract/test_obj_05_connector_bindings.py", "scripts/verify_obj_05_boundaries.py"]
+    },
+    {
+      "id": "fail-closed-extension-contracts",
+      "type": "negative_control",
+      "statement": "Extension boundaries reject duplicate or incompatible bindings, unavailable or non-async operations, mismatched registry identities, invalid revisions and non-durable WRITE bindings before provider calls. Catalog validation rejects changes to exact application-owned v1 request/result DTOs and method declarations, even when schema labels and metadata still match.",
+      "test_refs": ["tests/contract/test_obj_05_connector_bindings.py"]
+    },
+    {
+      "id": "independent-adapters-through-core",
+      "type": "journey",
+      "statement": "Independent offline model and newsletter implementations run through the existing application services and RunWorker without changes to application/domain code. Structured model output is independently validated; approved writes require dispatcher authorization and persisted receipts, with reconstructed runtime replay retaining the original effect identity.",
+      "test_refs": ["tests/integration/runtime/test_obj_05_adapter_substitution.py"]
+    },
+    {
+      "id": "substitution-preserves-safety",
+      "type": "negative_control",
+      "statement": "Independent adapter substitution does not turn malformed model output into an artifact or bypass absent approval and post-approval binding-configuration drift. Static bridge controls reject concrete implementation dependencies and hard-coded provider identity; repository layer checks and existing mock/authorization contracts remain mandatory regression gates.",
+      "test_refs": ["tests/integration/runtime/test_obj_05_adapter_substitution.py", "tests/tooling/test_obj_05_boundaries.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "obj-05-contract-regression",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "--disable-socket", "--allow-unix-socket", "tests/contract/test_obj_05_connector_bindings.py", "tests/contract/test_arch_06_llm_provider.py", "tests/contract/test_arch_07_connector_contract_matrix.py", "tests/contract/test_del_03_durable_mock_composition.py", "tests/unit/application/test_del_07_connector_dispatch_guards.py", "tests/security/test_safe_01_default_mock_mode.py", "tests/unit/architecture/test_arch_08_repository_boundaries.py", "tests/tooling/test_obj_05_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "deny",
+      "covers": ["explicit-neutral-connector-bindings", "fail-closed-extension-contracts", "substitution-preserves-safety"]
+    },
+    {
+      "id": "obj-05-independent-runtime",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "--disable-socket", "--allow-unix-socket", "tests/integration/runtime/test_obj_05_adapter_substitution.py"],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "deny",
+      "covers": ["independent-adapters-through-core", "substitution-preserves-safety"]
+    },
+    {
+      "id": "obj-05-dispatch-recovery",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "--disable-socket", "--allow-unix-socket", "tests/integration/db/test_run_05_external_action_idempotency.py"],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "deny",
+      "covers": ["independent-adapters-through-core", "substitution-preserves-safety"]
+    },
+    {
+      "id": "obj-05-repository-boundaries",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_architecture_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings", "substitution-preserves-safety"]
+    },
+    {
+      "id": "obj-05-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "apps/api/src/marketing_agents/infrastructure/adapters/connectors", "tests/contract/test_obj_05_connector_bindings.py", "tests/integration/runtime/test_obj_05_adapter_substitution.py", "tests/unit/application/test_del_07_connector_dispatch_guards.py", "tests/tooling/test_obj_05_boundaries.py", "scripts/verify_obj_05_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings", "independent-adapters-through-core"]
+    },
+    {
+      "id": "obj-05-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "apps/api/src/marketing_agents/infrastructure/adapters/connectors", "tests/contract/test_obj_05_connector_bindings.py", "tests/integration/runtime/test_obj_05_adapter_substitution.py", "tests/unit/application/test_del_07_connector_dispatch_guards.py", "tests/tooling/test_obj_05_boundaries.py", "scripts/verify_obj_05_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings", "independent-adapters-through-core"]
+    },
+    {
+      "id": "obj-05-types",
+      "runner": "argv",
+      "argv": ["python3", "-m", "mypy", "apps/api/src/marketing_agents"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings", "fail-closed-extension-contracts"]
+    },
+    {
+      "id": "obj-05-documentation",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_product_docs.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings", "independent-adapters-through-core"]
+    },
+    {
+      "id": "obj-05-bridge-witness",
+      "runner": "argv",
+      "argv": ["python3", "scripts/verify_obj_05_boundaries.py"],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "network_requirement": "not_required",
+      "covers": ["explicit-neutral-connector-bindings"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["apps/api/src/marketing_agents/infrastructure/adapters/connectors/dispatch.py"],
+    "gate_id": "obj-05-bridge-witness"
+  },
+  "limitations": [
+    "Independent implementations are offline qualification fixtures, not shipped vendor integrations. No SDK, credential, external call or live delivery is added. Default factories and the executable local composition remain mock-only.",
+    "Integration tests inject adapters at existing infrastructure composition seams. They do not establish a supported live runtime profile or enable real mode through settings. Future provider composition requires separate review and explicit network/credential policy.",
+    "Durable-receipt capability metadata is a composition declaration, never approval authority. The unchanged application dispatcher still requires exact authorization and a matching persisted receipt; a remote effect and local receipt are not atomic.",
+    "The dependency-free connection witness is a static bridge-architecture assertion, not behavioral proof. Contract and migrated-database integration gates provide the separate behavior evidence. Live provider idempotency, rate limits, cancellation and uncertain-outcome reconciliation still require vendor-specific qualification.",
+    "CI remains disabled. No remote branch publication or final whole-system acceptance is claimed by this requirement."
+  ]
+}

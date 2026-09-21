@@ -1,4 +1,4 @@
-"""DEL-07: registry READ/WRITE guards retain exact contracts and failure certainty."""
+"""DEL-07/OBJ-05: exact READ/WRITE guards also survive post-composition corruption."""
 
 from __future__ import annotations
 
@@ -199,8 +199,12 @@ async def test_del_07_read_failures_are_classified_without_implicit_retry(
         method.side_effect = RuntimeError("private transport detail")
     else:
         method.return_value = object()
-    connector = object() if fault == "missing_method" else SimpleNamespace(read_posts=method)
-    adapter = _read_adapter(fixture, social=connector)
+    adapter = _read_adapter(fixture, social=SimpleNamespace(read_posts=method))
+    if fault == "missing_method":
+        # OBJ-05 rejects missing handlers during composition. Deliberately remove
+        # this one after composition to retain the independent runtime guard test.
+        binding = adapter._bindings.resolve("mock.social.default")
+        object.__setattr__(binding, "handlers", {})
     request = object() if fault == "wrong_request_type" else fixture.request
     expected_type = (
         ReadAdapterTransientError if fault == "transport_failure" else ReadAdapterPermanentError
@@ -266,14 +270,19 @@ async def test_del_07_write_failures_preserve_pre_call_vs_ambiguous_delivery_bou
     registration = fixture.registration
     if fault == "invalid_command":
         registration = replace(registration, request_type=type(fixture.bundle))
-    connector = object() if fault == "missing_method" else SimpleNamespace(subscribe=method)
-    bundle = replace(fixture.bundle, newsletter=connector)
+    bundle = replace(fixture.bundle, newsletter=SimpleNamespace(subscribe=method))
     registry = SimpleNamespace(resolve=Mock(return_value=registration))
     if fault == "resolution":
         registry.resolve.side_effect = ConnectorBundleConfigurationError("private registry detail")
     gateway = RegistryConnectorWriteGateway(
-        registry, bundle, binding_configuration_revisions={"mock.newsletter.default": 1}
+        fixture.registry, bundle, binding_configuration_revisions={"mock.newsletter.default": 1}
     )
+    # Compose against the exact registry first; then exercise the independent
+    # runtime failure boundary with a deliberately corrupted resolver/handler.
+    gateway._registry = registry
+    if fault == "missing_method":
+        binding = gateway._bindings.resolve("mock.newsletter.default")
+        object.__setattr__(binding, "handlers", {})
     with pytest.raises(ConnectorDeliveryFailure) as failure:
         await gateway.execute(fixture.authorization)
     assert failure.value.code == expected_code
@@ -295,10 +304,12 @@ def test_del_07_write_contract_rejects_missing_binding_and_read_capability() -> 
         fixture.registration, metadata=replace(fixture.registration.metadata, effect=Effect.READ)
     )
     gateway = RegistryConnectorWriteGateway(
-        SimpleNamespace(resolve=Mock(return_value=registration)),
+        fixture.registry,
         fixture.bundle,
-        binding_configuration_revisions={action.connector_binding_id: 1},
+        binding_configuration_revisions={"mock.newsletter.default": 1},
     )
+    gateway._registry = SimpleNamespace(resolve=Mock(return_value=registration))
+    gateway._binding_revisions = {action.connector_binding_id: 1}
     with pytest.raises(ConnectorDeliveryFailure) as read:
         gateway.contract_for(action)
     assert read.value.code == "delivery_effect_mismatch"

@@ -362,6 +362,19 @@ OPERATION_REGISTRATIONS = (
 )
 
 
+# Adapter implementations may vary; the application-owned v1 operation types may not.
+_V1_OPERATION_CONTRACTS = MappingProxyType(
+    {
+        registration.metadata.capability_id: (
+            registration.request_type,
+            registration.result_type,
+            registration.method_name,
+        )
+        for registration in OPERATION_REGISTRATIONS
+    }
+)
+
+
 class ConnectorOperationRegistry:
     """Exact immutable capability-to-operation mapping."""
 
@@ -459,6 +472,15 @@ class ConnectorOperationRegistry:
             if actual != expected:
                 raise ConnectorBundleConfigurationError(
                     f"connector metadata drift for {capability_id!r}"
+                )
+            registration = self._operations[capability_id]
+            if (
+                registration.request_type,
+                registration.result_type,
+                registration.method_name,
+            ) != _V1_OPERATION_CONTRACTS.get(capability_id):
+                raise ConnectorBundleConfigurationError(
+                    f"connector typed operation contract drift for {capability_id!r}"
                 )
             if capability_id in assigned and not metadata.enabled:
                 raise ConnectorBundleConfigurationError(

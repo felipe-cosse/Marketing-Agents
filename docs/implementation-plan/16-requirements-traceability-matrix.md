@@ -27,7 +27,7 @@ Allowed status values:
 | OBJ-02 | Display an interactive source-modeled org chart. | 12 | Org chart canvas/tree | [Source identity, recovery and chart/tree gates](../verification/requirements/OBJ-02.md) | verified |
 | OBJ-03 | Safely configure, simulate, approve, and audit work. | 05, 06, 09, 12, 13 | Application services/APIs/UI | [Scoped cross-layer gates and limits](../verification/requirements/OBJ-03.md) | verified |
 | OBJ-04 | Run locally without cloud credentials or real external calls. | 01, 10, 14, 15 | Mock defaults, Compose, offline native startup | [Native lifecycle, adapter and guard evidence](../verification/requirements/OBJ-04.md) | verified |
-| OBJ-05 | Allow later real adapters without redesigning core. | 03, 10 | Ports/registry/layer boundaries | Architecture + adapter-contract tests | planned |
+| OBJ-05 | Allow later real adapters without redesigning core. | 03, 10 | Ports/registry/layer boundaries | [Independent adapter, authority and architecture gates](../verification/requirements/OBJ-05.md) | verified |
 | OBJ-06 | Org chart is configuration/control surface, not a static diagram. | 09, 12 | Details/config/forms/approvals/timeline | Browser acceptance | planned |
 | CAT-01 | Seed exactly 5 departments, 12 functions, 36 templates, 43 instances. | 02 | `catalog/v1`, compiler/seeder | `test_exact_counts.py` | verified |
 | CAT-02 | Community has 7 templates and 14 instances. | 02, 12 | Shared template refs + ordinal instances | Multiplicity/API/UI tests | verified |
