@@ -22,7 +22,7 @@ function renderTree(
     readonly projectedQuery?: string;
   } = {},
 ) {
-  const onSelectionChange = vi.fn();
+  const onSelectionChange = vi.fn<(instanceId: string | null) => void>();
   const onFocusSearch = vi.fn();
   const projection = projectHierarchy(hierarchy, {
     ...DEFAULT_ORG_CHART_FILTERS,
@@ -50,6 +50,91 @@ function item(nodeId: string): HTMLButtonElement {
 }
 
 describe("WEB-07 semantic organization tree", () => {
+  it("AC-04 expands the complete tree and independently dispatches all seven Community pairs", () => {
+    const { onSelectionChange } = renderTree();
+    for (const department of hierarchy.departments) {
+      for (const agentFunction of department.functions) {
+        const branch = item(agentFunction.id);
+        expect(branch).toHaveAttribute("aria-expanded", "false");
+        fireEvent.click(branch);
+        expect(branch).toHaveAttribute("aria-expanded", "true");
+      }
+    }
+    const expectedIds = [
+      "root",
+      ...hierarchy.departments.flatMap((department) => [
+        department.id,
+        ...department.functions.flatMap((agentFunction) => [
+          agentFunction.id,
+          ...agentFunction.instances.map(({ id }) => id),
+        ]),
+      ]),
+    ];
+    expect(
+      screen.getAllByRole("treeitem").map((node) => node.dataset.nodeId),
+    ).toEqual(expectedIds);
+    expect(expectedIds).toHaveLength(61);
+    expect(
+      document.querySelectorAll('[data-node-kind="instance"]'),
+    ).toHaveLength(43);
+    expect(item("dept.community")).toHaveTextContent(
+      "14 deployed instances · 7 reusable templates",
+    );
+    const community = hierarchy.departments.find(
+      ({ id }) => id === "dept.community",
+    );
+    if (community === undefined) throw new Error("AC-04 Community missing");
+    const instances = community.functions.flatMap(
+      (agentFunction) => agentFunction.instances,
+    );
+    expect(instances).toHaveLength(14);
+    const templateIds = [
+      ...new Set(instances.map(({ templateId }) => templateId)),
+    ];
+    expect(templateIds).toHaveLength(7);
+    for (const templateId of templateIds) {
+      expect(
+        instances
+          .filter((instance) => instance.templateId === templateId)
+          .map(({ sourceOrdinal }) => sourceOrdinal),
+      ).toEqual([1, 2]);
+    }
+    for (const instance of instances) {
+      const target = item(instance.id);
+      const ordinal = `Instance ${String(instance.sourceOrdinal)} of 2`;
+      expect(target).toHaveAttribute("aria-level", "4");
+      expect(target).toHaveAttribute("data-template-id", instance.templateId);
+      expect(target).toHaveAccessibleName(new RegExp(ordinal, "u"));
+      expect(target).toHaveTextContent(ordinal);
+      fireEvent.click(target);
+    }
+    expect(onSelectionChange.mock.calls).toEqual(
+      instances.map(({ id }) => [id]),
+    );
+    expect(new Set(onSelectionChange.mock.calls.map(([id]) => id)).size).toBe(
+      14,
+    );
+    expect(
+      document.querySelector(
+        '[role="treeitem"][data-node-id="control-plane.marketing-orchestrator"]',
+      ),
+    ).toBeNull();
+  });
+
+  it("AC-04 derives the mobile Community summary from a filtered projection", () => {
+    renderTree({
+      projectedQuery: "inst.community.events.agent-1.02",
+      autoExpandMatches: true,
+    });
+    expect(item("dept.community")).toHaveTextContent(
+      "1 deployed instance · 1 reusable template",
+    );
+    expect(screen.getAllByRole("treeitem")).toHaveLength(4);
+    expect(
+      document.querySelectorAll('[data-node-kind="instance"]'),
+    ).toHaveLength(1);
+  });
+
   it("OBJ-06 updates runtime labels without changing expansion, selection, or tree semantics", () => {
     const instanceId = "inst.community.education.agent-1.01";
     const status: InstanceRuntimeStatus = {

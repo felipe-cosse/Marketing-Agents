@@ -14,7 +14,11 @@ import {
   MARKETING_AGENTS_ROOT,
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
 } from "./model";
-import { presentPurpose, presentRuntimeStatus } from "./presentation";
+import {
+  presentDeploymentInventory,
+  presentPurpose,
+  presentRuntimeStatus,
+} from "./presentation";
 import type { ProjectedHierarchy } from "./projectHierarchy";
 import {
   buildOrgTreeModel,
@@ -114,6 +118,12 @@ function nodeSummary(
     );
   }
   if (node.kind === "department") {
+    if (node.department.id === "dept.community") {
+      return presentDeploymentInventory(
+        node.department.instanceCount,
+        node.department.templateCount,
+      );
+    }
     return `${String(node.department.instanceCount)} deployed agents · ${String(node.department.functions.length)} functions`;
   }
   if (node.kind === "function") {

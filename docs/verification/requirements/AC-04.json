@@ -1,0 +1,225 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-04",
+  "matrix_statement_sha256": "830de29874f470580a8333a8ebf216ec9f30441b328a11804f7e211c7596b4b2",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/web/src/features/org-chart/presentation.ts",
+      "apps/web/src/features/org-chart/presentation.test.ts",
+      "apps/web/src/features/org-chart/HierarchyStage.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.tsx",
+      "apps/web/src/features/org-chart/AgentCard.tsx",
+      "apps/web/src/styles/org-chart.css",
+      "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+      "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+      "apps/web/e2e/web-07-responsive-tree.spec.ts",
+      "apps/web/e2e/web-01-org-chart.spec.ts",
+      "docs/verification/requirements/AC-04.json",
+      "docs/verification/requirements/AC-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "apps/web/e2e/web-07-responsive-tree.spec.ts"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/web/src/features/org-chart/HierarchyStage.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.tsx"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+          "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-source-hierarchy",
+      "type": "journey",
+      "statement": "Desktop graph and mobile semantic tree render the real catalog API's ordered one-root, five-department, twelve-function and forty-three-instance hierarchy. Rendered instance identities, template links, ordinals and parents match the source projection; the named orchestrator control plane is excluded from deployment counts.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts"
+      ]
+    },
+    {
+      "id": "all-community-deployments-distinct",
+      "type": "journey",
+      "statement": "All seven canonical Community templates expose their two ordered deployments. Every one of the fourteen cards or tree rows can be selected independently, loads its exact deployment ID and shared template ID through the real detail API, and restores focus on close without an API mutation or hierarchy refetch.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts"
+      ]
+    },
+    {
+      "id": "truthful-complete-deployment-copy",
+      "type": "negative_control",
+      "statement": "Community summaries display full deployed-instance and reusable-template wording, graph chips include the complete Instance ordinal label, and filtered projections derive their actual counts rather than retaining fixed 14/7 copy. Browser geometry checks reject clipped summary/chip text and page overflow at the tested desktop/mobile sizes.",
+      "test_refs": [
+        "apps/web/src/features/org-chart/presentation.test.ts",
+        "apps/web/src/features/org-chart/OrgChartCanvas.test.tsx",
+        "apps/web/src/features/org-chart/OrgTreeFallback.test.tsx",
+        "apps/web/e2e/web-07-responsive-tree.spec.ts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-04-web-unit",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 240,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-web-typecheck",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "-b",
+        "--pretty",
+        "false"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-web-lint",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        ".",
+        "--max-warnings=0"
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-web-format",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "node_modules/prettier/bin/prettier.cjs",
+        "--check",
+        "."
+      ],
+      "cwd": "apps/web",
+      "timeout_seconds": 90,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-desktop-regression",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-web-01-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-complete-responsive-journey",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-web-07-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-accessibility-regression",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "apps/web/scripts/run-web-08-e2e.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    },
+    {
+      "id": "ac-04-browser-inventory",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "--test",
+        "tests/network/web_e2e_inventory.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-source-hierarchy",
+        "all-community-deployments-distinct",
+        "truthful-complete-deployment-copy"
+      ]
+    }
+  ],
+  "limitations": [
+    "The browser uses the production Vite build and real read-only FastAPI catalog/detail routes at the configured loopback origin. This catalog-only factory does not compose runtime services; only its exact known approvals and status-summary 503 Problem Details and matching browser resource errors are accepted, one-for-one. Other errors and warnings fail.",
+    "Component tests use the existing generic hierarchy fixture. Canonical source role IDs and all fourteen real detail responses are qualified separately by the desktop/mobile browser journeys; no API response replacement is introduced.",
+    "Chromium viewport emulation at 1536x1024 and 426x923 does not qualify physical devices, other browser engines or operating-system screen readers. Existing responsive and accessibility regression runners remain included.",
+    "The graph preserves its compact overview geometry and existing title/accessible-description fallback for ellipsized runtime labels. Complete ordinal chips and department summaries must fit their containing boxes.",
+    "All browser requests remain under the existing same-origin network guard. No provider, connector, credential, real delivery or application mutation is involved; CI remains disabled. Final committed-tree gates and external attestation are required before merge."
+  ]
+}

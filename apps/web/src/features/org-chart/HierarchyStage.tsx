@@ -9,6 +9,7 @@ import {
   MARKETING_ORCHESTRATOR_CONTROL_PLANE,
 } from "./model";
 import type { ProjectedHierarchy } from "./projectHierarchy";
+import { presentDeploymentInventory } from "./presentation";
 
 interface HierarchyStageProps {
   readonly hierarchy: ProjectedHierarchy;
@@ -134,8 +135,7 @@ function HierarchyStageComponent({
         if (departmentLayout === undefined) {
           return null;
         }
-        const communitySummary =
-          department.instanceCount === 14 && department.templateCount === 7;
+        const communitySummary = department.id === "dept.community";
         return (
           <section
             key={department.id}
@@ -161,7 +161,10 @@ function HierarchyStageComponent({
               <span>{department.displayName}</span>
               <small>
                 {communitySummary
-                  ? "14 deployments · 7 templates"
+                  ? presentDeploymentInventory(
+                      department.instanceCount,
+                      department.templateCount,
+                    )
                   : `${String(department.instanceCount)} deployed agents`}
               </small>
             </h2>

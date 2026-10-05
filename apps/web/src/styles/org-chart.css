@@ -257,13 +257,11 @@
 .department-header small {
   max-width: 100%;
   margin-top: 2px;
-  overflow: hidden;
   font-size: 6.7px;
   font-weight: 550;
-  line-height: 1;
+  line-height: 1.1;
   color: var(--color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .function-group {

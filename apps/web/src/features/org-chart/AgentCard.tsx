@@ -118,7 +118,7 @@ export function AgentCard({
         </span>
         {duplicated ? (
           <span className="ordinal-chip">
-            {String(instance.sourceOrdinal)} of{" "}
+            Instance {String(instance.sourceOrdinal)} of{" "}
             {String(instance.deploymentCount)}
           </span>
         ) : null}
