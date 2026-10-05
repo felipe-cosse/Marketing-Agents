@@ -32,6 +32,122 @@ function CanvasHarness(): React.JSX.Element {
 }
 
 describe("WEB-01 interactive org chart canvas", () => {
+  it("AC-04 renders the complete ordered hierarchy and selects every Community pair", () => {
+    const { container } = render(<CanvasHarness />);
+    const instances = hierarchy.departments.flatMap((department) =>
+      department.functions.flatMap((agentFunction) => agentFunction.instances),
+    );
+    const community = hierarchy.departments.find(
+      ({ id }) => id === "dept.community",
+    );
+    if (community === undefined) throw new Error("AC-04 Community missing");
+    const communityInstances = community.functions.flatMap(
+      (agentFunction) => agentFunction.instances,
+    );
+    const templateIds = [
+      ...new Set(communityInstances.map(({ templateId }) => templateId)),
+    ];
+    expect(templateIds).toEqual([
+      "tpl.community.events.agent-1",
+      "tpl.community.events.agent-2",
+      "tpl.community.events.agent-3",
+      "tpl.community.education.agent-1",
+      "tpl.community.education.agent-2",
+      "tpl.community.education.agent-3",
+      "tpl.community.discussion.agent-1",
+    ]);
+    expect(communityInstances).toHaveLength(14);
+    expect(new Set(communityInstances.map(({ id }) => id)).size).toBe(14);
+    expect(container.querySelectorAll('[data-node-kind="root"]')).toHaveLength(
+      1,
+    );
+    expect(
+      container.querySelectorAll('[data-node-kind="department"]'),
+    ).toHaveLength(5);
+    expect(
+      container.querySelectorAll('[data-node-kind="function"]'),
+    ).toHaveLength(12);
+    expect(
+      [
+        ...container.querySelectorAll<HTMLElement>(
+          '[data-node-kind="instance"]',
+        ),
+      ].map((node) => node.dataset.instanceId),
+    ).toEqual(instances.map(({ id }) => id));
+    expect(instances).toHaveLength(43);
+    expect(new Set(instances.map(({ templateId }) => templateId)).size).toBe(
+      36,
+    );
+    expect(
+      container.querySelector(
+        '[data-control-plane-id="control-plane.marketing-orchestrator"]',
+      ),
+    ).toHaveAttribute("data-counts-as-instance", "false");
+    expect(
+      container.querySelector(
+        '[data-instance-id="control-plane.marketing-orchestrator"]',
+      ),
+    ).toBeNull();
+    expect(
+      container.querySelector(
+        '[data-department-id="dept.community"] .department-header small',
+      ),
+    ).toHaveTextContent("14 deployed instances · 7 reusable templates");
+
+    for (const templateId of templateIds) {
+      const pair = communityInstances.filter(
+        (instance) => instance.templateId === templateId,
+      );
+      expect(pair.map(({ sourceOrdinal }) => sourceOrdinal)).toEqual([1, 2]);
+      const renderedPair = container.querySelectorAll<HTMLButtonElement>(
+        `[data-node-kind="instance"][data-template-id="${templateId}"]`,
+      );
+      expect([...renderedPair].map((card) => card.dataset.instanceId)).toEqual(
+        pair.map(({ id }) => id),
+      );
+      for (const instance of pair) {
+        const card = container.querySelector<HTMLButtonElement>(
+          `[data-node-kind="instance"][data-instance-id="${instance.id}"]`,
+        );
+        if (card === null)
+          throw new Error(`AC-04 card missing: ${instance.id}`);
+        const ordinal = `Instance ${String(instance.sourceOrdinal)} of 2`;
+        expect(card).toHaveAccessibleName(new RegExp(ordinal, "u"));
+        expect(card.querySelector(".ordinal-chip")).toHaveTextContent(ordinal);
+        fireEvent.click(card);
+        expect(card).toHaveAttribute("aria-pressed", "true");
+        expect(
+          container.querySelectorAll(
+            '[data-node-kind="instance"][aria-pressed="true"]',
+          ),
+        ).toHaveLength(1);
+      }
+    }
+  });
+
+  it("AC-04 derives the graph Community summary from filtered instances", () => {
+    const projection = projectHierarchy(hierarchy, {
+      ...DEFAULT_ORG_CHART_FILTERS,
+      q: "inst.community.events.agent-1.02",
+    });
+    const { container } = render(
+      <OrgChartCanvas
+        hierarchy={projection.hierarchy}
+        selectedInstanceId={null}
+        onSelectionChange={() => undefined}
+      />,
+    );
+    expect(
+      container.querySelectorAll('[data-node-kind="instance"]'),
+    ).toHaveLength(1);
+    expect(
+      container.querySelector(
+        '[data-department-id="dept.community"] .department-header small',
+      ),
+    ).toHaveTextContent("1 deployed instance · 1 reusable template");
+    expect(container).not.toHaveTextContent("14 deployed instances");
+  });
+
   it("renders exactly one root, five departments, twelve functions, and 43 instances", () => {
     const { container } = render(<CanvasHarness />);
     expect(container.querySelectorAll('[data-node-kind="root"]')).toHaveLength(

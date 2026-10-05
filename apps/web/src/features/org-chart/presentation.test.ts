@@ -1,9 +1,24 @@
 // WEB-01 keeps source-evidence annotations in the API model but out of product copy.
 import { describe, expect, it } from "vitest";
 
-import { presentPurpose, presentRuntimeStatus } from "./presentation";
+import {
+  presentDeploymentInventory,
+  presentPurpose,
+  presentRuntimeStatus,
+} from "./presentation";
 
 describe("WEB-01 vendor-neutral purpose presentation", () => {
+  it("AC-04 derives complete and filtered Community inventory wording", () => {
+    expect(presentDeploymentInventory(14, 7)).toBe(
+      "14 deployed instances · 7 reusable templates",
+    );
+    expect(presentDeploymentInventory(2, 1)).toBe(
+      "2 deployed instances · 1 reusable template",
+    );
+    expect(presentDeploymentInventory(1, 1)).toBe(
+      "1 deployed instance · 1 reusable template",
+    );
+  });
   it("OBJ-06 distinguishes every runtime state, including unknown versus never run", () => {
     expect(
       (

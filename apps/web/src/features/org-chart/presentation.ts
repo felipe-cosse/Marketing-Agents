@@ -1,5 +1,15 @@
 import type { InstanceRuntimeState } from "../../api/instanceStatusSummary";
 
+// AC-04: filtered views must describe their actual projected inventory.
+export function presentDeploymentInventory(
+  instanceCount: number,
+  templateCount: number,
+): string {
+  const instances = instanceCount === 1 ? "instance" : "instances";
+  const templates = templateCount === 1 ? "template" : "templates";
+  return `${String(instanceCount)} deployed ${instances} · ${String(templateCount)} reusable ${templates}`;
+}
+
 const SOURCE_CHART_VENDOR_SUFFIX =
   /\s*;\s*the source chart names [^.;\r\n]+\.?\s*$/iu;
 

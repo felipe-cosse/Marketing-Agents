@@ -506,7 +506,11 @@ test("WEB-01 refits all 43 cards at a compact desktop viewport", async ({
   await page.getByRole("button", { name: "Fit hierarchy" }).click();
   await expect(viewport).toHaveAttribute("data-viewport-intent", "auto-fit");
   await expectCompleteHierarchyVisible(page);
-  await expect(page.getByText("14 deployments · 7 templates")).toBeVisible();
+  await expect(
+    page.getByText("14 deployed instances · 7 reusable templates", {
+      exact: true,
+    }),
+  ).toBeVisible();
 });
 
 test("OBJ-02 rejects a count-preserving source ordinal corruption and recovers the real interactive hierarchy", async ({
