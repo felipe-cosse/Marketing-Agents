@@ -456,8 +456,8 @@ test-del-05-tooling:
 verify-del-05-offline-backend:
 	python -m scripts.del_05_offline_diagnostics ruff-format-source -- python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 	python -m scripts.del_05_offline_diagnostics ruff-check-source -- python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
-	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
-	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py tests/tooling/test_del_05_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py
 	python -m scripts.del_05_offline_diagnostics mypy -- python -m mypy apps/api/src/marketing_agents
 	python -m scripts.del_05_offline_diagnostics architecture -- python scripts/verify_architecture_boundaries.py
 	python -m scripts.del_05_offline_diagnostics catalog -- python -m marketing_agents.workers.catalog_cli validate --root catalog/v1

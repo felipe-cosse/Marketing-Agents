@@ -27,8 +27,20 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 if __package__:
+    from scripts.ac_01_environment import (
+        EnvironmentBoundaryError,
+        validate_compose_service_environments,
+        validate_runtime_container_environment,
+        verify_image_environment,
+    )
     from scripts.del_05_offline_diagnostics import project_diagnostics
 else:
+    from ac_01_environment import (
+        EnvironmentBoundaryError,
+        validate_compose_service_environments,
+        validate_runtime_container_environment,
+        verify_image_environment,
+    )
     from del_05_offline_diagnostics import project_diagnostics
 
 REQUIRED = (
@@ -43,6 +55,8 @@ REQUIRED = (
     ".nvmrc",
     "scripts/del_05_runtime_smoke.py",
     "scripts/del_05_replay_fixture.py",
+    "scripts/compose.sh",
+    "scripts/ac_01_environment.py",
     "Makefile",
 )
 DATABASE = "/var/lib/marketing-agents/data/marketing_agents.db"
@@ -199,10 +213,53 @@ def tree_fingerprint(root: Path) -> str:
     value = hashlib.sha256()
     for path in sorted(root.rglob("*")):
         if path.is_file():
-            value.update(str(path.relative_to(root)).encode())
-            value.update(b"\0")
-            value.update(path.read_bytes())
+            for field in (
+                str(path.relative_to(root)).encode(),
+                str(path.stat().st_mode & 0o777).encode(),
+                path.read_bytes(),
+            ):
+                value.update(len(field).to_bytes(8, "big"))
+                value.update(field)
     return value.hexdigest()
+
+
+def validate_exported_tree(root: Path, tree_listing: bytes) -> None:
+    """Reconcile archive bytes/modes with Git objects, not host archive attributes."""
+    expected = {}
+    for entry in tree_listing.split(b"\0"):
+        if not entry:
+            continue
+        metadata, separator, raw_path = entry.partition(b"\t")
+        fields = metadata.split()
+        require(separator and len(fields) == 3, "invalid_selected_tree_listing")
+        mode, kind, object_id = fields
+        require(
+            mode in {b"100644", b"100755"} and kind == b"blob", "unsupported_selected_tree_entry"
+        )
+        path = raw_path.decode("utf-8")
+        require(path not in expected, "duplicate_selected_tree_entry")
+        expected[path] = (mode, object_id)
+    entries = list(root.rglob("*"))
+    require(
+        all(not path.is_symlink() and (path.is_file() or path.is_dir()) for path in entries),
+        "exported_tree_nonregular_entry",
+    )
+    actual = {str(path.relative_to(root)): path for path in entries if path.is_file()}
+    require(set(actual) == set(expected), "exported_tree_inventory_mismatch")
+    for relative, path in actual.items():
+        mode, object_id = expected[relative]
+        require(
+            re.fullmatch(rb"[0-9a-f]{40}|[0-9a-f]{64}", object_id),
+            "invalid_selected_blob_identity",
+        )
+        value = path.read_bytes()
+        digest = hashlib.new("sha1" if len(object_id) == 40 else "sha256")
+        digest.update(f"blob {len(value)}\0".encode())
+        digest.update(value)
+        require(digest.hexdigest().encode() == object_id, "exported_tree_content_mismatch")
+        require(
+            bool(path.stat().st_mode & 0o111) == (mode == b"100755"), "exported_tree_mode_mismatch"
+        )
 
 
 def validate_owned_resource(kind: str, name: str, project: str, inspected: dict) -> None:
@@ -520,8 +577,22 @@ class Verification:
         self.report["phases"].append(name)
         print(f"DEL-05 phase: {name}", flush=True)
 
+    def external_temporary(self, prefix: str) -> Path:
+        parent = Path(tempfile.gettempdir()).resolve()
+        require(not parent.is_relative_to(self.repository), "temporary_root_inside_repository")
+        require(
+            self.source is None or not parent.is_relative_to(self.source),
+            "temporary_root_inside_export",
+        )
+        directory = Path(tempfile.mkdtemp(prefix=prefix, dir=parent)).resolve()
+        directory.chmod(0o700)
+        return directory
+
     def prepare(self) -> None:
-        require(shutil.which("git") and shutil.which("docker"), "git_and_docker_required")
+        require(
+            shutil.which("git") and shutil.which("docker") and shutil.which("make"),
+            "git_docker_and_make_required",
+        )
         for name in (
             "COMPOSE_FILE",
             "COMPOSE_PROJECT_NAME",
@@ -568,8 +639,7 @@ class Verification:
         ).stdout
         self.report["caller_worktree_dirty"] = bool(dirty)
         self.caller_status = dirty
-        self.temporary = Path(tempfile.mkdtemp(prefix="marketing-agents-del05-")).resolve()
-        self.temporary.chmod(0o700)
+        self.temporary = self.external_temporary("marketing-agents-del05-")
         self.source = self.temporary / "source"
         self.source.mkdir()
         archive = self.temporary / "source.tar"
@@ -579,6 +649,14 @@ class Verification:
             cwd=self.repository,
         )
         export_archive(archive, self.source)
+        listing = self.command(
+            "selected-commit-tree",
+            ["git", "ls-tree", "-rz", "--full-tree", commit],
+            cwd=self.repository,
+        ).stdout
+        validate_exported_tree(self.source, listing)
+        self.selected_tree_listing = listing
+        self.report["export_matches_selected_git_objects"] = True
         require(
             all((self.source / name).is_file() for name in REQUIRED),
             "selected_commit_missing_inputs",
@@ -635,6 +713,11 @@ class Verification:
             "-f",
             str(self.source / "compose.yaml"),
         ]
+        config = json.loads(
+            self.compose_command("validate-public-compose", "config", "--format", "json").stdout
+        )
+        validate_compose_boundary(config, self.project, self.source)
+        validate_compose_service_environments(config, project=self.project, port=port)
         override = self.temporary / "verification.compose.json"
         override.write_text(
             json.dumps(
@@ -656,15 +739,36 @@ class Verification:
             self.compose_command("validate-compose", "config", "--format", "json").stdout
         )
         validate_compose_boundary(config, self.project, self.source)
+        validate_compose_service_environments(
+            config, project=self.project, port=port, fixture_scope=self.project
+        )
         for name in (f"{self.project}_{volume}" for volume in VOLUMES):
             existing = self.command(
                 "ensure-fresh-volume", ["docker", "volume", "inspect", name], check=False
             )
             require(existing.returncode != 0, "test_volume_already_exists")
 
-    def inspect_runtime_network(self) -> None:
+    def inspect_runtime_network(self, *, fixture_scope: str | None = None) -> None:
         port = urlsplit(self.origin).port
         require(port is not None, "missing_runtime_loopback_port")
+        baselines = {}
+        for kind in ("backend", "web"):
+            images = json.loads(
+                self.command(
+                    f"inspect-runtime-image-{kind}",
+                    ["docker", "image", "inspect", f"{self.project}-{kind}:local"],
+                ).stdout
+            )
+            require(isinstance(images, list) and len(images) == 1, "ambiguous_runtime_image")
+            require(
+                images[0]
+                .get("Config", {})
+                .get("Labels", {})
+                .get("org.opencontainers.image.revision")
+                == self.report["source_commit"],
+                "runtime_image_source_revision_mismatch",
+            )
+            baselines[kind] = verify_image_environment(images[0], image_kind=kind)
         for service in ("web", *BACKENDS):
             container_id = (
                 self.compose_command(f"resolve-runtime-{service}", "ps", "--all", "-q", service)
@@ -681,6 +785,14 @@ class Verification:
             )
             require(len(inspected) == 1, "ambiguous_runtime_container_identity")
             validate_container_network(inspected[0], service, self.project, port)
+            validate_runtime_container_environment(
+                inspected[0],
+                service=service,
+                baseline=baselines["web" if service == "web" else "backend"],
+                project=self.project,
+                port=port,
+                fixture_scope=fixture_scope,
+            )
         # Probe only the running backend processes. Initializers have already
         # exited; their actual HostConfig.NetworkMode is checked above instead.
         probe = (
@@ -695,6 +807,9 @@ class Verification:
         self.report["network_boundary"]["runtime_network_modes_inspected"] = True
         self.report["network_boundary"]["backend_external_route_probes_failed_closed"] = True
         self.report["network_boundary"]["actual_loopback_port_publication_verified"] = True
+        self.report.setdefault("environment_boundary", {})[
+            "fixture_runtime_verified" if fixture_scope else "public_runtime_verified"
+        ] = True
 
     def run_offline(self, image: str, command: list[str], suffix: str) -> None:
         name = f"{self.project}-{suffix}"
@@ -749,8 +864,23 @@ class Verification:
             )
         self.phase("backend-no-egress-and-web-ingress-fresh-start")
         self.created = True
+        # Prove the documented entry point itself, before adding any test-only
+        # replay bindings. A direct compose up here would bypass that contract.
+        self.command("public-startup", ["make", "-j1", "up"], cwd=self.source, timeout=240)
+        self.inspect_runtime_network()
+        helper = str(self.source / "scripts/del_05_runtime_smoke.py")
+        self.report["startup"] = self.json_command(
+            "ready-session-counts", ["python3", helper, "ready", "--origin", self.origin]
+        )
+        self.report["public_startup"] = {
+            "argv": ["make", "-j1", "up"],
+            "cwd": "tracked-export",
+            "source_commit": self.report["source_commit"],
+            "without_fixture_overrides": True,
+        }
+        self.phase("explicit-replay-fixture-activation")
         self.compose_command(
-            "start-fresh-runtime",
+            "activate-replay-fixtures",
             "up",
             "--detach",
             "--no-build",
@@ -759,13 +889,12 @@ class Verification:
             "--wait",
             "--wait-timeout",
             "180",
+            "api",
+            "run-worker",
+            "scheduler-worker",
             timeout=240,
         )
-        self.inspect_runtime_network()
-        helper = str(self.source / "scripts/del_05_runtime_smoke.py")
-        self.report["startup"] = self.json_command(
-            "ready-session-counts", ["python3", helper, "ready", "--origin", self.origin]
-        )
+        self.inspect_runtime_network(fixture_scope=self.project)
         self.phase("idempotent-seed")
         self.compose_command(
             "quiesce-workers-before-reseed", "stop", "run-worker", "scheduler-worker"
@@ -860,12 +989,11 @@ class Verification:
         require(re.fullmatch(r"[0-9a-f]{12,64}", web_id), "invalid_web_container_identity")
         browser_name = f"{self.project}-browser"
         self.test_containers.append(browser_name)
-        self.command(
+        browser_result = self.command(
             "production-browser-loopback-only",
             [
                 "docker",
                 "run",
-                "--rm",
                 "--name",
                 browser_name,
                 "--label",
@@ -882,7 +1010,10 @@ class Verification:
             ],
             timeout=600,
         )
+        self.retain_browser_evidence(browser_result, browser_name)
+        validate_exported_tree(self.source, self.selected_tree_listing)
         require(tree_fingerprint(self.source) == self.source_hash, "tracked_export_changed")
+        self.report["export_matches_selected_git_objects_after_verification"] = True
         status = self.command(
             "caller-worktree-status-after",
             ["git", "status", "--porcelain=v1", "-z"],
@@ -891,6 +1022,58 @@ class Verification:
         self.report["caller_worktree_status_preserved"] = status == self.caller_status
         require(status == self.caller_status, "caller_worktree_changed_during_verification")
         self.report["ok"] = True
+
+    def retain_browser_evidence(
+        self, browser_result: subprocess.CompletedProcess, browser_name: str
+    ) -> None:
+        browser_report = json.loads(browser_result.stdout)
+        require(
+            isinstance(browser_report, dict) and browser_report.get("ok") is True,
+            "browser_verification_not_successful",
+        )
+        screenshot_source = browser_report.get("screenshots")
+        require(
+            isinstance(screenshot_source, str)
+            and re.fullmatch(
+                r"/tmp/marketing-agents-del05-browser-[A-Za-z0-9_-]+", screenshot_source
+            ),
+            "invalid_browser_screenshot_source",
+        )
+        # Keep only public demo pixels outside the caller source before removing
+        # the owned browser container. The directory contains no database/key.
+        evidence = self.external_temporary("marketing-agents-ac01-browser-")
+        screenshots = {}
+        try:
+            for view in ("desktop", "mobile"):
+                target = evidence / f"{view}.png"
+                self.command(
+                    f"retain-browser-{view}",
+                    ["docker", "cp", f"{browser_name}:{screenshot_source}/{view}.png", str(target)],
+                )
+                require(
+                    not target.is_symlink()
+                    and target.is_file()
+                    and target.stat().st_size <= 10_000_000,
+                    "invalid_browser_screenshot_file",
+                )
+                content = target.read_bytes()
+                require(
+                    content.startswith(b"\x89PNG\r\n\x1a\n"), "invalid_browser_screenshot_format"
+                )
+                screenshots[view] = {
+                    "path": str(target),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                }
+            self.report["browser"] = {
+                "ok": True,
+                "checks": browser_report["checks"],
+                "warnings": browser_report["warnings"],
+                "screenshots": screenshots,
+            }
+        except BaseException:
+            # This exact private directory was allocated above by this call.
+            shutil.rmtree(evidence)
+            raise
 
     def cleanup(self) -> None:
         previous = self.cleanup_deadline
@@ -1014,10 +1197,17 @@ def main(argv: list[str] | None = None) -> int:
     with verification_signals(EXECUTION_SECONDS):
         try:
             verification.execute()
-        except (VerificationFailure, OSError, ValueError, KeyError) as exc:
+        except (
+            VerificationFailure,
+            EnvironmentBoundaryError,
+            OSError,
+            ValueError,
+            KeyError,
+            tarfile.TarError,
+        ) as exc:
             verification.report["failure"] = (
                 str(exc)
-                if isinstance(exc, VerificationFailure)
+                if isinstance(exc, (VerificationFailure, EnvironmentBoundaryError))
                 else "verification_contract_failure"
             )
         finally:

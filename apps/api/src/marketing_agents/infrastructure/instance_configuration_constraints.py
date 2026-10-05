@@ -5,14 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from marketing_agents.application.ports.instance_configuration import (
     InstanceConfigurationConstraints,
 )
 from marketing_agents.domain.connector_families import EXTERNAL_CONNECTOR_FAMILIES
 from marketing_agents.domain.enums import TriggerKind
-from marketing_agents.infrastructure.catalog.models import CompiledCatalog
+
+if TYPE_CHECKING:
+    from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 
 
 class ConnectorBindingLike(Protocol):
@@ -35,6 +37,10 @@ def _constraints_for(
     catalog: CompiledCatalog,
     instance_id: str,
 ) -> InstanceConfigurationConstraints | None:
+    # Import after this module has finished defining its provider. The catalog
+    # package exports seeding helpers which import this boundary in return.
+    from marketing_agents.infrastructure.catalog.models import CompiledCatalog
+
     if type(catalog) is not CompiledCatalog:
         raise InstanceConfigurationConstraintError(
             "catalog_invalid",
@@ -79,6 +85,8 @@ class CompiledCatalogInstanceConfigurationConstraintProvider:
     catalog: CompiledCatalog
 
     def __post_init__(self) -> None:
+        from marketing_agents.infrastructure.catalog.models import CompiledCatalog
+
         if type(self.catalog) is not CompiledCatalog:
             raise ValueError("configuration constraint provider requires one compiled catalog")
 
