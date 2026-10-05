@@ -1,0 +1,162 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-08",
+  "matrix_statement_sha256": "497e8f74db682e0678bca73d2e4e04f2e589f2ccf37209080f343ad5b44b77bd",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_08_dispatch_approval_boundary.py",
+      "tests/contract/test_ac_08_all_write_authorization.py",
+      "docs/verification/requirements/AC-08.json",
+      "docs/verification/requirements/AC-08.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_08_dispatch_approval_boundary.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/contract/test_ac_08_all_write_authorization.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "pending-and-partial-dispatch-denied",
+      "type": "negative_control",
+      "statement": "The real default Email API and worker persist two schema-valid write actions. Active dispatch attempts for both exact IDs, with neither or only one approval, fail before release with unchanged run/step/action/approval snapshots, no use or reservation, and zero gateway/model/read-adapter calls, dispatch attempts, receipts or artifacts.",
+      "test_refs": [
+        "tests/acceptance/test_ac_08_dispatch_approval_boundary.py"
+      ]
+    },
+    {
+      "id": "exact-durable-release-and-valid-completion",
+      "type": "journey",
+      "statement": "Final public approval atomically consumes and reserves both actions without an inline connector call. The same production dispatcher, gateway and durable mock bundle then execute the same IDs once each, with exact proof/decision/use/hash/key/receipt joins. The worker completes the same workflow without another write.",
+      "test_refs": [
+        "tests/acceptance/test_ac_08_dispatch_approval_boundary.py"
+      ]
+    },
+    {
+      "id": "every-write-rejects-unsealed-or-mismatched-command",
+      "type": "negative_control",
+      "statement": "An independent eight-case fixture inventory equals both catalog and registry WRITE sets. Every actual shipped write method rejects absent, arbitrary or raw-envelope proof and rejects a schema-valid changed command with a genuine unchanged proof before ledger effects. Forged authorization construction fails. Disabled methods remain disabled.",
+      "test_refs": [
+        "tests/contract/test_ac_08_all_write_authorization.py"
+      ]
+    },
+    {
+      "id": "enabled-write-positive-and-disabled-controls",
+      "type": "contract",
+      "statement": "All six enabled real mock handlers execute their exact typed command with a genuine guard-created proof and record one mock effect. The two deliberately disabled writes reject even valid proof and are absent from binding handlers. These lower-layer controls use explicitly synthetic reservations, not fabricated human approval evidence.",
+      "test_refs": [
+        "tests/contract/test_ac_08_all_write_authorization.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-08-active-boundary-and-all-write-handlers",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_08_dispatch_approval_boundary.py",
+        "tests/contract/test_ac_08_all_write_authorization.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "pending-and-partial-dispatch-denied",
+        "exact-durable-release-and-valid-completion",
+        "every-write-rejects-unsealed-or-mismatched-command",
+        "enabled-write-positive-and-disabled-controls"
+      ]
+    },
+    {
+      "id": "ac-08-approval-and-dispatch-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_07_real_composition_demos.py",
+        "tests/security/test_safe_02_external_write_authorization.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "pending-and-partial-dispatch-denied",
+        "exact-durable-release-and-valid-completion",
+        "every-write-rejects-unsealed-or-mismatched-command",
+        "enabled-write-positive-and-disabled-controls"
+      ]
+    },
+    {
+      "id": "ac-08-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "tests/acceptance/test_ac_08_dispatch_approval_boundary.py",
+        "tests/contract/test_ac_08_all_write_authorization.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "pending-and-partial-dispatch-denied",
+        "exact-durable-release-and-valid-completion",
+        "every-write-rejects-unsealed-or-mismatched-command",
+        "enabled-write-positive-and-disabled-controls"
+      ]
+    },
+    {
+      "id": "ac-08-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "tests/acceptance/test_ac_08_dispatch_approval_boundary.py",
+        "tests/contract/test_ac_08_all_write_authorization.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "pending-and-partial-dispatch-denied",
+        "exact-durable-release-and-valid-completion",
+        "every-write-rejects-unsealed-or-mismatched-command",
+        "enabled-write-positive-and-disabled-controls"
+      ]
+    }
+  ],
+  "limitations": [
+    "The real persisted human-approval journey uses Email's newsletter and CRM writes through default local ASGI/runtime composition. The eight-operation matrix separately exercises every real mock write handler with synthetic trusted reservations to isolate its inner proof contract; it is not eight end-to-end human approval journeys.",
+    "Observers record and invoke the original gateway/model methods; no synthetic connector result, model response or fake repository replaces the real composition. Direct production dispatcher calls after API release provide the same-action positive control before normal worker completion.",
+    "Six registered writes are enabled and two remain deliberately disabled: email send and spreadsheet update. Social publication, CMS mutation and fulfillment creation remain unregistered; ARCH-07 regressions verify their absence rather than inventing new operations.",
+    "SAFE-02, ORCH-08, ARCH-07 and RUN-05 regression gates retain canonical scope/hash mismatch, forged authority, committed call-marker, atomic barrier, runtime-control and idempotency checks. Existing AC-07 journeys qualify shared installation helpers.",
+    "Expiry, reused decisions and changed stored proposals have separate AC-09 acceptance ownership. Synthetic sealed proof is an internal trusted-process contract, not a cryptographic defense against arbitrary code execution.",
+    "All pytest gates run in-process with sockets disabled except local Unix sockets; no child process or real provider delivery is qualified. SQLite deterministic mock evidence does not claim universal distributed exactly-once delivery. CI remains disabled."
+  ]
+}
