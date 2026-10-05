@@ -1,0 +1,125 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-01",
+  "matrix_statement_sha256": "7b903ee83b057e6fa77497a934bdfddd572808fda8553ea37b977fa19fdc354a",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py",
+      "scripts/del_05_clean_state.py",
+      "scripts/ac_01_environment.py",
+      "tests/tooling/test_del_05_clean_state.py",
+      "tests/tooling/test_ac_01_public_startup.py",
+      "tests/tooling/test_ac_01_environment.py",
+      "tests/tooling/test_ac_01_browser_evidence.py",
+      "tests/unit/architecture/test_ac_01_cold_imports.py",
+      "docs/verification/requirements/AC-01.json",
+      "docs/verification/requirements/AC-01.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": ["scripts/del_05_clean_state.py"]
+      },
+      {
+        "kind": "control",
+        "one_of": ["scripts/ac_01_environment.py"]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_ac_01_public_startup.py",
+          "tests/tooling/test_ac_01_environment.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "selected-export-public-startup",
+      "type": "journey",
+      "statement": "Clean verification reconciles every exported file, blob identity and executable mode to the selected Git tree, then invokes exactly one make -j1 up from that tracked export with scoped project, loopback-port and source-revision settings before any test-only fixture overlay. A failed public startup stops before runtime inspection or fixture activation.",
+      "test_refs": ["tests/tooling/test_ac_01_public_startup.py"]
+    },
+    {
+      "id": "exact-credential-free-runtime-environment",
+      "type": "negative_control",
+      "statement": "Expanded public Compose configuration and live containers must equal immutable inspected image environments plus exact local-identity, mock-adapter and external-network-disabled service overrides. Extra, malformed, duplicate, credential, proxy, loader or real-mode variables fail with value-redacted codes; replay variables require an exact post-readiness fixture scope.",
+      "test_refs": ["tests/tooling/test_ac_01_environment.py"]
+    },
+    {
+      "id": "cold-process-catalog-constraints",
+      "type": "negative_control",
+      "statement": "Fresh Python processes can import the catalog and configuration constraint modules in either order without a partially initialized-module cycle. Runtime exact-type checks remain enforced. The clean Compose replay fixture must execute in its own process, not rely on imports warmed by unit-test collection or migration setup.",
+      "test_refs": ["tests/unit/architecture/test_ac_01_cold_imports.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-01-focused-contracts",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/tooling/test_ac_01_public_startup.py",
+        "tests/tooling/test_ac_01_environment.py",
+        "tests/tooling/test_ac_01_browser_evidence.py",
+        "tests/unit/architecture/test_ac_01_cold_imports.py",
+        "tests/tooling/test_del_05_clean_state_fixture.py",
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_del_05_compose_contract.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 240,
+      "network_requirement": "not_required",
+      "covers": [
+        "selected-export-public-startup",
+        "exact-credential-free-runtime-environment",
+        "cold-process-catalog-constraints"
+      ]
+    },
+    {
+      "id": "ac-01-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "scripts/del_05_clean_state.py", "scripts/ac_01_environment.py", "tests/tooling/test_del_05_clean_state.py", "tests/tooling/test_ac_01_public_startup.py", "tests/tooling/test_ac_01_environment.py", "tests/tooling/test_ac_01_browser_evidence.py", "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py", "tests/unit/architecture/test_ac_01_cold_imports.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["selected-export-public-startup", "exact-credential-free-runtime-environment"]
+    },
+    {
+      "id": "ac-01-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "scripts/del_05_clean_state.py", "scripts/ac_01_environment.py", "tests/tooling/test_del_05_clean_state.py", "tests/tooling/test_ac_01_public_startup.py", "tests/tooling/test_ac_01_environment.py", "tests/tooling/test_ac_01_browser_evidence.py", "apps/api/src/marketing_agents/infrastructure/instance_configuration_constraints.py", "tests/unit/architecture/test_ac_01_cold_imports.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["selected-export-public-startup", "exact-credential-free-runtime-environment"]
+    },
+    {
+      "id": "ac-01-isolated-clean-startup",
+      "runner": "argv",
+      "argv": ["make", "verify-clean", "REF=HEAD"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "selected-export-public-startup",
+        "exact-credential-free-runtime-environment",
+        "cold-process-catalog-constraints"
+      ]
+    }
+  ],
+  "limitations": [
+    "The build and frozen dependency acquisition phases may contact public registries or use the selected local Docker registry configuration. Provider and cloud credentials are neither required nor passed to application containers.",
+    "Backend application and prebuilt test containers have no external network, but the static web ingress container retains a disclosed outbound operating-system route. This is not an all-container firewall claim.",
+    "Qualification covers local identity, SQLite, deterministic mock model and connector adapters, and the scoped local Compose runtime. It does not qualify live providers, real delivery, production authentication, TLS/cloud deployment, or production RPO/RTO.",
+    "Focused contract tests do not prove a successful clean checkout. Only the exact make verify-clean REF=HEAD gate and external requirement attestation against the final committed feature tree supply AC-01 journey evidence.",
+    "CI remains disabled at user direction. No workflow execution, remote publication, or optional live PostgreSQL qualification is claimed."
+  ]
+}

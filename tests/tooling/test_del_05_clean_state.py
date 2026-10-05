@@ -153,7 +153,7 @@ def test_del_05_every_acquisition_command_forces_default_local_builder(tmp_path,
     calls = []
 
     def command(label, arguments, **kwargs):
-        if label == "start-fresh-runtime":
+        if label == "public-startup":
             raise VerificationFailure("end-of-acquisition-test")
         calls.append((label, arguments))
         return subprocess.CompletedProcess(arguments, 0, b"", b"")
