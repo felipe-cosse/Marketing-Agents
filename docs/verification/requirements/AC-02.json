@@ -1,0 +1,67 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-02",
+  "matrix_statement_sha256": "9322c2b914d05fabc04591c49d262c5131b5083e66261624b088510ac1b2031b",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_02_catalog_api.py",
+      "docs/verification/requirements/AC-02.json",
+      "docs/verification/requirements/AC-02.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/acceptance/test_ac_02_catalog_api.py"]},
+      {"kind": "test", "one_of": ["tests/acceptance/test_ac_02_catalog_api.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "default-api-exact-catalog-inventory",
+      "type": "journey",
+      "statement": "The default local catalog query composition serves exactly five departments, twelve functions, thirty-six reusable templates and forty-three deployed instances. Aggregate, hierarchy and dedicated list routes agree on actual unique record identities and catalog version/hash; advertised counts alone are insufficient.",
+      "test_refs": ["tests/acceptance/test_ac_02_catalog_api.py"]
+    },
+    {
+      "id": "invalid-catalog-never-serves-partial-inventory",
+      "type": "negative_control",
+      "statement": "Count drift in an isolated copy of the tracked source catalog is rejected by the production compiler and default HTTP query path. Catalog routes return the sanitized unavailable problem rather than a successful partial inventory or leaked source diagnostics.",
+      "test_refs": ["tests/acceptance/test_ac_02_catalog_api.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-02-api-acceptance",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "tests/acceptance/test_ac_02_catalog_api.py", "tests/integration/api/test_api_02_catalog_hierarchy.py", "tests/catalog/test_cat_01_authoritative_catalog.py", "tests/catalog/test_del_02_validated_catalog_release.py"],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_required",
+      "covers": ["default-api-exact-catalog-inventory", "invalid-catalog-never-serves-partial-inventory"]
+    },
+    {
+      "id": "ac-02-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "tests/acceptance/test_ac_02_catalog_api.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["default-api-exact-catalog-inventory", "invalid-catalog-never-serves-partial-inventory"]
+    },
+    {
+      "id": "ac-02-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "tests/acceptance/test_ac_02_catalog_api.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["default-api-exact-catalog-inventory", "invalid-catalog-never-serves-partial-inventory"]
+    }
+  ],
+  "limitations": [
+    "HTTP acceptance uses the real FastAPI routes, local identity, compiler and query service through in-process ASGI transport. It does not start a TCP listener or qualify the Docker reverse proxy or browser rendering.",
+    "The catalog is the tracked local v1 source. This requirement does not qualify live cloud providers, production authentication or database-backed configuration mutations.",
+    "The repository-wide pytest external-network guard remains active. CI remains disabled at user direction; only executed local gates and their exact final-tree attestation count as this requirement's verification."
+  ]
+}

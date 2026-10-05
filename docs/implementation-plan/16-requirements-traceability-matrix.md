@@ -150,7 +150,7 @@ Allowed status values:
 | ID | Acceptance criterion | Primary plan | Verification evidence required | Status |
 |---|---|---|---|---|
 | AC-01 | Clean checkout starts with one command/no cloud credentials. | 15 | Successful isolated `make verify-clean` record | verified |
-| AC-02 | Catalog API exposes exactly 5/12/36/43. | 02, 09 | Catalog and API exact-count tests | planned |
+| AC-02 | Catalog API exposes exactly 5/12/36/43. | 02, 09 | Catalog and API exact-count tests | verified |
 | AC-03 | Department instance counts are 12/6/5/14/6. | 02, 09 | Distribution tests/API response | planned |
 | AC-04 | UI complete hierarchy and 14 Community instances from 7 templates. | 12 | Component + desktop/mobile browser assertions | planned |
 | AC-05 | Stable instance IDs are unique. | 02 | Full inventory uniqueness test | planned |
