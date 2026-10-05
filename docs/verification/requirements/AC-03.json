@@ -1,0 +1,68 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-03",
+  "matrix_statement_sha256": "5fdf770929d5a9f489be6ac6f76ad85cb57538e38e2b5fe1721ea83a8b7e5cb9",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_03_department_instance_distribution.py",
+      "tests/catalog/test_ac_03_catalog_distribution.py",
+      "docs/verification/requirements/AC-03.json",
+      "docs/verification/requirements/AC-03.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/acceptance/test_ac_03_department_instance_distribution.py"]},
+      {"kind": "test", "one_of": ["tests/catalog/test_ac_03_catalog_distribution.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "independently-derived-department-distribution",
+      "type": "journey",
+      "statement": "The default catalog HTTP composition exposes exactly 12 Social media, 6 Blog and SEO, 5 Email, 14 Community and 6 Partnerships instances. Hierarchy nesting and the independent instance-to-template-to-department join agree with advertised counts for all 43 unique IDs; disabled catalog instances remain included and control-plane nodes are not deployments.",
+      "test_refs": ["tests/acceptance/test_ac_03_department_instance_distribution.py"]
+    },
+    {
+      "id": "total-preserving-distribution-drift-rejected",
+      "type": "negative_control",
+      "statement": "The production v1 compiler rejects a coherent catalog mutation that preserves global 5/12/36/43 counts but shifts department deployment counts to 11/7/5/14/6. Distribution-only release-lock tampering is also rejected even when the lock's global counts and semantic hash remain unchanged.",
+      "test_refs": ["tests/catalog/test_ac_03_catalog_distribution.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-03-distribution-acceptance",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "tests/acceptance/test_ac_03_department_instance_distribution.py", "tests/catalog/test_ac_03_catalog_distribution.py", "tests/integration/api/test_api_02_catalog_hierarchy.py", "tests/catalog/test_cat_01_authoritative_catalog.py", "tests/catalog/test_del_02_validated_catalog_release.py"],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_required",
+      "covers": ["independently-derived-department-distribution", "total-preserving-distribution-drift-rejected"]
+    },
+    {
+      "id": "ac-03-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "tests/acceptance/test_ac_03_department_instance_distribution.py", "tests/catalog/test_ac_03_catalog_distribution.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["independently-derived-department-distribution", "total-preserving-distribution-drift-rejected"]
+    },
+    {
+      "id": "ac-03-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "tests/acceptance/test_ac_03_department_instance_distribution.py", "tests/catalog/test_ac_03_catalog_distribution.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["independently-derived-department-distribution", "total-preserving-distribution-drift-rejected"]
+    }
+  ],
+  "limitations": [
+    "The API journey uses in-process ASGI transport with default local catalog compilation and identity; no query projection is replaced by a static mock. Browser rendering and deployed network transport are separate requirements.",
+    "Disabled-instance coverage changes only isolated catalog copies; it does not claim to exercise persisted configuration edits. A relaxed global-count-only compiler contract is used solely to establish the negative fixture's coherence before the default v1 contract rejects its distribution.",
+    "CI remains disabled at user direction. Static review is not completion evidence; the final committed requirement tree must pass all declared local gates."
+  ]
+}
