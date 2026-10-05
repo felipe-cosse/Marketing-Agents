@@ -1955,6 +1955,8 @@ async def test_run_05_durable_receipt_race_restart_and_collision_guards(
         "idempotency_key": first.idempotency_key,
         "action_hash": first.action_hash,
         "capability_id": first.envelope.capability_id,
+        "connector_family": first.envelope.connector_family,
+        "provider_version": "v1",
     }
     try:
         receipts = await asyncio.gather(ledger.record(**kwargs), ledger.record(**kwargs))
@@ -1974,6 +1976,8 @@ async def test_run_05_durable_receipt_race_restart_and_collision_guards(
                 idempotency_key=first.idempotency_key,
                 action_hash=second.action_hash,
                 capability_id=second.envelope.capability_id,
+                connector_family=second.envelope.connector_family,
+                provider_version="v1",
             )
         assert same_key.value.code == "idempotency_conflict"
         assert same_key.value.__cause__ is None
@@ -1985,6 +1989,8 @@ async def test_run_05_durable_receipt_race_restart_and_collision_guards(
                 idempotency_key="action-idempotency-v1:" + "f" * 64,
                 action_hash=first.action_hash,
                 capability_id=first.envelope.capability_id,
+                connector_family=first.envelope.connector_family,
+                provider_version="v1",
             )
         assert same_action.value.code == "idempotency_conflict"
         assert await _counts(runtime) == (2, 1)
@@ -2010,6 +2016,8 @@ async def test_run_05_receipt_replay_requires_exact_result_projection(
         idempotency_key=action.idempotency_key,
         action_hash=action.action_hash,
         capability_id=action.envelope.capability_id,
+        connector_family=action.envelope.connector_family,
+        provider_version="v1",
     )
     try:
         async with _uow_factory(runtime)() as unit_of_work:

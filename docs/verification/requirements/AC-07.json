@@ -1,0 +1,204 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-07",
+  "matrix_statement_sha256": "5d04f1435f5277bd159544ee8a3c1ffc022dd6c482f0bb1fd221cdc38c6bf5fc",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/base.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/durable.py",
+      "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py",
+      "tests/integration/db/test_run_05_external_action_idempotency.py",
+      "tests/integration/db/test_ac_07_connector_provenance.py",
+      "tests/acceptance/test_ac_07_real_composition_demos.py",
+      "docs/verification/requirements/AC-07.json",
+      "docs/verification/requirements/AC-07.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_07_real_composition_demos.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_ac_07_connector_provenance.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/base.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/durable.py",
+          "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "five-default-runtime-demo-journeys",
+      "type": "journey",
+      "statement": "All five explicit plan scenarios enter through the real default demo API and execute through RunWorker against a fresh migrated and seeded SQLite installation. The four read-only scenarios make exactly one deterministic model call and no connector call, with schema-valid output and safe draft/advisory semantics.",
+      "test_refs": [
+        "tests/acceptance/test_ac_07_real_composition_demos.py"
+      ]
+    },
+    {
+      "id": "persisted-artifact-and-connector-lineage",
+      "type": "contract",
+      "statement": "Every demo artifact joins to its persisted input, plan, producing step, successful attempt and exact catalog release. Email summary receipt references join exact actions to authoritative versioned connector receipts. Public artifact projections match their persisted identities and protected payload digests; completed artifacts survive reconstruction unchanged.",
+      "test_refs": [
+        "tests/acceptance/test_ac_07_real_composition_demos.py"
+      ]
+    },
+    {
+      "id": "exact-email-all-approvals-barrier",
+      "type": "negative_control",
+      "statement": "Email planning and an incorrect expected hash produce zero model or connector calls. One approved action still releases no call; both exact approvals release the run without inline dispatch. After restart, each approved action executes once with matching decision, use, reservation, hash, binding and idempotency identity, followed by one unsent welcome draft.",
+      "test_refs": [
+        "tests/acceptance/test_ac_07_real_composition_demos.py"
+      ]
+    },
+    {
+      "id": "historical-connector-provenance-is-not-rewritten",
+      "type": "negative_control",
+      "statement": "New mock receipts persist trusted connector family and implementation version before acknowledging the effect. Replay retains the historical version or exact unversioned legacy metadata without another side effect. Exact action scope and deterministic receipt/status/static metadata remain validated; result corruption and collisions are rejected.",
+      "test_refs": [
+        "tests/integration/db/test_ac_07_connector_provenance.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-07-real-composition-and-provenance",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_07_real_composition_demos.py",
+        "tests/integration/db/test_ac_07_connector_provenance.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "five-default-runtime-demo-journeys",
+        "persisted-artifact-and-connector-lineage",
+        "exact-email-all-approvals-barrier",
+        "historical-connector-provenance-is-not-rewritten"
+      ]
+    },
+    {
+      "id": "ac-07-demo-and-dispatch-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_social_demo.py",
+        "tests/acceptance/test_blog_seo_demo.py",
+        "tests/acceptance/test_community_reminder_demo.py",
+        "tests/acceptance/test_partnerships_demo.py",
+        "tests/acceptance/test_email_signup_demo.py",
+        "tests/acceptance/test_email_signup_demo_contract.py",
+        "tests/contract/test_del_03_durable_mock_composition.py",
+        "tests/contract/test_arch_07_connector_contract_matrix.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/runtime/test_del_05_process_composition.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "five-default-runtime-demo-journeys",
+        "persisted-artifact-and-connector-lineage",
+        "exact-email-all-approvals-barrier",
+        "historical-connector-provenance-is-not-rewritten"
+      ]
+    },
+    {
+      "id": "ac-07-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/base.py",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/durable.py",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/db/test_ac_07_connector_provenance.py",
+        "tests/acceptance/test_ac_07_real_composition_demos.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "five-default-runtime-demo-journeys",
+        "persisted-artifact-and-connector-lineage",
+        "exact-email-all-approvals-barrier",
+        "historical-connector-provenance-is-not-rewritten"
+      ]
+    },
+    {
+      "id": "ac-07-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/base.py",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/durable.py",
+        "apps/api/src/marketing_agents/infrastructure/adapters/connectors/mock/families.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/db/test_ac_07_connector_provenance.py",
+        "tests/acceptance/test_ac_07_real_composition_demos.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "five-default-runtime-demo-journeys",
+        "persisted-artifact-and-connector-lineage",
+        "exact-email-all-approvals-barrier",
+        "historical-connector-provenance-is-not-rewritten"
+      ]
+    },
+    {
+      "id": "ac-07-backend-types",
+      "runner": "argv",
+      "argv": [
+        "mypy",
+        "apps/api/src/marketing_agents"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "not_required",
+      "covers": [
+        "five-default-runtime-demo-journeys",
+        "persisted-artifact-and-connector-lineage",
+        "exact-email-all-approvals-barrier",
+        "historical-connector-provenance-is-not-rewritten"
+      ]
+    }
+  ],
+  "limitations": [
+    "The API journeys use real default local composition with in-process ASGI transport and deterministic mocks. Original methods are observed but still invoked; no synthetic model response, query projection or connector result is supplied.",
+    "Catalog version resolves through the persisted release keyed by artifact catalog hash. Email connector versions resolve through immutable action and receipt references; ArtifactProvenance.providers lists the direct LLM producer, not a flattened upstream provider list.",
+    "Email retains one schema-bound summary with a nested welcome_message_draft, not a separately addressable welcome artifact or a parent edge. No email is sent and all connector effects remain mock-only.",
+    "Historical legacy receipts without a recorded implementation version remain unversioned. Replay preserves their existing metadata and never invents a version from current runtime registration.",
+    "Existing five-demo suites qualify deterministic business fields and wider rejection, expiry, mutation, cancellation and crash cases. New composition journeys use fresh SQLite storage and controlled time; they do not claim browser or production-provider qualification.",
+    "Pytest denies sockets except local Unix sockets, with the repository network guard also active. The regression gate also launches a worker child configured mock/offline; parent monkeypatch guards do not sandbox that child, so the full regression gate is marked not_enforced. No OS-level child isolation is claimed. CI remains disabled."
+  ]
+}

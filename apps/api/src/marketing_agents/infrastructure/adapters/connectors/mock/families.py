@@ -48,6 +48,7 @@ from marketing_agents.infrastructure.adapters.connectors.bindings import (
     ConnectorBindingRegistry,
 )
 from marketing_agents.infrastructure.adapters.connectors.mock.base import (
+    MOCK_CONNECTOR_IMPLEMENTATION_VERSION,
     InMemoryMockReceiptLedger,
     MockReceiptLedger,
     build_read_observation,
@@ -320,7 +321,7 @@ class MockConnectorBundle:
                     },
                     provider_mode="mock",
                     provider_name=family,
-                    provider_version="v1",
+                    provider_version=MOCK_CONNECTOR_IMPLEMENTATION_VERSION,
                     durable_receipts=self.ledger.durable,
                     operation_provider_versions={
                         item.metadata.capability_id: item.result_type.__name__
