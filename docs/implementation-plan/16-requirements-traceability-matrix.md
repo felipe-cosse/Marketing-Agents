@@ -154,7 +154,7 @@ Allowed status values:
 | AC-03 | Department instance counts are 12/6/5/14/6. | 02, 09 | Distribution tests/API response | verified |
 | AC-04 | UI complete hierarchy and 14 Community instances from 7 templates. | 12 | Component + desktop/mobile browser assertions | verified |
 | AC-05 | Stable instance IDs are unique. | 02 | Full inventory uniqueness test | verified |
-| AC-06 | Every template has schemas, tools, approval policy. | 02 | Template completeness/schema/policy suite | planned |
+| AC-06 | Every template has schemas, tools, approval policy. | 02 | Template completeness/schema/policy suite | verified |
 | AC-07 | Five valid provenance-linked demos; writes wait and execute only after exact approval. | 06, 11 | Five acceptance tests + Email call ledger | planned |
 | AC-08 | Mutating action cannot cross approval boundary. | 06 | Dispatcher proof/zero-call negative tests | planned |
 | AC-09 | Reused, expired, or changed approval rejected. | 06 | Approval negative tests | planned |

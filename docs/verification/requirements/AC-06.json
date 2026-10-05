@@ -1,0 +1,75 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-06",
+  "matrix_statement_sha256": "7a96ed29c32ff81093e8c26161bfe338945f052090fb86dda899108a65ce9bb5",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_06_template_contracts.py",
+      "docs/verification/requirements/AC-06.json",
+      "docs/verification/requirements/AC-06.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/acceptance/test_ac_06_template_contracts.py"]},
+      {"kind": "test", "one_of": ["tests/acceptance/test_ac_06_template_contracts.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "every-public-template-resolves-valid-schema-pair",
+      "type": "journey",
+      "statement": "All 36 default template-detail HTTP routes expose their complete source input/output schema pair under the correct template and direction identities. The 72 unique schemas compile as Draft 2020-12, preserve the source documents, and accept representative valid payloads while rejecting extra-input or incomplete-output payloads.",
+      "test_refs": ["tests/acceptance/test_ac_06_template_contracts.py"]
+    },
+    {
+      "id": "every-public-template-resolves-allowlist-and-policy",
+      "type": "contract",
+      "statement": "Every public template detail resolves a nonempty duplicate-free capability allowlist and its exact approval policy. References agree with the compiled source and public registries at one catalog version/hash. Templates with write capabilities expose mutating classification and the human external-write policy, while read-only templates expose no-approval policy.",
+      "test_refs": ["tests/acceptance/test_ac_06_template_contracts.py"]
+    },
+    {
+      "id": "invalid-template-contracts-never-project-partially",
+      "type": "negative_control",
+      "statement": "The default compiler rejects six isolated schema, capability and approval-policy defects with their expected diagnostic codes. The real default list and target-detail HTTP paths then return sanitized non-cacheable catalog-unavailable problems, not successful partial contracts or reflected source diagnostics.",
+      "test_refs": ["tests/acceptance/test_ac_06_template_contracts.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-06-template-contract-acceptance",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "--disable-socket", "--allow-unix-socket", "tests/acceptance/test_ac_06_template_contracts.py", "tests/catalog/test_dom_02_template_core_contract.py", "tests/catalog/test_dom_03_template_io_schemas.py", "tests/catalog/test_dom_04_template_runtime_policy.py", "tests/integration/api/test_api_02_catalog_hierarchy.py"],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": ["every-public-template-resolves-valid-schema-pair", "every-public-template-resolves-allowlist-and-policy", "invalid-template-contracts-never-project-partially"]
+    },
+    {
+      "id": "ac-06-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "tests/acceptance/test_ac_06_template_contracts.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["every-public-template-resolves-valid-schema-pair", "every-public-template-resolves-allowlist-and-policy", "invalid-template-contracts-never-project-partially"]
+    },
+    {
+      "id": "ac-06-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "tests/acceptance/test_ac_06_template_contracts.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["every-public-template-resolves-valid-schema-pair", "every-public-template-resolves-allowlist-and-policy", "invalid-template-contracts-never-project-partially"]
+    }
+  ],
+  "limitations": [
+    "The journey uses real FastAPI routes and default LocalCatalogQueryService through in-process ASGI transport. The compiled source is a read-side comparison oracle, never an injected query projection or weakened contract. It does not start a TCP listener or browser.",
+    "The payload cases are representative of the tracked v1 schemas, not exhaustive proofs for all possible payloads. Included DOM-02/03/04 regressions cover core completeness, recursive bounds and runtime policy below HTTP.",
+    "Negative controls mutate private catalog copies only: input schema identity, an output string bound, a missing or empty capability set, a missing approval policy and a write template assigned a no-approval policy. They do not claim every invalid catalog mutation is covered.",
+    "Schema and policy exposure is not connector execution or exact-action approval enforcement. No provider, connector, credential, live delivery, persisted configuration mutation or production identity is qualified.",
+    "Pytest uses socket denial with Unix sockets permitted for the local asyncio runtime, in addition to the repository network guard. CI remains disabled. Recorded preflight results do not replace the final committed-tree gates and their matching external attestation."
+  ]
+}
