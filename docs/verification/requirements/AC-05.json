@@ -1,0 +1,74 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-05",
+  "matrix_statement_sha256": "f1a639f95729dac805f431bfcbc35fe698767652fc825f310e0f68c1ab540d36",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_05_stable_instance_ids.py",
+      "docs/verification/requirements/AC-05.json",
+      "docs/verification/requirements/AC-05.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/acceptance/test_ac_05_stable_instance_ids.py"]},
+      {"kind": "test", "one_of": ["tests/acceptance/test_ac_05_stable_instance_ids.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-independent-stable-identity-inventory",
+      "type": "journey",
+      "statement": "The production v1 compiler resolves exactly the 43 unique ordered instance identities derived from an explicit, plan-backed table of all 36 template IDs and allowed ordinals. Each complete instance ID, referenced template ID and source ordinal matches that independent authority, including both deployments for all seven Community templates.",
+      "test_refs": ["tests/acceptance/test_ac_05_stable_instance_ids.py"]
+    },
+    {
+      "id": "source-configuration-does-not-rename-instances",
+      "type": "contract",
+      "statement": "Changing one isolated source instance's enabled flag and configuration revision changes the compiled catalog content hash but preserves the complete ordered 43-instance identity inventory. The changed configuration is observed in the compiled result, preventing an ignored mutation from satisfying the stability assertion.",
+      "test_refs": ["tests/acceptance/test_ac_05_stable_instance_ids.py"]
+    },
+    {
+      "id": "production-compiler-rejects-identity-drift",
+      "type": "negative_control",
+      "statement": "The unmodified production compiler rejects duplicate instance IDs, syntactically valid namespace drift from the referenced template, and a forbidden non-Community second ordinal. Each isolated source mutation must produce its specific identity diagnostics, not merely an unrelated validation failure.",
+      "test_refs": ["tests/acceptance/test_ac_05_stable_instance_ids.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-05-stable-identity-acceptance",
+      "runner": "argv",
+      "argv": ["python3", "-m", "pytest", "-q", "tests/acceptance/test_ac_05_stable_instance_ids.py", "tests/catalog/test_cat_01_authoritative_catalog.py", "tests/catalog/test_cat_02_community_multiplicity.py", "tests/catalog/test_cat_03_stable_instance_identities.py"],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_required",
+      "covers": ["complete-independent-stable-identity-inventory", "source-configuration-does-not-rename-instances", "production-compiler-rejects-identity-drift"]
+    },
+    {
+      "id": "ac-05-format",
+      "runner": "argv",
+      "argv": ["ruff", "format", "--check", "tests/acceptance/test_ac_05_stable_instance_ids.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["complete-independent-stable-identity-inventory", "source-configuration-does-not-rename-instances", "production-compiler-rejects-identity-drift"]
+    },
+    {
+      "id": "ac-05-lint",
+      "runner": "argv",
+      "argv": ["ruff", "check", "tests/acceptance/test_ac_05_stable_instance_ids.py"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["complete-independent-stable-identity-inventory", "source-configuration-does-not-rename-instances", "production-compiler-rejects-identity-drift"]
+    }
+  ],
+  "limitations": [
+    "This acceptance journey qualifies tracked-v1 catalog source through the default production compiler. It does not qualify HTTP responses, browser rendering, database migrations or persistence across runtime restarts.",
+    "Configuration stability changes only enabled and configuration_revision in an isolated source copy. It does not exercise live configuration APIs, vendor rebinding, schedules, geography, audience or environment changes.",
+    "The duplicate-ID fixture also increases the global instance count; the test explicitly requires both duplicate identity diagnostics. Namespace and ordinal controls retain the source record count. No compiler or contract override is used.",
+    "The normal pytest external-network guard remains active. CI remains disabled at user direction. Static review is not completion evidence; all gates must pass against the final committed requirement tree."
+  ]
+}
