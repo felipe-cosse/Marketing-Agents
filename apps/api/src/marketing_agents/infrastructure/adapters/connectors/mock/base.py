@@ -22,11 +22,13 @@ from marketing_agents.application.ports.connectors import (
 )
 from marketing_agents.domain.action_hash import canonical_action_hash
 from marketing_agents.domain.canonical_json import canonical_json_bytes
+from marketing_agents.domain.connector_families import EXTERNAL_CONNECTOR_FAMILIES
 from marketing_agents.infrastructure.adapters.connectors.registry import (
     ConnectorOperationRegistration,
 )
 
 MOCK_CONNECTOR_DOMAIN = b"marketing-agents:mock-connector:v1\x00"
+MOCK_CONNECTOR_IMPLEMENTATION_VERSION = "v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,8 @@ class MockReceiptLedger(Protocol):
         idempotency_key: str,
         action_hash: str,
         capability_id: str,
+        connector_family: str,
+        provider_version: str,
     ) -> ConnectorWriteResult: ...
 
 
@@ -61,7 +65,18 @@ def build_mock_write_result(
     idempotency_key: str,
     action_hash: str,
     capability_id: str,
+    connector_family: str,
+    provider_version: str,
 ) -> ConnectorWriteResult:
+    if (
+        type(connector_family) is not str
+        or connector_family not in EXTERNAL_CONNECTOR_FAMILIES
+        or binding_id != f"mock.{connector_family}.default"
+        or not _valid_provider_version(provider_version)
+    ):
+        raise ConnectorPortError(
+            "invalid_request", "mock receipt requires its exact trusted provider identity"
+        )
     receipt_digest = hashlib.sha256(
         MOCK_CONNECTOR_DOMAIN
         + canonical_json_bytes(
@@ -80,8 +95,62 @@ def build_mock_write_result(
             "mode": "mock",
             "external_side_effect": False,
             "capability_id": capability_id,
+            "provider_kind": "connector",
+            "provider_name": connector_family,
+            "provider_version": provider_version,
         },
     )
+
+
+def _valid_provider_version(value: object) -> bool:
+    return type(value) is str and bool(value) and value == value.strip() and len(value) <= 100
+
+
+def replay_mock_write_result(
+    result: ConnectorWriteResult,
+    *,
+    binding_id: str,
+    idempotency_key: str,
+    action_hash: str,
+    capability_id: str,
+    connector_family: str,
+) -> ConnectorWriteResult:
+    """Validate deterministic facts without replacing a receipt's historical version."""
+
+    legacy_keys = {"mode", "external_side_effect", "capability_id"}
+    legacy = set(result.safe_metadata) == legacy_keys
+    recorded_version = result.safe_metadata.get("provider_version")
+    if not legacy and not _valid_provider_version(recorded_version):
+        raise ConnectorPortError(
+            "idempotency_conflict", "mock receipt has invalid recorded provider provenance"
+        )
+    # The placeholder is removed below for a legacy receipt. It is never returned
+    # or persisted as provenance for an execution that did not record a version.
+    expected = build_mock_write_result(
+        binding_id=binding_id,
+        idempotency_key=idempotency_key,
+        action_hash=action_hash,
+        capability_id=capability_id,
+        connector_family=connector_family,
+        provider_version="legacy-validation-only" if legacy else cast(str, recorded_version),
+    )
+    if legacy:
+        expected = expected.model_copy(
+            update={
+                "safe_metadata": {
+                    key: value
+                    for key, value in expected.safe_metadata.items()
+                    if key in legacy_keys
+                }
+            }
+        )
+    if canonical_json_bytes(result.model_dump(mode="json")) != canonical_json_bytes(
+        expected.model_dump(mode="json")
+    ):
+        raise ConnectorPortError(
+            "idempotency_conflict", "mock receipt conflicts with its deterministic result"
+        )
+    return result.model_copy(deep=True)
 
 
 class InMemoryMockReceiptLedger:
@@ -109,7 +178,17 @@ class InMemoryMockReceiptLedger:
         idempotency_key: str,
         action_hash: str,
         capability_id: str,
+        connector_family: str,
+        provider_version: str,
     ) -> ConnectorWriteResult:
+        result = build_mock_write_result(
+            binding_id=binding_id,
+            idempotency_key=idempotency_key,
+            action_hash=action_hash,
+            capability_id=capability_id,
+            connector_family=connector_family,
+            provider_version=provider_version,
+        )
         key = (binding_id, idempotency_key)
         existing = self._receipts.get(key)
         if existing is not None:
@@ -122,14 +201,14 @@ class InMemoryMockReceiptLedger:
                     "idempotency_conflict",
                     "mock connector idempotency key is bound to another exact action",
                 )
-            return existing.result
-
-        result = build_mock_write_result(
-            binding_id=binding_id,
-            idempotency_key=idempotency_key,
-            action_hash=action_hash,
-            capability_id=capability_id,
-        )
+            return replay_mock_write_result(
+                existing.result,
+                binding_id=binding_id,
+                idempotency_key=idempotency_key,
+                action_hash=action_hash,
+                capability_id=capability_id,
+                connector_family=connector_family,
+            )
         self._receipts[key] = _StoredMockReceipt(
             external_action_id=external_action_id,
             action_hash=action_hash,
@@ -137,7 +216,7 @@ class InMemoryMockReceiptLedger:
             result=result,
         )
         self._side_effect_count += 1
-        return result
+        return result.model_copy(deep=True)
 
 
 def build_read_observation[ParametersT: BaseModel, PayloadT: RecordsPayload](
@@ -231,4 +310,6 @@ async def execute_mock_write[CommandT: BaseModel](
         idempotency_key=authorization.idempotency_key,
         action_hash=authorization.action_hash,
         capability_id=metadata.capability_id,
+        connector_family=metadata.connector_family,
+        provider_version=MOCK_CONNECTOR_IMPLEMENTATION_VERSION,
     )

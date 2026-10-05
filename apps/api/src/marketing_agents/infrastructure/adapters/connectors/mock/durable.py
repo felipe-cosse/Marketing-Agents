@@ -10,7 +10,7 @@ from marketing_agents.infrastructure.db.repositories import (
     ExternalActionPersistenceConflict,
 )
 
-from .base import build_mock_write_result
+from .base import build_mock_write_result, replay_mock_write_result
 
 
 class DurableMockReceiptLedger:
@@ -41,12 +41,16 @@ class DurableMockReceiptLedger:
         idempotency_key: str,
         action_hash: str,
         capability_id: str,
+        connector_family: str,
+        provider_version: str,
     ) -> ConnectorWriteResult:
         deterministic = build_mock_write_result(
             binding_id=binding_id,
             idempotency_key=idempotency_key,
             action_hash=action_hash,
             capability_id=capability_id,
+            connector_family=connector_family,
+            provider_version=provider_version,
         )
         candidate = ConnectorActionReceipt(
             external_action_id=external_action_id,
@@ -62,6 +66,34 @@ class DurableMockReceiptLedger:
         stored = None
         persistence_conflict = False
         try:
+            async with self._unit_of_work_factory() as unit_of_work:
+                existing = await unit_of_work.connector_receipts.get(binding_id, idempotency_key)
+            if existing is not None:
+                if (
+                    existing.external_action_id != external_action_id
+                    or existing.connector_binding_id != binding_id
+                    or existing.idempotency_key != idempotency_key
+                    or existing.action_hash != action_hash
+                    or existing.capability_id != capability_id
+                ):
+                    raise ExternalActionPersistenceConflict(
+                        "connector_receipt_collision",
+                        "connector idempotency key maps to another exact action",
+                    )
+                return replay_mock_write_result(
+                    ConnectorWriteResult(
+                        receipt_id=existing.receipt_id,
+                        status=existing.status,
+                        safe_metadata=dict(existing.safe_metadata),
+                    ),
+                    binding_id=binding_id,
+                    idempotency_key=idempotency_key,
+                    action_hash=action_hash,
+                    capability_id=capability_id,
+                    connector_family=connector_family,
+                )
+            # Keep lookup and insertion separate: a deferred SQLite read snapshot
+            # must not be upgraded to a writer while another receipt wins a race.
             async with self._unit_of_work_factory() as unit_of_work:
                 stored = await unit_of_work.connector_receipts.add_or_get(candidate)
                 await unit_of_work.commit()
