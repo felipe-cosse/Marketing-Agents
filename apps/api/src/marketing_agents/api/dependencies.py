@@ -31,6 +31,10 @@ from marketing_agents.application.policies.manual_work_authorization import (
     ManualWorkAuthorizationError,
     authorize_manual_work_operator,
 )
+from marketing_agents.application.policies.run_cancellation_authorization import (
+    RunCancellationAuthorizationError,
+    authorize_run_cancellation_operator,
+)
 from marketing_agents.application.policies.runtime_resource_authorization import (
     RuntimeResourceAuthorizationError,
     authorize_runtime_resource_reader,
@@ -61,6 +65,7 @@ from marketing_agents.application.services.audit_resources import (
     AuditListQuery,
     AuditPage,
 )
+from marketing_agents.application.services.cancellation import RunCancellationOutcome
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationSchema,
     InstanceConfigurationSnapshot,
@@ -71,6 +76,7 @@ from marketing_agents.application.services.manual_work_intake import (
     ManualDryRunCommand,
     ManualDryRunResult,
 )
+from marketing_agents.application.services.run_cancellation_command import RunCancellationCommand
 from marketing_agents.application.services.run_resources import (
     ExternalActionResource,
     InstanceStatusSummary,
@@ -180,6 +186,12 @@ class ManualDryRunExecutor(Protocol):
         *,
         principal: AuthenticatedPrincipal,
     ) -> ManualDryRunResult: ...
+
+
+class RunCancellationExecutor(Protocol):
+    async def request(
+        self, command: RunCancellationCommand, *, principal: AuthenticatedPrincipal
+    ) -> RunCancellationOutcome: ...
 
 
 class DemoScenarioRegistryExecutor(Protocol):
@@ -601,6 +613,33 @@ async def require_manual_work_operator_principal(
             detail="manual dry-run creation is forbidden",
         ) from None
     return principal
+
+
+async def require_run_cancellation_operator_principal(
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_authenticated_principal)],
+) -> AuthenticatedPrincipal:
+    try:
+        authorize_run_cancellation_operator(principal)
+    except RunCancellationAuthorizationError:
+        raise HTTPException(403, detail={"code": "cancellation_forbidden"}) from None
+    return principal
+
+
+def get_run_cancellation_executor(
+    request: Request,
+    _principal: Annotated[
+        AuthenticatedPrincipal, Depends(require_run_cancellation_operator_principal)
+    ],
+) -> RunCancellationExecutor:
+    """Authorize before even resolving the optional async mutation executor."""
+    try:
+        executor = getattr(request.app.state, "run_cancellation_service", None)
+        method = getattr(executor, "request", None)
+    except Exception:
+        executor, method = None, None
+    if executor is None or not callable(method) or not inspect.iscoroutinefunction(method):
+        raise HTTPException(503, detail={"code": "cancellation_unavailable"})
+    return cast(RunCancellationExecutor, executor)
 
 
 async def require_approval_principal(
