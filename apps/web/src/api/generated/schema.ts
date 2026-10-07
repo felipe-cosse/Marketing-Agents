@@ -412,6 +412,26 @@ export interface paths {
     readonly patch?: never;
     readonly trace?: never;
   };
+  readonly "/api/v1/runs/{run_id}/cancel": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /**
+     * Cancel Run
+     * @description A human operator may cancel queued work and fence future calls. In-flight or completed effects are not reversed. Preserved IDs may be in flight or already terminal, and effect counts are snapshots at cancellation, not final totals. An unavailable response may follow a committed cancellation: inspect the run/timeline before retrying.
+     */
+    readonly post: operations["cancelRun"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
   readonly "/api/v1/runs/{run_id}/steps/{step_id}": {
     readonly parameters: {
       readonly query?: never;
@@ -2303,6 +2323,53 @@ export interface components {
       readonly backoff: "none" | "bounded_exponential";
       /** Maxattempts */
       readonly maxAttempts: number;
+    };
+    /** RunCancellationInput */
+    readonly RunCancellationInput: Record<string, never>;
+    /** RunCancellationResponse */
+    readonly RunCancellationResponse: {
+      /** Cancelled Action Ids */
+      readonly cancelled_action_ids: readonly string[];
+      /**
+       * Cancelled At
+       * Format: date-time
+       */
+      readonly cancelled_at: string;
+      /** Cancelled Step Ids */
+      readonly cancelled_step_ids: readonly string[];
+      /**
+       * Effects Reversed
+       * @default false
+       * @constant
+       */
+      readonly effects_reversed: false;
+      /** Outcome Unknown Effect Count At Cancellation */
+      readonly outcome_unknown_effect_count_at_cancellation: number;
+      /**
+       * Preserved Action Ids
+       * @description Members not cancelled by this command; no rollback or final delivery claim.
+       */
+      readonly preserved_action_ids: readonly string[];
+      /**
+       * Preserved Step Ids
+       * @description Members not cancelled by this command, including in-flight or terminal work.
+       */
+      readonly preserved_step_ids: readonly string[];
+      /** Run Id */
+      readonly run_id: string;
+      /** Run Url */
+      readonly run_url: string;
+      /**
+       * State
+       * @constant
+       */
+      readonly state: "cancelled";
+      /** Succeeded Effect Count At Cancellation */
+      readonly succeeded_effect_count_at_cancellation: number;
+      /** Timeline Url */
+      readonly timeline_url: string;
+      /** Version */
+      readonly version: number;
     };
     /** RunExecutionControlView */
     readonly RunExecutionControlView: {
@@ -5640,6 +5707,122 @@ export interface operations {
           readonly "Cache-Control"?: "no-store";
           readonly Vary?: string;
           readonly "X-Content-Type-Options"?: "nosniff";
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly cancelRun: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path: {
+        readonly run_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["RunCancellationInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["RunCancellationResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
           readonly [name: string]: unknown;
         };
         content: {

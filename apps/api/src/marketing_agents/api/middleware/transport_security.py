@@ -29,6 +29,10 @@ _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _MAX_ERROR_BODY_BYTES = 65_536
+_CANCELLATION_UNAVAILABLE_DETAIL = (
+    "Cancellation outcome is unconfirmed. Inspect the run and timeline before retrying; "
+    "cancellation may already have committed."
+)
 _PROBLEM_PRESERVED_HEADERS = frozenset(
     {b"allow", b"etag", b"retry-after", b"vary", b"www-authenticate"}
 )
@@ -334,6 +338,8 @@ async def _send_problem(
     current_resource_version: int | str | None = None,
     retained_headers: Iterable[tuple[bytes, bytes]] = (),
 ) -> None:
+    if status_code == 503 and code == "cancellation_unavailable":
+        detail = _CANCELLATION_UNAVAILABLE_DETAIL
     problem = problem_details(
         status_code=status_code,
         correlation_id=correlation_id,

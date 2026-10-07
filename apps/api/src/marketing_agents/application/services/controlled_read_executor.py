@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
@@ -32,6 +32,7 @@ from marketing_agents.application.ports.repositories import (
 )
 from marketing_agents.application.ports.runtime_inputs import RuntimeInputContract
 from marketing_agents.application.ports.runtime_outputs import RuntimeOutputContract
+from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.audit import (
     RUNTIME_CONTROL_DENIAL_CODES,
     TERMINAL_RUNTIME_CONTROL_DENIAL_CODES,
@@ -43,7 +44,7 @@ from marketing_agents.domain.data_classification import (
     DataClassification,
     highest_classification,
 )
-from marketing_agents.domain.entities import RunPlanSnapshot, RunStep, WorkItem
+from marketing_agents.domain.entities import Run, RunPlanSnapshot, RunStep, WorkItem
 from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.execution_control import (
     AttemptCompletionCommand,
@@ -244,6 +245,165 @@ class ControlledReadExecutor:
     ) -> None:
         self._dependencies = dependencies
         self._adapter = adapter
+
+    async def recover_cancelled_attempt(
+        self,
+        step_id: str,
+        *,
+        audit_context: AuditContext,
+        recovery_fence: Callable[[UnitOfWork], Awaitable[None]] | None = None,
+    ) -> ControlledReadResult | None:
+        """Finalize only an expired, existing READ attempt of a cancelled Run.
+
+        This entry point cannot reserve an attempt, inspect an adapter contract,
+        or invoke the adapter. It deliberately has no execution input argument.
+        """
+        require_id(step_id, "cancelled recovery step ID")
+        audit_context.verify_integrity()
+        async with self._dependencies.unit_of_work() as unit_of_work:
+            if recovery_fence is not None:
+                await recovery_fence(unit_of_work)
+            step = await unit_of_work.run_steps.get(step_id)
+            if step is None:
+                raise ControlledReadExecutorError(
+                    "step_not_found", "READ recovery step does not exist", step_id=step_id
+                )
+            run = await unit_of_work.runs.get(step.run_id)
+            control = await unit_of_work.execution_control.get(step.run_id)
+            operation = await unit_of_work.execution_control.get_operation(
+                step.id, step.runtime_policy.operation_key
+            )
+            if (
+                run is None
+                or run.state is not RunState.CANCELLED
+                or control is None
+                or control.cancel_requested_at is None
+                or control.started_at is None
+                or control.policy_hash != step.plan_hash
+                or step.effect is not Effect.READ
+                or step.runtime_policy.attempt_kind is AttemptKind.NO_CALL
+                or operation is None
+                or not _operation_binds_step(operation, step)
+                or step not in await unit_of_work.run_steps.validate_plan_for_execution(run.id)
+            ):
+                raise ControlledReadExecutorError(
+                    "cancelled_recovery_context_invalid",
+                    "READ recovery requires an exact cancelled execution plan",
+                    step_id=step_id,
+                )
+            attempts = await unit_of_work.execution_control.list_attempts(
+                step.id, operation.operation_key
+            )
+            if not attempts or attempts[-1].outcome is not None:
+                return None
+            if step.state is not StepState.EXECUTING:
+                raise ControlledReadExecutorError(
+                    "cancelled_recovery_context_invalid",
+                    "open READ attempt requires its executing step",
+                    step_id=step_id,
+                )
+            now = self._dependencies.utc_now()
+            if now < attempts[-1].call_deadline_at:
+                return None
+            return (
+                await self._recover_expired_in_uow(
+                    unit_of_work,
+                    run=run,
+                    step=step,
+                    open_attempt=attempts[-1],
+                    cancellation_observed=True,
+                    recovered_at=now,
+                    audit_context=audit_context,
+                )
+            ).result
+
+    async def _recover_expired_in_uow(
+        self,
+        unit_of_work: UnitOfWork,
+        *,
+        run: Run,
+        step: RunStep,
+        open_attempt: ExecutionAttempt,
+        cancellation_observed: bool,
+        recovered_at: datetime,
+        audit_context: AuditContext,
+    ) -> _RecoveredRead:
+        """Share the original atomic expiry closure with the no-call terminal lane."""
+        completed = await unit_of_work.execution_control.recover_expired_attempt(
+            ExpiredAttemptRecoveryCommand(
+                attempt_id=open_attempt.id,
+                expected_attempt_version=open_attempt.version,
+                expected_call_deadline_at=open_attempt.call_deadline_at,
+                recovered_at=recovered_at,
+            )
+        )
+        recovered_step = step
+        recovery_events = [AuditEventFactory(audit_context).attempt_completed(completed.attempt)]
+        if completed.retry_not_before is None:
+            terminal_reason = (
+                "run_cancelled"
+                if cancellation_observed
+                else completed.terminal_reason_code or "retry_deadline_exceeded"
+            )
+            if run.state is RunState.EXECUTING and not cancellation_observed:
+                cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                    unit_of_work,
+                    run_id=run.id,
+                    failed_step_id=step.id,
+                    plan_hash=step.plan_hash,
+                    failure_code=terminal_reason,
+                    occurred_at=recovered_at,
+                    audit_context=audit_context,
+                )
+                recovery_events.extend(cleanup.audit_events)
+                recovered_step = cleanup.denied_step
+            else:
+                transition = transition_step(
+                    step,
+                    StepLifecycleCommand.FAIL,
+                    StepTerminalContext(terminal_reason),
+                    recovered_at,
+                )
+                applied = await unit_of_work.run_steps.apply_transition(
+                    expected_run_version=run.version,
+                    expected_run_state=run.state,
+                    expected_version=step.version,
+                    expected_state=StepState.EXECUTING,
+                    result=transition,
+                )
+                if not applied:
+                    raise ControlledReadExecutorError(
+                        "stale_recovery_conflict",
+                        "expired READ attempt lost its step recovery fence",
+                        step_id=step.id,
+                    )
+                recovery_events.append(
+                    AuditEventFactory(audit_context).step_transition(
+                        transition.step, transition.transition
+                    )
+                )
+                recovered_step = transition.step
+        await unit_of_work.audits.append_many(tuple(recovery_events))
+        await unit_of_work.commit()
+        return _RecoveredRead(
+            ControlledReadResult(
+                classification=(
+                    ReadExecutionClassification.CANCELLED
+                    if completed.attempt.outcome is AttemptOutcome.CANCELLED
+                    else (
+                        ReadExecutionClassification.PERMANENT_FAILURE
+                        if completed.attempt.outcome is AttemptOutcome.PERMANENT_FAILURE
+                        else ReadExecutionClassification.TIMED_OUT
+                    )
+                ),
+                attempt=completed.attempt,
+                step=recovered_step,
+                output=None,
+                artifact=None,
+                retry_not_before=completed.retry_not_before,
+                cancellation_observed_after_return=cancellation_observed,
+            )
+        )
 
     async def execute(
         self,
@@ -534,83 +694,14 @@ class ControlledReadExecutor:
                     cancellation_observed = (
                         control.cancel_requested_at is not None or run.state is RunState.CANCELLED
                     )
-                    completed = await unit_of_work.execution_control.recover_expired_attempt(
-                        ExpiredAttemptRecoveryCommand(
-                            attempt_id=open_attempt.id,
-                            expected_attempt_version=open_attempt.version,
-                            expected_call_deadline_at=open_attempt.call_deadline_at,
-                            recovered_at=reserved_at,
-                        )
-                    )
-                    recovered_step = step
-                    recovery_events = [
-                        AuditEventFactory(audit_context).attempt_completed(completed.attempt)
-                    ]
-                    if completed.retry_not_before is None:
-                        terminal_reason = (
-                            "run_cancelled"
-                            if cancellation_observed
-                            else completed.terminal_reason_code or "retry_deadline_exceeded"
-                        )
-                        if run.state is RunState.EXECUTING and not cancellation_observed:
-                            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
-                                unit_of_work,
-                                run_id=run.id,
-                                failed_step_id=step.id,
-                                plan_hash=step.plan_hash,
-                                failure_code=terminal_reason,
-                                occurred_at=reserved_at,
-                                audit_context=audit_context,
-                            )
-                            recovery_events.extend(cleanup.audit_events)
-                            recovered_step = cleanup.denied_step
-                        else:
-                            transition = transition_step(
-                                step,
-                                StepLifecycleCommand.FAIL,
-                                StepTerminalContext(terminal_reason),
-                                reserved_at,
-                            )
-                            applied = await unit_of_work.run_steps.apply_transition(
-                                expected_run_version=run.version,
-                                expected_run_state=run.state,
-                                expected_version=step.version,
-                                expected_state=StepState.EXECUTING,
-                                result=transition,
-                            )
-                            if not applied:
-                                raise ControlledReadExecutorError(
-                                    "stale_recovery_conflict",
-                                    "expired READ attempt lost its step recovery fence",
-                                    step_id=step.id,
-                                )
-                            recovery_events.append(
-                                AuditEventFactory(audit_context).step_transition(
-                                    transition.step,
-                                    transition.transition,
-                                )
-                            )
-                            recovered_step = transition.step
-                    await unit_of_work.audits.append_many(tuple(recovery_events))
-                    await unit_of_work.commit()
-                    return _RecoveredRead(
-                        ControlledReadResult(
-                            classification=(
-                                ReadExecutionClassification.CANCELLED
-                                if completed.attempt.outcome is AttemptOutcome.CANCELLED
-                                else (
-                                    ReadExecutionClassification.PERMANENT_FAILURE
-                                    if completed.attempt.outcome is AttemptOutcome.PERMANENT_FAILURE
-                                    else ReadExecutionClassification.TIMED_OUT
-                                )
-                            ),
-                            attempt=completed.attempt,
-                            step=recovered_step,
-                            output=None,
-                            artifact=None,
-                            retry_not_before=completed.retry_not_before,
-                            cancellation_observed_after_return=cancellation_observed,
-                        )
+                    return await self._recover_expired_in_uow(
+                        unit_of_work,
+                        run=run,
+                        step=step,
+                        open_attempt=open_attempt,
+                        cancellation_observed=cancellation_observed,
+                        recovered_at=reserved_at,
+                        audit_context=audit_context,
                     )
                 if run.state is not RunState.EXECUTING or control.cancel_requested_at is not None:
                     raise ControlledReadExecutorError(

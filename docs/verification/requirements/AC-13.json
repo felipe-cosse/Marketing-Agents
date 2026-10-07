@@ -1,0 +1,311 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-13",
+  "matrix_statement_sha256": "ba2720373b6e51cd2a9e03575a1cff3b016c523d3ab1785041980c3a41ede056",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/openapi.json",
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/dependencies.py",
+      "apps/api/src/marketing_agents/api/middleware/transport_security.py",
+      "apps/api/src/marketing_agents/api/routes/run_cancellation.py",
+      "apps/api/src/marketing_agents/api/schemas/run_cancellation.py",
+      "apps/api/src/marketing_agents/application/policies/run_cancellation_authorization.py",
+      "apps/api/src/marketing_agents/application/services/run_cancellation_command.py",
+      "apps/api/src/marketing_agents/application/services/cancelled_run_recovery.py",
+      "apps/api/src/marketing_agents/application/services/controlled_read_executor.py",
+      "apps/api/src/marketing_agents/application/services/external_action_dispatcher.py",
+      "apps/api/src/marketing_agents/infrastructure/runtime/run_claims.py",
+      "apps/api/src/marketing_agents/workers/runtime/composition.py",
+      "apps/api/src/marketing_agents/workers/runtime/run_loop.py",
+      "apps/web/src/api/generated/schema.ts",
+      "tests/integration/api/test_ac_13_cancellation_api.py",
+      "tests/integration/db/test_ac_13_cancelled_recovery.py",
+      "tests/acceptance/test_ac_13_public_cancellation.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/AC-13.json",
+      "docs/verification/requirements/AC-13.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_13_public_cancellation.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_ac_13_cancelled_recovery.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/cancelled_run_recovery.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "public-operator-cancellation",
+      "type": "contract",
+      "statement": "The strict empty-JSON cancellation route and application wrapper independently enforce server-issued human operator authority, browser security, bounded input and execution, fixed safe errors, and explicit cancellation-time snapshot semantics.",
+      "test_refs": [
+        "tests/integration/api/test_ac_13_cancellation_api.py"
+      ]
+    },
+    {
+      "id": "queued-and-pre-barrier-zero-calls",
+      "type": "journey",
+      "statement": "Public cancellation of queued and not-fully-approved Email runs persists cancellation across reconstruction, executes no connector, and consumes or reserves no approval authority; terminal repeat requests conflict and remain auditable.",
+      "test_refs": [
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ]
+    },
+    {
+      "id": "inflight-effects-remain-truthful",
+      "type": "journey",
+      "statement": "A real mock receipt and previously completed effects remain authoritative after public cancellation. Timely completion records success, uncalled siblings are cancelled, consumed approvals and exact immutable action identities are preserved, and the ordered public timeline makes no rollback claim.",
+      "test_refs": [
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ]
+    },
+    {
+      "id": "cancelled-restart-recovery-without-replay",
+      "type": "journey",
+      "statement": "Default worker reconstruction selects only due unfinished evidence under cancelled parents. It reconciles an exact WRITE receipt or records outcome unknown when absent, and closes expired READ attempts without new calls, artifacts, retries or budget reservations; parent cancellation and completed siblings remain immutable.",
+      "test_refs": [
+        "tests/acceptance/test_ac_13_public_cancellation.py",
+        "tests/integration/db/test_ac_13_cancelled_recovery.py"
+      ]
+    },
+    {
+      "id": "recovery-fences-and-integrity",
+      "type": "negative_control",
+      "statement": "Exact plan/control, attempt/action and claim fences reject the tested corrupt or stale recovery authority. Before-deadline recovery is inert; concurrent claims, competing completion and repeated recovery cannot duplicate outcomes, audit mutations or effects. A lost worker claim cannot mutate or audit closure.",
+      "test_refs": [
+        "tests/integration/db/test_ac_13_cancelled_recovery.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-13-public-cancellation-journeys",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "public-operator-cancellation",
+        "queued-and-pre-barrier-zero-calls",
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-api-authority-and-contract",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/api/test_ac_13_cancellation_api.py",
+        "tests/integration/api/test_api_09_transport_security.py",
+        "tests/integration/api/test_run_10_identity_dependency.py",
+        "tests/unit/application/test_api_09_terminal_error_projection.py",
+        "tests/contract/test_del_07_openapi_snapshot.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "public-operator-cancellation"
+      ]
+    },
+    {
+      "id": "ac-13-bounded-recovery-and-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/db/test_ac_13_cancelled_recovery.py",
+        "tests/integration/db/test_run_03_cancellation_coordinator.py",
+        "tests/integration/db/test_run_03_write_completion.py",
+        "tests/integration/db/test_run_03_retry_cleanup.py",
+        "tests/integration/db/test_orch_06_controlled_read_executor.py",
+        "tests/integration/db/test_run_05_external_action_idempotency.py",
+        "tests/integration/runtime/test_del_05_process_composition.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-active-workflow-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py",
+        "tests/integration/runtime/test_obj_03_catalog_writes.py",
+        "tests/integration/runtime/test_obj_03_local_artifacts.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-source-types",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "mypy",
+        "apps/api/src/marketing_agents"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation",
+        "queued-and-pre-barrier-zero-calls",
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-web-types",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "web-typecheck"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation"
+      ]
+    },
+    {
+      "id": "ac-13-generated-contract",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "api-contract-check"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation"
+      ]
+    },
+    {
+      "id": "ac-13-layer-boundaries",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/verify_architecture_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation",
+        "queued-and-pre-barrier-zero-calls",
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "apps/api/src/marketing_agents",
+        "tests/integration/api/test_ac_13_cancellation_api.py",
+        "tests/integration/db/test_ac_13_cancelled_recovery.py",
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation",
+        "queued-and-pre-barrier-zero-calls",
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    },
+    {
+      "id": "ac-13-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "apps/api/src/marketing_agents",
+        "tests/integration/api/test_ac_13_cancellation_api.py",
+        "tests/integration/db/test_ac_13_cancelled_recovery.py",
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-operator-cancellation",
+        "queued-and-pre-barrier-zero-calls",
+        "inflight-effects-remain-truthful",
+        "cancelled-restart-recovery-without-replay",
+        "recovery-fences-and-integrity"
+      ]
+    }
+  ],
+  "limitations": [
+    "This manifest declares the required gates; successful exact-tree execution and attestation, not the presence of this document, establishes verification. The companion record tracks preflight and final results.",
+    "Composed journeys use freshly migrated/seeded SQLite, public in-process HTTP routes, default composition and original observed workers/adapters. Runtime reconstruction and task cancellation simulate process interruption; they are not OS-kill tests.",
+    "Post-receipt interception awaits a genuine mock receipt before blocking response delivery. The no-receipt case blocks before the real gateway and never releases that call after cancellation; it establishes conservative ambiguity handling, not proof of a real external effect.",
+    "Cancellation-time effect counts are snapshots and may be zero while a receipt already exists but local action success has not committed. Later action/timeline outcomes preserve the actual result without rewriting the original cancellation snapshot.",
+    "Recovery closes only due evidence under cancelled parents. It does not reactivate the workflow, compensate external effects, or provide universal distributed exactly-once delivery. Missing durable WRITE receipts yield outcome unknown even for provider-idempotent connectors.",
+    "Business and audit snapshots exclude worker lease/session bookkeeping. Existing focused fixtures may set up synthetic sealed policies/claims for negative boundary tests; those are distinct from default-runtime acceptance journeys.",
+    "All pytest gates deny Python sockets except local Unix sockets. The API generator enforces its existing offline reference/network boundary. CI remains disabled; no workflow or protected history/evidence policy is changed."
+  ]
+}

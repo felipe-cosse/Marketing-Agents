@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -712,6 +713,7 @@ class ExternalActionDispatcher:
         outcome_unknown: bool = False,
         receipt_reconciled: bool = False,
         pre_call_exhausted: bool = False,
+        audit_context: AuditContext | None = None,
     ) -> ExternalActionDispatchResult | None:
         """Atomically close one dispatch attempt and its exact active WRITE step."""
 
@@ -866,7 +868,9 @@ class ExternalActionDispatcher:
                 "write_completion_step_conflict",
                 "WRITE step changed before its external action outcome was committed",
             )
-        factory = AuditEventFactory(self._dispatch_audit_context(lease_owner, previous))
+        factory = AuditEventFactory(
+            audit_context or self._dispatch_audit_context(lease_owner, previous)
+        )
         if result is not None:
             action_event = (
                 factory.action_receipt_reconciled(previous, completed)
@@ -953,6 +957,42 @@ class ExternalActionDispatcher:
             if recovered is not None:
                 results.append(recovered)
         return tuple(results)
+
+    async def recover_cancelled_action(
+        self,
+        action_id: str,
+        *,
+        audit_context: AuditContext | None = None,
+        recovery_fence: Callable[[UnitOfWork], Awaitable[None]] | None = None,
+    ) -> ExternalActionDispatchResult:
+        """Close one cancelled parent's expired call; never reserve or retry delivery."""
+
+        if audit_context is not None:
+            audit_context.verify_integrity()
+        snapshot = await self._load_required(action_id)
+        if snapshot.state is not ExternalActionState.DISPATCHING:
+            return _terminal_dispatch_result(snapshot)
+        if (
+            snapshot.lease is None
+            or snapshot.call_started_at is None
+            or snapshot.call_deadline_at is None
+        ):
+            raise ExternalActionDispatchError(
+                "recovery_call_authority_invalid", "cancelled recovery requires an existing call"
+            )
+        if self._dependencies.utc_now() < max(snapshot.lease.expires_at, snapshot.call_deadline_at):
+            return ExternalActionDispatchResult(snapshot, DispatchDisposition.RECOVERY_PENDING)
+        result = await self._finalize_terminal_parent_call(
+            snapshot,
+            cancelled_only=True,
+            audit_context=audit_context,
+            recovery_fence=recovery_fence,
+        )
+        if result is None:
+            raise ExternalActionDispatchError(
+                "cancelled_recovery_context_invalid", "cancelled recovery cannot resume execution"
+            )
+        return result
 
     async def recover_action(
         self,
@@ -1095,6 +1135,10 @@ class ExternalActionDispatcher:
     async def _finalize_terminal_parent_call(
         self,
         snapshot: ExternalAction,
+        *,
+        cancelled_only: bool = False,
+        audit_context: AuditContext | None = None,
+        recovery_fence: Callable[[UnitOfWork], Awaitable[None]] | None = None,
     ) -> ExternalActionDispatchResult | None:
         """Close expired call authority under a terminal/cancelled parent without replay."""
 
@@ -1103,6 +1147,8 @@ class ExternalActionDispatcher:
         if snapshot.call_started_at is None or call_deadline_at is None or now < call_deadline_at:
             return None
         async with self._dependencies.unit_of_work() as unit_of_work:
+            if recovery_fence is not None:
+                await recovery_fence(unit_of_work)
             current = await unit_of_work.external_actions.get(snapshot.id)
             if current is None:
                 raise ExternalActionDispatchError(
@@ -1123,6 +1169,16 @@ class ExternalActionDispatcher:
                 raise ExternalActionDispatchError(
                     "execution_control_invalid",
                     "terminal action lacks its exact parent control",
+                )
+            if cancelled_only and (
+                run.state is not RunState.CANCELLED
+                or control.cancel_requested_at is None
+                or control.started_at is None
+                or now < max(lease.expires_at, call_deadline_at)
+            ):
+                raise ExternalActionDispatchError(
+                    "cancelled_recovery_context_invalid",
+                    "cancelled recovery requires an expired call and exact cancelled parent",
                 )
             step = await _sealed_write_step(unit_of_work, current)
             if step.state is not StepState.EXECUTING:
@@ -1175,6 +1231,7 @@ class ExternalActionDispatcher:
                     result=result,
                     occurred_at=now,
                     receipt_reconciled=True,
+                    audit_context=audit_context,
                 )
                 if completed is not None:
                     await unit_of_work.commit()
@@ -1194,6 +1251,7 @@ class ExternalActionDispatcher:
                     occurred_at=now,
                     reason_code=terminal_reason_code,
                     outcome_unknown=True,
+                    audit_context=audit_context,
                 )
                 if completed is not None:
                     await unit_of_work.commit()
