@@ -26,6 +26,7 @@ from marketing_agents.application.services import (
 from marketing_agents.domain.audit import AuditEvent
 from marketing_agents.domain.entities import Schedule, ScheduleClaim
 from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState, TriggerKind, WorkMode
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.domain.schedule_misfire import ScheduleDisposition
 from marketing_agents.domain.schedule_occurrence_identity import SCHEDULE_RECURRENCE_VERSION
 from marketing_agents.infrastructure.db import (
@@ -81,6 +82,13 @@ class IncrementingIds:
 
 
 class MinuteRecurrence:
+    def next_occurrence_after(
+        self, *, cron: str, timezone: str, after_utc: datetime
+    ) -> RecurrenceResult:
+        return RecurrenceResult(
+            scheduled_for_utc=self.next_after(cron=cron, timezone=timezone, after_utc=after_utc)
+        )
+
     def next_after(
         self,
         *,
@@ -144,12 +152,14 @@ class ExpireAtFinalAdvanceScheduleRepository(SQLAlchemyScheduleRepository):
         claim: ScheduleClaim,
         next_run_at_utc: datetime,
         completed_at_utc: datetime,
+        next_recurrence: RecurrenceResult | None = None,
     ) -> Schedule | None:
         del completed_at_utc
         self._probe.uncommitted_counts = await _session_counts(self._probe_session)
         return await super().advance_and_release_claim(
             claim=claim,
             next_run_at_utc=next_run_at_utc,
+            next_recurrence=next_recurrence,
             completed_at_utc=claim.lease_expires_at_utc + timedelta(microseconds=1),
         )
 

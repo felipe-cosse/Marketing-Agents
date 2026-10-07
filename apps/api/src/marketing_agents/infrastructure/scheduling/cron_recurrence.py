@@ -13,6 +13,7 @@ from croniter import (  # type: ignore[import-untyped]
 )
 
 from marketing_agents.application.ports.recurrence import RecurrenceCalculationError
+from marketing_agents.domain.recurrence_resolution import RecurrenceResolution, RecurrenceResult
 from marketing_agents.domain.validation import require_iana_timezone, require_text, require_utc
 
 MAX_WALL_CANDIDATES = 512
@@ -71,7 +72,7 @@ def _resolve_or_advance_nonexistent(
 
 
 class CroniterRecurrenceCalculator:
-    """Calculate from original wall-clock cron and persist only the chosen UTC instant."""
+    """Calculate from original wall-clock cron and preserve any gap resolution."""
 
     def next_after(
         self,
@@ -80,6 +81,17 @@ class CroniterRecurrenceCalculator:
         timezone: str,
         after_utc: datetime,
     ) -> datetime:
+        return self.next_occurrence_after(
+            cron=cron, timezone=timezone, after_utc=after_utc
+        ).scheduled_for_utc
+
+    def next_occurrence_after(
+        self,
+        *,
+        cron: str,
+        timezone: str,
+        after_utc: datetime,
+    ) -> RecurrenceResult:
         try:
             require_utc(after_utc, "schedule calculation boundary")
         except (AttributeError, ValueError) as exc:
@@ -111,7 +123,19 @@ class CroniterRecurrenceCalculator:
                     )
                 scheduled_at_utc = _resolve_or_advance_nonexistent(wall_time, zone)
                 if scheduled_at_utc is not None and scheduled_at_utc > after_utc:
-                    return scheduled_at_utc
+                    resolution = (
+                        RecurrenceResolution(
+                            reason="nonexistent_local_time",
+                            nominal_local=wall_time.isoformat(timespec="microseconds"),
+                            timezone=timezone,
+                            resolved_at_utc=scheduled_at_utc,
+                        )
+                        if _resolve_wall_time(wall_time, zone) is None
+                        else None
+                    )
+                    return RecurrenceResult(
+                        scheduled_for_utc=scheduled_at_utc, resolution=resolution
+                    )
         except RecurrenceCalculationError:
             raise
         except (CroniterBadCronError, CroniterBadDateError, OverflowError, ValueError) as exc:

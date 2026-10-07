@@ -14,6 +14,7 @@ from marketing_agents.application.services import (
 )
 from marketing_agents.domain.entities import Schedule, ScheduleClaim
 from marketing_agents.domain.enums import MisfirePolicy
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.domain.schedule_misfire import (
     MAX_COALESCED_MISSED_OCCURRENCES,
     ScheduleDisposition,
@@ -23,6 +24,17 @@ from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalcula
 
 DUE = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
 RECURRENCE_VERSION = "five-field-cron-adr0008-v1"
+
+
+class _DetailedRecurrence:
+    def next_occurrence_after(
+        self, *, cron: str, timezone: str, after_utc: datetime
+    ) -> RecurrenceResult:
+        return RecurrenceResult(
+            scheduled_for_utc=self.next_after(  # type: ignore[attr-defined]
+                cron=cron, timezone=timezone, after_utc=after_utc
+            )
+        )
 
 
 def _schedule(
@@ -119,7 +131,7 @@ def test_sched_04_exact_grace_boundary_is_on_time_and_processing_delay_is_irrele
 
     near_max_due = datetime.max.replace(tzinfo=UTC) - timedelta(seconds=2)
 
-    class NearMaximumRecurrence:
+    class NearMaximumRecurrence(_DetailedRecurrence):
         def next_after(
             self,
             *,
@@ -153,6 +165,8 @@ def test_sched_04_skip_coalesces_missed_range_without_work_intent() -> None:
         first_missed_at_utc=DUE,
         last_missed_at_utc=DUE + timedelta(minutes=3),
         missed_count=4,
+        next_recurrence=RecurrenceResult(scheduled_for_utc=DUE + timedelta(minutes=4)),
+        recurrence_resolutions=(),
     )
     assert plan.admits_work is False
 
@@ -173,7 +187,7 @@ def test_sched_04_run_once_coalesces_to_one_catch_up_anchored_to_persisted_due()
 
 
 def test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed() -> None:
-    class TrackingMinuteRecurrence:
+    class TrackingMinuteRecurrence(_DetailedRecurrence):
         def __init__(self) -> None:
             self.calls = 0
 
@@ -212,7 +226,7 @@ def test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed() -> None
     assert exhausted.value.code == "misfire_range_exhausted"
     assert exhausted_recurrence.calls == 3
 
-    class BrokenRecurrence:
+    class BrokenRecurrence(_DetailedRecurrence):
         def __init__(self, returned: object) -> None:
             self.returned = returned
 
@@ -241,7 +255,7 @@ def test_sched_04_missed_range_limit_and_broken_recurrence_fail_closed() -> None
             )
         assert broken.value.code == "recurrence_contract_error"
 
-    class RaisingRecurrence:
+    class RaisingRecurrence(_DetailedRecurrence):
         def __init__(self, failure: Exception) -> None:
             self.failure = failure
 

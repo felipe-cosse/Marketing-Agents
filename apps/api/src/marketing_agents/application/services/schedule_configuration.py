@@ -25,6 +25,7 @@ from marketing_agents.domain.instance_configuration import (
     ScheduledInput,
     ScheduledInputAuthority,
 )
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.domain.runtime_policy import payload_fields_within_byte_limit
 from marketing_agents.domain.schedule_occurrence_identity import (
     SCHEDULE_RECURRENCE_VERSION,
@@ -187,28 +188,24 @@ class ScheduleConfigurationService:
                 raise ScheduleConfigurationError("schedule synchronization lost its creation fence")
             return
         next_run = previous.next_run_at_utc
-        if (
-            enabled
-            and parameters is not None
-            and (
-                not previous.enabled
-                or parameters.cron != previous.cron
-                or parameters.timezone != previous.timezone
-            )
+        next_recurrence = previous.next_recurrence
+        if parameters is not None and (
+            (enabled and not previous.enabled)
+            or parameters.cron != previous.cron
+            or parameters.timezone != previous.timezone
         ):
             boundary = max(now, previous.last_scheduled_at_utc or now)
-            next_run = self._recurrence.next_after(
+            next_recurrence = self._calculate_next(
                 cron=parameters.cron,
                 timezone=parameters.timezone,
                 after_utc=boundary,
             )
-            require_utc(next_run, "updated schedule occurrence")
-            if next_run <= boundary:
-                raise ScheduleConfigurationError("schedule recurrence must advance")
+            next_run = next_recurrence.scheduled_for_utc
         replacement = replace(
             previous,
             enabled=enabled,
             next_run_at_utc=next_run,
+            next_recurrence=next_recurrence,
             workflow_id=previous.workflow_id if authority is None else authority.workflow_id,
             cron=previous.cron if parameters is None else parameters.cron,
             timezone=previous.timezone if parameters is None else parameters.timezone,
@@ -228,21 +225,11 @@ class ScheduleConfigurationService:
 
     def create(self, command: CreateScheduleCommand) -> Schedule:
         require_utc(command.after_utc, "schedule calculation boundary")
-        next_run_at_utc = self._recurrence.next_after(
+        next_recurrence = self._calculate_next(
             cron=command.cron,
             timezone=command.timezone,
             after_utc=command.after_utc,
         )
-        try:
-            require_utc(next_run_at_utc, "calculated next scheduled time")
-        except (AttributeError, ValueError) as exc:
-            raise ScheduleConfigurationError(
-                "recurrence calculator returned a non-UTC scheduled time"
-            ) from exc
-        if next_run_at_utc <= command.after_utc:
-            raise ScheduleConfigurationError(
-                "recurrence calculator must return a time strictly after the boundary"
-            )
         return Schedule(
             id=command.id,
             trigger_id=command.trigger_id,
@@ -250,9 +237,31 @@ class ScheduleConfigurationService:
             workflow_id=command.workflow_id,
             cron=command.cron,
             timezone=command.timezone,
-            next_run_at_utc=next_run_at_utc,
+            next_run_at_utc=next_recurrence.scheduled_for_utc,
+            next_recurrence=next_recurrence,
             misfire_policy=command.misfire_policy,
             misfire_grace_seconds=command.misfire_grace_seconds,
             enabled=command.enabled,
             recurrence_version=SCHEDULE_RECURRENCE_VERSION,
         )
+
+    def _calculate_next(self, *, cron: str, timezone: str, after_utc: datetime) -> RecurrenceResult:
+        try:
+            result = self._recurrence.next_occurrence_after(
+                cron=cron, timezone=timezone, after_utc=after_utc
+            )
+            if type(result) is not RecurrenceResult:
+                raise ValueError("recurrence result must be typed")
+            replace(result)
+            require_utc(result.scheduled_for_utc, "calculated next scheduled time")
+            if result.resolution is not None and result.resolution.timezone != timezone:
+                raise ValueError("recurrence resolution identifies another timezone")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ScheduleConfigurationError(
+                "recurrence calculator returned invalid selection evidence"
+            ) from exc
+        if result.scheduled_for_utc <= after_utc:
+            raise ScheduleConfigurationError(
+                "recurrence calculator must return a time strictly after the boundary"
+            )
+        return result

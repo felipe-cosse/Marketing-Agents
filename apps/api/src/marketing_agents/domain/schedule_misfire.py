@@ -6,10 +6,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from marketing_agents.domain.recurrence_resolution import (
+    MAX_RECORDED_RECURRENCE_RESOLUTIONS,
+    RecurrenceResolution,
+    RecurrenceResult,
+    validate_recurrence_range,
+)
 from marketing_agents.domain.validation import require_id, require_text, require_utc
 
 MAX_MISFIRE_GRACE_SECONDS = 86_400
-MAX_COALESCED_MISSED_OCCURRENCES = 10_000
+MAX_COALESCED_MISSED_OCCURRENCES = MAX_RECORDED_RECURRENCE_RESOLUTIONS
 
 
 class ScheduleDisposition(StrEnum):
@@ -32,6 +38,9 @@ class ScheduleOccurrencePlan:
     first_missed_at_utc: datetime | None = None
     last_missed_at_utc: datetime | None = None
     missed_count: int | None = None
+    scheduled_recurrence: RecurrenceResult | None = None
+    next_recurrence: RecurrenceResult | None = None
+    recurrence_resolutions: tuple[RecurrenceResolution, ...] | None = None
 
     def __post_init__(self) -> None:
         require_id(self.schedule_id, "misfire plan schedule ID")
@@ -43,6 +52,15 @@ class ScheduleOccurrencePlan:
         require_utc(self.next_run_at_utc, "misfire plan next scheduled time")
         if self.next_run_at_utc <= self.scheduled_for_utc:
             raise ValueError("misfire plan next scheduled time must follow the original due time")
+
+        validate_recurrence_range(
+            scheduled_for_utc=self.scheduled_for_utc,
+            scheduled_recurrence=self.scheduled_recurrence,
+            next_recurrence=self.next_recurrence,
+            recurrence_resolutions=self.recurrence_resolutions,
+            last_missed_at_utc=self.last_missed_at_utc,
+            next_run_at_utc=self.next_run_at_utc,
+        )
 
         missed_values = (
             self.first_missed_at_utc,

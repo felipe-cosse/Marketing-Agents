@@ -9,6 +9,11 @@ from marketing_agents.domain.enums import (
     MisfirePolicy,
     OccurrenceState,
 )
+from marketing_agents.domain.recurrence_resolution import (
+    RecurrenceResolution,
+    RecurrenceResult,
+    validate_recurrence_range,
+)
 from marketing_agents.domain.schedule_misfire import (
     MAX_COALESCED_MISSED_OCCURRENCES,
     MAX_MISFIRE_GRACE_SECONDS,
@@ -37,6 +42,7 @@ class Schedule:
     version: int = 1
     last_scheduled_at_utc: datetime | None = None
     configuration_revision: int | None = None
+    next_recurrence: RecurrenceResult | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -53,6 +59,16 @@ class Schedule:
             raise ValueError("schedule cron must contain exactly five fields")
         require_iana_timezone(self.timezone, "schedule timezone")
         require_utc(self.next_run_at_utc, "next scheduled UTC time")
+        if self.next_recurrence is not None:
+            if type(self.next_recurrence) is not RecurrenceResult:
+                raise ValueError("next recurrence selection must be typed")
+            if self.next_recurrence.scheduled_for_utc != self.next_run_at_utc:
+                raise ValueError("next recurrence selection must match its UTC projection")
+            if (
+                self.next_recurrence.resolution is not None
+                and self.next_recurrence.resolution.timezone != self.timezone
+            ):
+                raise ValueError("next recurrence selection must preserve its original timezone")
         if type(self.misfire_policy) is not MisfirePolicy:
             raise ValueError("schedule misfire policy must be supported")
         if (
@@ -120,6 +136,9 @@ class ScheduleOccurrence:
     first_missed_at_utc: datetime | None = None
     last_missed_at_utc: datetime | None = None
     missed_count: int | None = None
+    scheduled_recurrence: RecurrenceResult | None = None
+    next_recurrence: RecurrenceResult | None = None
+    recurrence_resolutions: tuple[RecurrenceResolution, ...] | None = None
 
     def __post_init__(self) -> None:
         require_id(self.id, "occurrence ID")
@@ -166,6 +185,16 @@ class ScheduleOccurrence:
         linked_states = (OccurrenceState.ENQUEUED, OccurrenceState.COMPLETED)
         if (self.state in linked_states) != (self.work_item_id is not None):
             raise ValueError("occurrence state and WorkItem/Run links disagree")
+
+        validate_recurrence_range(
+            scheduled_for_utc=self.scheduled_for_utc,
+            scheduled_recurrence=self.scheduled_recurrence,
+            next_recurrence=self.next_recurrence,
+            recurrence_resolutions=self.recurrence_resolutions,
+            last_missed_at_utc=self.last_missed_at_utc,
+            timezone=self.timezone,
+            allow_pending_only=True,
+        )
 
         misfire_facts = (
             self.misfire_policy_applied,

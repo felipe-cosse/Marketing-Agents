@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -95,6 +96,7 @@ class ScheduleRecord(Base):
     timezone_name: Mapped[str] = mapped_column(String(100), nullable=False)
     recurrence_version: Mapped[str] = mapped_column(String(64), nullable=False)
     next_run_at_utc: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    next_recurrence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_scheduled_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     misfire_policy: Mapped[str] = mapped_column(String(16), nullable=False)
     misfire_grace_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -229,6 +231,9 @@ class ScheduleOccurrenceRecord(Base):
     timezone_fold: Mapped[int] = mapped_column(Integer, nullable=False)
     recurrence_version: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
+    scheduled_recurrence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_recurrence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recurrence_resolutions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     misfire_policy_applied: Mapped[str | None] = mapped_column(String(16), nullable=True)
     misfire_grace_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     misfire_evaluated_at_utc: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

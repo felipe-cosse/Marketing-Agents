@@ -33,6 +33,7 @@ from marketing_agents.domain.enums import (
     TriggerKind,
     WorkMode,
 )
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.domain.schedule_occurrence_identity import (
     SCHEDULE_RECURRENCE_VERSION,
     schedule_occurrence_id,
@@ -99,6 +100,13 @@ class ForbiddenIds:
 
 
 class MinuteRecurrence:
+    def next_occurrence_after(
+        self, *, cron: str, timezone: str, after_utc: datetime
+    ) -> RecurrenceResult:
+        return RecurrenceResult(
+            scheduled_for_utc=self.next_after(cron=cron, timezone=timezone, after_utc=after_utc)
+        )
+
     def next_after(
         self,
         *,

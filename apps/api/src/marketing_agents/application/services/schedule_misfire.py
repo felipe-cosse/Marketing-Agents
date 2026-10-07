@@ -10,6 +10,7 @@ from marketing_agents.application.ports.recurrence import (
 )
 from marketing_agents.domain.entities import Schedule, ScheduleClaim
 from marketing_agents.domain.enums import MisfirePolicy
+from marketing_agents.domain.recurrence_resolution import RecurrenceResolution, RecurrenceResult
 from marketing_agents.domain.schedule_misfire import (
     MAX_COALESCED_MISSED_OCCURRENCES as MAX_COALESCED_MISSED_OCCURRENCES,
 )
@@ -47,13 +48,20 @@ class ScheduleMisfirePlanner:
         *,
         schedule: Schedule,
         claim: ScheduleClaim,
+        record_resolution: bool = True,
     ) -> ScheduleOccurrencePlan:
         if type(schedule) is not Schedule or type(claim) is not ScheduleClaim:
             raise ScheduleMisfireError(
                 "misfire_input_invalid",
                 "misfire planning requires one exact Schedule and ScheduleClaim",
             )
+        if type(record_resolution) is not bool:
+            raise ValueError("recording recurrence resolution must be boolean")
         self._validate_claim_snapshot(schedule, claim)
+        scheduled_recurrence = schedule.next_recurrence if record_resolution else None
+        resolutions: list[RecurrenceResolution] = []
+        if scheduled_recurrence is not None and scheduled_recurrence.resolution is not None:
+            resolutions.append(scheduled_recurrence.resolution)
 
         try:
             lateness = claim.claimed_at_utc - claim.scheduled_for_utc
@@ -64,24 +72,30 @@ class ScheduleMisfirePlanner:
             ) from exc
 
         if lateness <= timedelta(seconds=schedule.misfire_grace_seconds):
+            next_at, next_recurrence = self._next_selection(
+                schedule=schedule,
+                after_utc=claim.scheduled_for_utc,
+                record_resolution=record_resolution,
+            )
             return ScheduleOccurrencePlan(
                 schedule_id=schedule.id,
                 scheduled_for_utc=claim.scheduled_for_utc,
                 recurrence_version=schedule.recurrence_version,
                 disposition=ScheduleDisposition.ON_TIME,
-                next_run_at_utc=self._next_after(
-                    schedule=schedule,
-                    after_utc=claim.scheduled_for_utc,
-                ),
+                next_run_at_utc=next_at,
+                scheduled_recurrence=scheduled_recurrence,
+                next_recurrence=next_recurrence,
+                recurrence_resolutions=tuple(resolutions) if record_resolution else None,
             )
 
         first_missed_at_utc = claim.scheduled_for_utc
         last_missed_at_utc = first_missed_at_utc
         missed_count = 1
         for _ in range(self._max_coalesced_occurrences):
-            candidate = self._next_after(
+            candidate, next_recurrence = self._next_selection(
                 schedule=schedule,
                 after_utc=last_missed_at_utc,
+                record_resolution=record_resolution,
             )
             if candidate > claim.claimed_at_utc:
                 disposition = (
@@ -98,6 +112,9 @@ class ScheduleMisfirePlanner:
                     first_missed_at_utc=first_missed_at_utc,
                     last_missed_at_utc=last_missed_at_utc,
                     missed_count=missed_count,
+                    scheduled_recurrence=scheduled_recurrence,
+                    next_recurrence=next_recurrence,
+                    recurrence_resolutions=tuple(resolutions) if record_resolution else None,
                 )
             if missed_count == self._max_coalesced_occurrences:
                 raise ScheduleMisfireError(
@@ -106,6 +123,8 @@ class ScheduleMisfirePlanner:
                 )
             last_missed_at_utc = candidate
             missed_count += 1
+            if next_recurrence is not None and next_recurrence.resolution is not None:
+                resolutions.append(next_recurrence.resolution)
 
         raise ScheduleMisfireError(
             "misfire_range_exhausted",
@@ -140,18 +159,33 @@ class ScheduleMisfirePlanner:
             if not matches:
                 raise ScheduleMisfireError(code, message)
 
-    def _next_after(
+    def _next_selection(
         self,
         *,
         schedule: Schedule,
         after_utc: datetime,
-    ) -> datetime:
+        record_resolution: bool,
+    ) -> tuple[datetime, RecurrenceResult | None]:
         try:
-            candidate = self._recurrence.next_after(
-                cron=schedule.cron,
-                timezone=schedule.timezone,
-                after_utc=after_utc,
-            )
+            result = None
+            if record_resolution:
+                result = self._recurrence.next_occurrence_after(
+                    cron=schedule.cron, timezone=schedule.timezone, after_utc=after_utc
+                )
+                if type(result) is not RecurrenceResult:
+                    raise ValueError("recurrence result must be typed")
+                if (
+                    result.resolution is not None
+                    and result.resolution.timezone != schedule.timezone
+                ):
+                    raise ValueError("recurrence result changed its original timezone")
+                candidate = result.scheduled_for_utc
+            else:
+                candidate = self._recurrence.next_after(
+                    cron=schedule.cron,
+                    timezone=schedule.timezone,
+                    after_utc=after_utc,
+                )
         except RecurrenceCalculationError as exc:
             raise ScheduleMisfireError(
                 "recurrence_calculation_failed",
@@ -174,4 +208,4 @@ class ScheduleMisfirePlanner:
                 "recurrence_contract_error",
                 "schedule recurrence must advance strictly beyond its boundary",
             )
-        return candidate
+        return candidate, result

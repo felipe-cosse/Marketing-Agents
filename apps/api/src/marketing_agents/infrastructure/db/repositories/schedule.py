@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -22,6 +23,13 @@ from marketing_agents.application.ports.repositories import (
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Schedule, ScheduleClaim, ScheduleOccurrence
 from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState
+from marketing_agents.domain.recurrence_resolution import (
+    RecurrenceResult,
+    recurrence_resolutions_from_list,
+    recurrence_resolutions_to_list,
+    recurrence_result_from_dict,
+    recurrence_result_to_dict,
+)
 from marketing_agents.domain.schedule_occurrence_identity import (
     SCHEDULE_OCCURRENCE_ID_SCHEME,
 )
@@ -34,6 +42,7 @@ from marketing_agents.infrastructure.db.models.schedule import (
 
 _SCHEDULE_INTEGRITY_DOMAIN = b"marketing-agents:schedule:persistence:v1\x00"
 _OCCURRENCE_INTEGRITY_DOMAIN = b"marketing-agents:schedule-occurrence:persistence:v1\x00"
+_MAX_RECURRENCE_SNAPSHOT_BYTES = 4 * 1024 * 1024
 
 
 class SchedulePersistenceConflict(ScheduleRepositoryConflict):
@@ -46,6 +55,35 @@ def _timestamp_material(value: datetime) -> str:
 
 def _optional_timestamp_material(value: datetime | None) -> str | None:
     return None if value is None else _timestamp_material(value)
+
+
+def _snapshot_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    payload = canonical_json_bytes(value)
+    if len(payload) > _MAX_RECURRENCE_SNAPSHOT_BYTES:
+        raise ValueError("recurrence snapshot exceeds the persistence byte limit")
+    return payload.decode("utf-8")
+
+
+def _snapshot_value(raw: str) -> Any:
+    if type(raw) is not str or len(raw.encode("utf-8")) > _MAX_RECURRENCE_SNAPSHOT_BYTES:
+        raise ValueError("persisted recurrence snapshot is not bounded text")
+    try:
+        value = json.loads(raw)
+        if _snapshot_json(value) != raw:
+            raise ValueError("persisted recurrence snapshot is not canonical JSON")
+        return value
+    except RecursionError as exc:
+        raise ValueError("persisted recurrence snapshot exceeds the nesting limit") from exc
+
+
+def _result_material(result: RecurrenceResult | None) -> dict[str, Any] | None:
+    return None if result is None else recurrence_result_to_dict(result)
+
+
+def _result_from_json(raw: str | None) -> RecurrenceResult | None:
+    return None if raw is None else recurrence_result_from_dict(_snapshot_value(raw))
 
 
 def _integrity_material(
@@ -67,8 +105,9 @@ def _integrity_material(
     lease_claimed_at_utc: datetime | None,
     lease_expires_at_utc: datetime | None,
     configuration_revision: int | None = None,
+    next_recurrence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    material = {
+    material: dict[str, Any] = {
         "id": schedule_id,
         "trigger_id": trigger_id,
         "instance_id": instance_id,
@@ -88,6 +127,8 @@ def _integrity_material(
     }
     if configuration_revision is not None:
         material["configuration_revision"] = configuration_revision
+    if next_recurrence is not None:
+        material["next_recurrence"] = next_recurrence
     return material
 
 
@@ -106,6 +147,7 @@ def _schedule_material(schedule: Schedule) -> dict[str, Any]:
         timezone_name=schedule.timezone,
         recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
+        next_recurrence=_result_material(schedule.next_recurrence),
         last_scheduled_at_utc=schedule.last_scheduled_at_utc,
         misfire_policy=schedule.misfire_policy.value,
         misfire_grace_seconds=schedule.misfire_grace_seconds,
@@ -128,6 +170,7 @@ def _record_material(record: ScheduleRecord) -> dict[str, Any]:
         timezone_name=record.timezone_name,
         recurrence_version=record.recurrence_version,
         next_run_at_utc=record.next_run_at_utc,
+        next_recurrence=_result_material(_result_from_json(record.next_recurrence_json)),
         last_scheduled_at_utc=record.last_scheduled_at_utc,
         misfire_policy=record.misfire_policy,
         misfire_grace_seconds=record.misfire_grace_seconds,
@@ -163,6 +206,7 @@ def _to_record(schedule: Schedule) -> ScheduleRecord:
         timezone_name=schedule.timezone,
         recurrence_version=schedule.recurrence_version,
         next_run_at_utc=schedule.next_run_at_utc,
+        next_recurrence_json=_snapshot_json(_result_material(schedule.next_recurrence)),
         last_scheduled_at_utc=None,
         misfire_policy=schedule.misfire_policy.value,
         misfire_grace_seconds=schedule.misfire_grace_seconds,
@@ -227,6 +271,7 @@ def _to_domain(record: ScheduleRecord) -> Schedule:
             cron=record.cron_expression,
             timezone=record.timezone_name,
             next_run_at_utc=record.next_run_at_utc,
+            next_recurrence=_result_from_json(record.next_recurrence_json),
             last_scheduled_at_utc=record.last_scheduled_at_utc,
             misfire_policy=MisfirePolicy(record.misfire_policy),
             misfire_grace_seconds=record.misfire_grace_seconds,
@@ -260,6 +305,7 @@ def _creation_facts(schedule: Schedule) -> tuple[Any, ...]:
         schedule.misfire_grace_seconds,
         schedule.enabled,
         schedule.configuration_revision,
+        schedule.next_recurrence,
     )
 
 
@@ -282,8 +328,11 @@ def _occurrence_material(
     first_missed_at_utc: datetime | None,
     last_missed_at_utc: datetime | None,
     missed_count: int | None,
+    scheduled_recurrence: dict[str, Any] | None = None,
+    next_recurrence: dict[str, Any] | None = None,
+    recurrence_resolutions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    material = {
         "id": occurrence_id,
         "identity_scheme": identity_scheme,
         "schedule_id": schedule_id,
@@ -302,6 +351,14 @@ def _occurrence_material(
         "last_missed_at_utc": _optional_timestamp_material(last_missed_at_utc),
         "missed_count": missed_count,
     }
+    for name, value in (
+        ("scheduled_recurrence", scheduled_recurrence),
+        ("next_recurrence", next_recurrence),
+        ("recurrence_resolutions", recurrence_resolutions),
+    ):
+        if value is not None:
+            material[name] = value
+    return material
 
 
 def _occurrence_digest(material: dict[str, Any]) -> str:
@@ -331,6 +388,13 @@ def _occurrence_domain_material(occurrence: ScheduleOccurrence) -> dict[str, Any
         first_missed_at_utc=occurrence.first_missed_at_utc,
         last_missed_at_utc=occurrence.last_missed_at_utc,
         missed_count=occurrence.missed_count,
+        scheduled_recurrence=_result_material(occurrence.scheduled_recurrence),
+        next_recurrence=_result_material(occurrence.next_recurrence),
+        recurrence_resolutions=(
+            None
+            if occurrence.recurrence_resolutions is None
+            else recurrence_resolutions_to_list(occurrence.recurrence_resolutions)
+        ),
     )
 
 
@@ -353,6 +417,17 @@ def _occurrence_record_material(record: ScheduleOccurrenceRecord) -> dict[str, A
         first_missed_at_utc=record.first_missed_at_utc,
         last_missed_at_utc=record.last_missed_at_utc,
         missed_count=record.missed_count,
+        scheduled_recurrence=_result_material(_result_from_json(record.scheduled_recurrence_json)),
+        next_recurrence=_result_material(_result_from_json(record.next_recurrence_json)),
+        recurrence_resolutions=(
+            None
+            if record.recurrence_resolutions_json is None
+            else recurrence_resolutions_to_list(
+                recurrence_resolutions_from_list(
+                    _snapshot_value(record.recurrence_resolutions_json)
+                )
+            )
+        ),
     )
 
 
@@ -373,6 +448,9 @@ def _occurrence_to_record(occurrence: ScheduleOccurrence) -> ScheduleOccurrenceR
         timezone_fold=occurrence.timezone_fold,
         recurrence_version=occurrence.recurrence_version,
         state=occurrence.state.value,
+        scheduled_recurrence_json=_snapshot_json(material.get("scheduled_recurrence")),
+        next_recurrence_json=_snapshot_json(material.get("next_recurrence")),
+        recurrence_resolutions_json=_snapshot_json(material.get("recurrence_resolutions")),
         misfire_policy_applied=(
             None
             if occurrence.misfire_policy_applied is None
@@ -426,6 +504,15 @@ def _occurrence_to_domain(record: ScheduleOccurrenceRecord) -> ScheduleOccurrenc
             first_missed_at_utc=record.first_missed_at_utc,
             last_missed_at_utc=record.last_missed_at_utc,
             missed_count=record.missed_count,
+            scheduled_recurrence=_result_from_json(record.scheduled_recurrence_json),
+            next_recurrence=_result_from_json(record.next_recurrence_json),
+            recurrence_resolutions=(
+                None
+                if record.recurrence_resolutions_json is None
+                else recurrence_resolutions_from_list(
+                    _snapshot_value(record.recurrence_resolutions_json)
+                )
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise SchedulePersistenceConflict(
@@ -449,6 +536,9 @@ def _occurrence_identity_facts(occurrence: ScheduleOccurrence) -> tuple[Any, ...
         occurrence.first_missed_at_utc,
         occurrence.last_missed_at_utc,
         occurrence.missed_count,
+        occurrence.scheduled_recurrence,
+        occurrence.next_recurrence,
+        occurrence.recurrence_resolutions,
     )
 
 
@@ -494,6 +584,11 @@ class SQLAlchemyScheduleRepository:
         )
         if current is None or _to_domain(current) != previous:
             return False
+        if previous.next_recurrence is not None and replacement.next_recurrence is None:
+            raise SchedulePersistenceConflict(
+                "schedule_recurrence_missing",
+                "recorded recurrence evidence cannot become legacy unknown",
+            )
         statement = (
             update(ScheduleRecord)
             .where(
@@ -509,6 +604,7 @@ class SQLAlchemyScheduleRepository:
                 misfire_grace_seconds=replacement.misfire_grace_seconds,
                 enabled=replacement.enabled,
                 next_run_at_utc=replacement.next_run_at_utc,
+                next_recurrence_json=_snapshot_json(_result_material(replacement.next_recurrence)),
                 configuration_revision=replacement.configuration_revision,
                 version=replacement.version,
                 lease_owner=None,
@@ -710,6 +806,7 @@ class SQLAlchemyScheduleRepository:
                 timezone_name=current.timezone_name,
                 recurrence_version=current.recurrence_version,
                 next_run_at_utc=current.next_run_at_utc,
+                next_recurrence=_result_material(_result_from_json(current.next_recurrence_json)),
                 last_scheduled_at_utc=current.last_scheduled_at_utc,
                 misfire_policy=current.misfire_policy,
                 misfire_grace_seconds=current.misfire_grace_seconds,
@@ -782,6 +879,7 @@ class SQLAlchemyScheduleRepository:
         *,
         next_run_at_utc: datetime,
         completed_at_utc: datetime,
+        next_recurrence: RecurrenceResult | None = None,
     ) -> Schedule | None:
         """Atomically persist the next occurrence and release one exact live claim."""
 
@@ -791,6 +889,11 @@ class SQLAlchemyScheduleRepository:
         require_utc(completed_at_utc, "schedule processing completion time")
         if next_run_at_utc <= claim.scheduled_for_utc:
             raise ValueError("next scheduled UTC time must follow the completed occurrence")
+        if next_recurrence is not None and (
+            type(next_recurrence) is not RecurrenceResult
+            or next_recurrence.scheduled_for_utc != next_run_at_utc
+        ):
+            raise ValueError("next recurrence must describe the exact next scheduled UTC time")
         if completed_at_utc < claim.claimed_at_utc or claim.lease_expires_at_utc < completed_at_utc:
             return None
 
@@ -802,12 +905,26 @@ class SQLAlchemyScheduleRepository:
         current = (await self._session.execute(current_statement)).scalar_one_or_none()
         if current is None:
             return None
-        _to_domain(current)
+        current_schedule = _to_domain(current)
         if _claim_from_record(current) != claim:
             return None
+        if current_schedule.next_recurrence is not None and next_recurrence is None:
+            raise SchedulePersistenceConflict(
+                "schedule_recurrence_missing",
+                "recorded recurrence evidence cannot become legacy unknown",
+            )
 
         expected_digest = current.integrity_digest
         new_version = claim.version + 1
+        # Validate contextual projection facts before the conditional write; a
+        # typed result alone cannot establish the schedule's original timezone.
+        replace(
+            current_schedule,
+            next_run_at_utc=next_run_at_utc,
+            next_recurrence=next_recurrence,
+            last_scheduled_at_utc=claim.scheduled_for_utc,
+            version=new_version,
+        )
         new_digest = _integrity_digest(
             _integrity_material(
                 schedule_id=current.id,
@@ -819,6 +936,7 @@ class SQLAlchemyScheduleRepository:
                 timezone_name=current.timezone_name,
                 recurrence_version=current.recurrence_version,
                 next_run_at_utc=next_run_at_utc,
+                next_recurrence=_result_material(next_recurrence),
                 last_scheduled_at_utc=claim.scheduled_for_utc,
                 misfire_policy=current.misfire_policy,
                 misfire_grace_seconds=current.misfire_grace_seconds,
@@ -847,6 +965,7 @@ class SQLAlchemyScheduleRepository:
             .values(
                 last_scheduled_at_utc=claim.scheduled_for_utc,
                 next_run_at_utc=next_run_at_utc,
+                next_recurrence_json=_snapshot_json(_result_material(next_recurrence)),
                 lease_owner=None,
                 lease_claimed_at_utc=None,
                 lease_expires_at_utc=None,

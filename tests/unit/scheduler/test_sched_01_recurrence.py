@@ -13,6 +13,7 @@ from marketing_agents.application.services.schedule_configuration import (
     ScheduleConfigurationService,
 )
 from marketing_agents.domain.enums import MisfirePolicy
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
 
 
@@ -109,6 +110,17 @@ def test_sched_01_service_rejects_nonfuture_or_nonutc_adapter_results(
     returned: datetime,
 ) -> None:
     class BrokenCalculator:
+        def next_occurrence_after(
+            self,
+            *,
+            cron: str,
+            timezone: str,
+            after_utc: datetime,
+        ) -> RecurrenceResult:
+            return RecurrenceResult(
+                scheduled_for_utc=self.next_after(cron=cron, timezone=timezone, after_utc=after_utc)
+            )
+
         def next_after(
             self,
             *,

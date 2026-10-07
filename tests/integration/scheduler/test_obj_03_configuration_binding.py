@@ -56,7 +56,7 @@ from marketing_agents.infrastructure.db import (
     WorkItemRecord,
     create_database_runtime,
 )
-from marketing_agents.infrastructure.db.migrations import upgrade_database
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION, upgrade_database
 from marketing_agents.infrastructure.db.repositories.instance_configuration import (
     _to_record as config_record,
 )
@@ -421,7 +421,13 @@ async def test_obj_03_bound_due_filter_prevents_legacy_schedule_starvation(insta
     database, service, _, _, clock, dependencies = installation
     await save(service)
     bound = await schedule_of(database)
-    legacy = replace(bound, id="schedule.legacy", configuration_revision=None, next_run_at_utc=NOW)
+    legacy = replace(
+        bound,
+        id="schedule.legacy",
+        configuration_revision=None,
+        next_run_at_utc=NOW,
+        next_recurrence=None,
+    )
     async with dependencies.unit_of_work() as uow:
         assert (await uow.schedules.add_or_get(legacy)).inserted
         await uow.commit()
@@ -468,6 +474,12 @@ async def test_obj_03_migration_preserves_legacy_configuration_and_schedule_inte
             ("agent_instance_configs", config_record(legacy_configuration)),
             ("schedules", schedule_record(legacy_schedule)),
         )
+        before = {}
+
+        def reflected_rows(sync, table_name):
+            table = Table(table_name, MetaData(), autoload_with=sync)
+            return tuple(dict(row) for row in sync.execute(select(table)).mappings())
+
         async with database.engine.begin() as connection:
             for name, record in old_records:
 
@@ -480,7 +492,26 @@ async def test_obj_03_migration_preserves_legacy_configuration_and_schedule_inte
                     )
 
                 await connection.run_sync(insert_legacy)
+                before[name] = await connection.run_sync(reflected_rows, name)
+                assert len(before[name]) == 1
+                assert before[name][0]["integrity_digest"] == record.integrity_digest
+        # Preserve the original historical migration boundary. Current ORM
+        # metadata includes 0009 columns and cannot hydrate the 0007 schema.
         assert await upgrade_database(database, "0007") == "0007"
+        async with database.engine.connect() as connection:
+            for name, added_column in (
+                ("agent_instance_configs", "scheduled_input_json"),
+                ("schedules", "configuration_revision"),
+            ):
+                assert added_column not in before[name][0]
+                after = await connection.run_sync(reflected_rows, name)
+                assert after == tuple({**row, added_column: None} for row in before[name])
+                assert after[0]["integrity_digest"] == before[name][0]["integrity_digest"]
+            schedules_at_0007 = await connection.run_sync(reflected_rows, "schedules")
+            assert "next_recurrence_json" not in schedules_at_0007[0]
+        # Only after proving exact 0006→0007 preservation may current repositories
+        # hydrate the legacy rows through the complete additive migration chain.
+        assert await upgrade_database(database) == HEAD_REVISION
         async with _factory(database)() as uow:
             assert await uow.configurations.get(TARGET) == legacy_configuration
             assert await uow.schedules.get(legacy_schedule.id) == legacy_schedule
