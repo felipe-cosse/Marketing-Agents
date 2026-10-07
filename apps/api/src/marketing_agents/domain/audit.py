@@ -12,6 +12,7 @@ from typing import Any
 
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
+from marketing_agents.domain.recurrence_audit import validate_recurrence_audit_context
 from marketing_agents.domain.validation import (
     frozen_json_mapping,
     require_id,
@@ -517,6 +518,10 @@ _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
     "runtime.control_denied": frozenset({"denial_code", "operation_key"}),
 }
 _EVENT_OPTIONAL_METADATA: Mapping[str, frozenset[str]] = {
+    "schedule.occurrence_created": frozenset({"recurrence_resolution"}),
+    "schedule.misfire_skipped": frozenset({"recurrence_resolution"}),
+    "schedule.misfire_run_once": frozenset({"recurrence_resolution"}),
+    "schedule.next_occurrence_persisted": frozenset({"recurrence_resolution"}),
     "attempt.completed": frozenset({"safe_error_code"}),
     "run.transitioned": frozenset({"terminal_failure_origin"}),
     "runtime.control_denied": frozenset({"retry_after_seconds"}),
@@ -1791,6 +1796,18 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
                 or (metadata["missed_count"] == 1) != (last_missed_at_utc == first_missed_at_utc)
             ):
                 raise ValueError("schedule misfire audit range is inconsistent")
+        if "recurrence_resolution" in metadata:
+            validate_recurrence_audit_context(
+                metadata["recurrence_resolution"],
+                scheduled_for_utc=scheduled_for_utc,
+                next_run_at_utc=next_run_at_utc,
+                last_missed_at_utc=(
+                    scheduled_for_utc
+                    if draft.event_type == "schedule.occurrence_created"
+                    else last_missed_at_utc
+                ),
+                missed_count=metadata.get("missed_count", 1),
+            )
     elif draft.event_type == "schedule.next_occurrence_persisted":
         if metadata["occurrence_id"] != draft.occurrence_id:
             raise ValueError("schedule advancement audit occurrence identity does not match")
@@ -1804,6 +1821,16 @@ def _validate_event_semantics(draft: AuditEventDraft) -> None:
             or next_run_at_utc <= last_scheduled_at_utc
         ):
             raise ValueError("schedule advancement audit projection is inconsistent")
+        if "recurrence_resolution" in metadata:
+            validate_recurrence_audit_context(
+                metadata["recurrence_resolution"],
+                scheduled_for_utc=previous_next_run_at_utc,
+                next_run_at_utc=next_run_at_utc,
+                last_missed_at_utc=(
+                    previous_next_run_at_utc if metadata["disposition"] == "on_time" else None
+                ),
+                missed_count=1 if metadata["disposition"] == "on_time" else None,
+            )
     if draft.event_type == "runtime.control_denied":
         if draft.run_id is None:  # pragma: no cover - rejected by the draft shape
             raise AssertionError("runtime-control audit Run identity disappeared")

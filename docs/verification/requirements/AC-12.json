@@ -1,0 +1,275 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-12",
+  "matrix_statement_sha256": "8c28ac63a79ec2e6833277edbb6e1929b80dc07eb7e199e62ac1568889b13155",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/application/ports/recurrence.py",
+      "apps/api/src/marketing_agents/application/ports/repositories.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/schedule_configuration.py",
+      "apps/api/src/marketing_agents/application/services/schedule_misfire.py",
+      "apps/api/src/marketing_agents/application/services/schedule_occurrence_ingress.py",
+      "apps/api/src/marketing_agents/application/services/schedule_processing.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/domain/entities/control.py",
+      "apps/api/src/marketing_agents/domain/recurrence_audit.py",
+      "apps/api/src/marketing_agents/domain/recurrence_resolution.py",
+      "apps/api/src/marketing_agents/domain/schedule_misfire.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0009_recurrence_resolution_snapshots.py",
+      "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/scheduling/cron_recurrence.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/AC-12.json",
+      "docs/verification/requirements/AC-12.md",
+      "tests/acceptance/test_ac_12_scheduler_recovery.py",
+      "tests/integration/db/test_ac_12_recurrence_persistence.py",
+      "tests/integration/db/test_del_04_migrations.py",
+      "tests/integration/db/test_obj_03_artifact_migration.py",
+      "tests/integration/scheduler/test_ac_12_resolution_replay.py",
+      "tests/integration/scheduler/test_obj_03_configuration_binding.py",
+      "tests/integration/scheduler/test_sched_05_occurrence_transaction.py",
+      "tests/integration/scheduler/test_sched_06_restart_recovery.py",
+      "tests/unit/scheduler/test_ac_12_recurrence_audit.py",
+      "tests/unit/scheduler/test_ac_12_recurrence_resolution.py",
+      "tests/unit/scheduler/test_sched_01_recurrence.py",
+      "tests/unit/scheduler/test_sched_04_misfire.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_12_scheduler_recovery.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/db/test_ac_12_recurrence_persistence.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/domain/recurrence_resolution.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "configured-dst-race-and-restart",
+      "type": "journey",
+      "statement": "Public configuration, independently reconstructed default runtimes and real workers preserve spring-gap and first-fold selections; two genuine due scans race to one occurrence/work/run and one post-restart model artifact with no connector calls. Public audits agree with the durable calendar evidence.",
+      "test_refs": [
+        "tests/acceptance/test_ac_12_scheduler_recovery.py"
+      ]
+    },
+    {
+      "id": "abandoned-claim-misfire-recovery",
+      "type": "journey",
+      "statement": "A genuinely committed abandoned claim remains fenced through exact expiry. Reconstructed default workers race after expiry: skip creates no work; run_once creates one original-due work/run, preserving the three-occurrence range and its interior spring-gap adjustment without a backlog burst.",
+      "test_refs": [
+        "tests/acceptance/test_ac_12_scheduler_recovery.py",
+        "tests/integration/scheduler/test_ac_12_resolution_replay.py"
+      ]
+    },
+    {
+      "id": "durable-resolution-integrity",
+      "type": "positive",
+      "statement": "Typed pending, due, next and coalesced adjustment evidence survives additive migration, claims, CAS, rollback and reconstruction. Historical NULL snapshots and digests remain unchanged; canonical snapshot tampering, replay mismatches and recorded-to-NULL downgrade fail closed. Bounded audit summaries bind full adjustment lists without retaining business input.",
+      "test_refs": [
+        "tests/integration/db/test_ac_12_recurrence_persistence.py",
+        "tests/unit/scheduler/test_ac_12_recurrence_resolution.py",
+        "tests/unit/scheduler/test_ac_12_recurrence_audit.py",
+        "tests/integration/scheduler/test_ac_12_resolution_replay.py"
+      ]
+    },
+    {
+      "id": "configuration-and-existing-fences-preserved",
+      "type": "positive",
+      "statement": "Disabled schedule edits recompute changed cron/timezone evidence while disable-only preserves its pending snapshot. Existing UTC, claim, rollback, replay, configuration, migration and audit safety contracts remain enforced.",
+      "test_refs": [
+        "tests/acceptance/test_ac_12_scheduler_recovery.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-12-composed-scheduler-recovery",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_12_scheduler_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-recurrence-storage-and-scheduler",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/scheduler",
+        "tests/integration/scheduler",
+        "tests/integration/runtime/test_obj_03_scheduler_liveness.py",
+        "tests/integration/db/test_ac_12_recurrence_persistence.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/db/test_obj_03_artifact_migration.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-audit-and-configuration",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/integration/db/test_api_07_audit_feed.py",
+        "tests/integration/api/test_api_03_instance_configuration.py",
+        "tests/integration/db/test_api_03_instance_configuration_persistence.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-source-types",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "mypy",
+        "apps/api/src/marketing_agents"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-layer-boundaries",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/verify_architecture_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "apps/api/src/marketing_agents",
+        "tests/unit/scheduler",
+        "tests/integration/scheduler",
+        "tests/integration/db/test_ac_12_recurrence_persistence.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/db/test_obj_03_artifact_migration.py",
+        "tests/acceptance/test_ac_12_scheduler_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    },
+    {
+      "id": "ac-12-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "apps/api/src/marketing_agents",
+        "tests/unit/scheduler",
+        "tests/integration/scheduler",
+        "tests/integration/db/test_ac_12_recurrence_persistence.py",
+        "tests/integration/db/test_sched_01_schedule_persistence.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/db/test_obj_03_artifact_migration.py",
+        "tests/acceptance/test_ac_12_scheduler_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "configured-dst-race-and-restart",
+        "abandoned-claim-misfire-recovery",
+        "durable-resolution-integrity",
+        "configuration-and-existing-fences-preserved"
+      ]
+    }
+  ],
+  "limitations": [
+    "The five new composed cases use fresh migrated and seeded SQLite, default runtime composition, real public configuration routes and original workers. Due-scan coordination must release the original read transaction before the two claim attempts race; no result, claim, provider response or positive-path storage row is manufactured.",
+    "Abandonment and restart are simulated by ending and reconstructing runtimes, not an OS-process kill. Focused existing transaction tests additionally inject rollback and response-loss failures.",
+    "Historical NULL means unknown calculation evidence, not an ordinary occurrence. Migration 0009 performs no backfill or historical digest rewrite. Committed replay retains recorded adjustment facts and checks the existing deterministic UTC/policy contract separately; changed future timezone rules may still fail that pre-existing timestamp check closed.",
+    "Occurrence identity scheme, recurrence version, earlier-fold selection, strict lease expiry and the existing 10000-occurrence coalescing bound are unchanged. Large audit ranges retain full evidence only in occurrence storage; public audit metadata contains count, endpoints and a calendar-only SHA256.",
+    "The 10000-item audit-limit unit fixture uses synthetic structural historical facts and does not assert that any real timezone has daily DST gaps. Default runtime model outputs are deterministic mocks, not real provider behavior.",
+    "All pytest gates are in-process with Python sockets denied except local Unix sockets and launch no server or external provider. CI remains disabled. Targeted lint/format scope does not assert the entire repository is clean of pre-existing style issues."
+  ]
+}

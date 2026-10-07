@@ -202,6 +202,11 @@ class ScheduleOccurrenceIngressService:
             timezone_fold=timezone_fold,
             recurrence_version=claim.recurrence_version,
             state=OccurrenceState.CLAIMED,
+            scheduled_recurrence=(
+                schedule.next_recurrence if plan is None else plan.scheduled_recurrence
+            ),
+            next_recurrence=None if plan is None else plan.next_recurrence,
+            recurrence_resolutions=None if plan is None else plan.recurrence_resolutions,
             misfire_policy_applied=(schedule.misfire_policy if misfire_plan is not None else None),
             misfire_grace_seconds=(
                 schedule.misfire_grace_seconds if misfire_plan is not None else None

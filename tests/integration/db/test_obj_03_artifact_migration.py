@@ -35,7 +35,11 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyWorkRepository,
     create_database_runtime,
 )
-from marketing_agents.infrastructure.db.migrations import DatabaseMigrationError, upgrade_database
+from marketing_agents.infrastructure.db.migrations import (
+    HEAD_REVISION,
+    DatabaseMigrationError,
+    upgrade_database,
+)
 from marketing_agents.infrastructure.db.schema import schema_matches_metadata
 from marketing_agents.infrastructure.manual_work import CompiledCatalogManualAdmissionResolver
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
@@ -184,8 +188,6 @@ async def _assert_upgrade_preserved(
     assert after["rows"] == {**before["rows"], "alembic_version": (("0008",),)}
     assert after["indexes"] == before["indexes"]
     assert after["foreign_keys"] == before["foreign_keys"]
-    async with database.engine.connect() as connection:
-        assert await connection.run_sync(schema_matches_metadata)
     # Hash- and lineage-verifying hydration proves preserved rows remain usable.
     async with dependencies.unit_of_work() as uow:
         for run_id in run_ids:
@@ -196,6 +198,11 @@ async def _assert_upgrade_preserved(
             assert len(artifacts) == 1 and artifacts[0].verify_payload()
     assert await upgrade_database(database, "0008") == "0008"
     assert await _state(database) == after
+    # Retain the exact historical 0007→0008 assertions above. Current ORM
+    # metadata includes later additive migrations, so compare it only at head.
+    assert await upgrade_database(database) == HEAD_REVISION
+    async with database.engine.connect() as connection:
+        assert await connection.run_sync(schema_matches_metadata)
 
 
 @pytest.mark.asyncio

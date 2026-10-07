@@ -18,6 +18,7 @@ from marketing_agents.domain.audit import (
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.execution_control import SAFE_ATTEMPT_ERROR_CODES
+from marketing_agents.domain.recurrence_audit import validate_recurrence_audit_summary
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
 from marketing_agents.domain.validation import (
     require_digest,
@@ -65,6 +66,7 @@ _SCHEDULE_OCCURRENCE_FIELDS = frozenset(
         "claim_fingerprint",
         "next_run_at_utc",
         "recurrence_version",
+        "recurrence_resolution",
         "scheduled_for_utc",
         "work_admitted",
     }
@@ -147,6 +149,7 @@ _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
             "next_run_at_utc",
             "occurrence_id",
             "previous_next_run_at_utc",
+            "recurrence_resolution",
         }
     ),
     "run.received": _RUN_FIELDS | frozenset({"catalog_content_hash"}),
@@ -928,6 +931,14 @@ def _validate_typed_value(
     stored_configuration: bool = False,
 ) -> None:
     validator: Callable[[Any, str], None]
+    if field_name == "recurrence_resolution":
+        try:
+            validate_recurrence_audit_summary(value)
+        except (TypeError, ValueError) as exc:
+            raise AuditMetadataError(
+                "metadata_value_invalid", "recurrence audit summary has invalid safe facts"
+            ) from exc
+        return
     if field_name in {"new_configuration", "previous_configuration"}:
         _validate_deployment_configuration(
             value,

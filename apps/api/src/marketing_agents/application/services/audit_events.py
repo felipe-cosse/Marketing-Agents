@@ -61,6 +61,7 @@ from marketing_agents.domain.planner_output import (
     PROPOSAL_PREVIEW_KIND,
 )
 from marketing_agents.domain.provenance import ArtifactEnvelope, ProviderVersion
+from marketing_agents.domain.recurrence_audit import recurrence_audit_summary
 from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
 from marketing_agents.domain.runtime_policy import AttemptKind
@@ -791,6 +792,9 @@ class AuditEventFactory:
             or occurrence.scheduled_for_utc != claim.scheduled_for_utc
             or occurrence.recurrence_version != plan.recurrence_version
             or occurrence.recurrence_version != claim.recurrence_version
+            or occurrence.scheduled_recurrence != plan.scheduled_recurrence
+            or occurrence.next_recurrence != plan.next_recurrence
+            or occurrence.recurrence_resolutions != plan.recurrence_resolutions
             or next_run_at_utc != plan.next_run_at_utc
             or work_admitted is not plan.admits_work
             or (occurrence.work_item_id is not None) is not work_admitted
@@ -817,6 +821,13 @@ class AuditEventFactory:
             "recurrence_version": occurrence.recurrence_version,
             "work_admitted": work_admitted,
         }
+        resolution_summary = recurrence_audit_summary(
+            scheduled_recurrence=occurrence.scheduled_recurrence,
+            next_recurrence=occurrence.next_recurrence,
+            recurrence_resolutions=occurrence.recurrence_resolutions,
+        )
+        if resolution_summary is not None:
+            metadata["recurrence_resolution"] = resolution_summary
         if plan.disposition is ScheduleDisposition.ON_TIME:
             if (
                 occurrence.state is not OccurrenceState.ENQUEUED
@@ -920,10 +931,16 @@ class AuditEventFactory:
             or previous_schedule.version != claim.version
             or resulting_schedule.last_scheduled_at_utc != occurrence.scheduled_for_utc
             or resulting_schedule.next_run_at_utc != plan.next_run_at_utc
+            or previous_schedule.next_recurrence != plan.scheduled_recurrence
+            or resulting_schedule.next_recurrence != plan.next_recurrence
+            or occurrence.scheduled_recurrence != plan.scheduled_recurrence
+            or occurrence.next_recurrence != plan.next_recurrence
+            or occurrence.recurrence_resolutions != plan.recurrence_resolutions
             or resulting_schedule.version != previous_schedule.version + 1
             or replace(
                 resulting_schedule,
                 next_run_at_utc=previous_schedule.next_run_at_utc,
+                next_recurrence=previous_schedule.next_recurrence,
                 last_scheduled_at_utc=previous_schedule.last_scheduled_at_utc,
                 version=previous_schedule.version,
             )
@@ -935,6 +952,11 @@ class AuditEventFactory:
             raise ValueError("schedule advancement audit cannot precede its scheduled time")
         if not claim.claimed_at_utc <= occurred_at <= claim.lease_expires_at_utc:
             raise ValueError("schedule advancement audit must occur within its exact claim lease")
+        resolution_summary = recurrence_audit_summary(
+            scheduled_recurrence=occurrence.scheduled_recurrence,
+            next_recurrence=occurrence.next_recurrence,
+            recurrence_resolutions=occurrence.recurrence_resolutions,
+        )
         return self._build(
             run_id=None,
             schedule_id=resulting_schedule.id,
@@ -960,6 +982,11 @@ class AuditEventFactory:
                 ),
                 "disposition": plan.disposition.value,
                 "occurrence_id": occurrence.id,
+                **(
+                    {"recurrence_resolution": resolution_summary}
+                    if resolution_summary is not None
+                    else {}
+                ),
             },
             mutation_version=resulting_schedule.version,
         )

@@ -54,6 +54,7 @@ from marketing_agents.domain.execution_control import (
     RunExecutionPolicy,
 )
 from marketing_agents.domain.provenance import ArtifactEnvelope
+from marketing_agents.domain.recurrence_resolution import RecurrenceResult
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
 from marketing_agents.domain.runtime_policy import RateLimitScope
 from marketing_agents.domain.step_lifecycle import (
@@ -219,6 +220,7 @@ class ScheduleRepository(Protocol):
         claim: ScheduleClaim,
         next_run_at_utc: datetime,
         completed_at_utc: datetime,
+        next_recurrence: RecurrenceResult | None = None,
     ) -> Schedule | None: ...
 
 

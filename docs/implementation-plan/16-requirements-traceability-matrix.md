@@ -160,7 +160,7 @@ Allowed status values:
 | AC-09 | Reused, expired, or changed approval rejected. | 06 | Approval negative tests | verified |
 | AC-10 | Identical webhook replay creates/executes no duplicate work. | 07 | Replay test with original resource IDs/call counts | verified |
 | AC-11 | Crash/retry after approval cannot repeat same mock action. | 06 | Fault-injection receipt/count test | verified |
-| AC-12 | Scheduled occurrence runs once across workers, persists UTC next time, recovers misfire. | 08 | Race/restart/misfire/DST suite | planned |
+| AC-12 | Scheduled occurrence runs once across workers, persists UTC next time, recovers misfire. | 08 | Race/restart/misfire/DST suite | verified |
 | AC-13 | Queued cancellation cancels; executing is honest best effort. | 03, 05, 06 | Cancellation state/action timeline tests | planned |
 | AC-14 | Every transition and approval appears in audit timeline. | 04, 05, 13 | Timeline completeness + audit rollback test | planned |
 | AC-15 | No test performs external network call. | 14 | Socket/MSW/Playwright/offline CI evidence | planned |

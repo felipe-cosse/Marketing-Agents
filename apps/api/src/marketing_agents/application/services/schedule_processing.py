@@ -212,6 +212,7 @@ class ScheduleClaimProcessingService:
             resulting_schedule = await unit_of_work.schedules.advance_and_release_claim(
                 claim=claim,
                 next_run_at_utc=plan.next_run_at_utc,
+                next_recurrence=plan.next_recurrence,
                 completed_at_utc=completed_at,
             )
             if resulting_schedule is None:
@@ -223,6 +224,7 @@ class ScheduleClaimProcessingService:
                 resulting_schedule.version != claim.version + 1
                 or resulting_schedule.last_scheduled_at_utc != claim.scheduled_for_utc
                 or resulting_schedule.next_run_at_utc != plan.next_run_at_utc
+                or resulting_schedule.next_recurrence != plan.next_recurrence
             ):
                 raise ScheduleClaimProcessingError(
                     "schedule_advance_invalid",
@@ -489,21 +491,42 @@ class ScheduleClaimProcessingService:
             first_missed_at_utc=occurrence.first_missed_at_utc,
             last_missed_at_utc=occurrence.last_missed_at_utc,
             missed_count=occurrence.missed_count,
+            scheduled_recurrence=occurrence.scheduled_recurrence,
+            next_recurrence=occurrence.next_recurrence,
+            recurrence_resolutions=occurrence.recurrence_resolutions,
         )
+        if occurrence.next_recurrence != schedule.next_recurrence:
+            raise ScheduleClaimProcessingError(
+                "committed_outcome_incomplete", "committed recurrence selection changed"
+            )
         prior_schedule = replace(
             schedule,
             next_run_at_utc=claim.scheduled_for_utc,
+            next_recurrence=occurrence.scheduled_recurrence,
             last_scheduled_at_utc=None,
             version=claim.version,
         )
         try:
-            expected_plan = self._planner.resolve(schedule=prior_schedule, claim=claim)
+            expected_plan = self._planner.resolve(
+                schedule=prior_schedule,
+                claim=claim,
+                # Retain the existing deterministic UTC/policy replay check,
+                # but never reinterpret recorded resolution facts using a new
+                # timezone database. Their sealed audit witnesses are checked
+                # separately against the exact persisted snapshots below.
+                record_resolution=False,
+            )
         except ScheduleMisfireError as exc:
             raise ScheduleClaimProcessingError(
                 "committed_outcome_incomplete",
                 "committed occurrence policy can no longer be revalidated",
             ) from exc
-        if plan != expected_plan or (
+        if replace(
+            plan,
+            scheduled_recurrence=None,
+            next_recurrence=None,
+            recurrence_resolutions=None,
+        ) != expected_plan or (
             disposition is not ScheduleDisposition.ON_TIME
             and occurrence.misfire_evaluated_at_utc != claim.claimed_at_utc
         ):
@@ -556,6 +579,7 @@ class ScheduleClaimProcessingService:
             prior_schedule = replace(
                 schedule,
                 next_run_at_utc=claim.scheduled_for_utc,
+                next_recurrence=occurrence.scheduled_recurrence,
                 last_scheduled_at_utc=None,
                 version=claim.version,
             )
@@ -753,4 +777,7 @@ class ScheduleClaimProcessingService:
             first_missed_at_utc=plan.first_missed_at_utc,
             last_missed_at_utc=plan.last_missed_at_utc,
             missed_count=plan.missed_count,
+            scheduled_recurrence=plan.scheduled_recurrence,
+            next_recurrence=plan.next_recurrence,
+            recurrence_resolutions=plan.recurrence_resolutions,
         )
