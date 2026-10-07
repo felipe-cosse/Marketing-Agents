@@ -1,0 +1,155 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-11",
+  "matrix_statement_sha256": "c9e9ce479c85e08f873178a2bdce54bfd3b3e520ae8ebad6fa8ec015d7eefc12",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_11_mock_crash_recovery.py",
+      "docs/verification/requirements/AC-11.json",
+      "docs/verification/requirements/AC-11.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "interrupted-approved-effect-is-durably-real",
+      "type": "journey",
+      "statement": "Two public Email journeys approve the exact original actions, then interrupt the real worker after either newsletter or CRM receipt commits but before local success. The target remains dispatching with its original reservation, first unfinished attempt and call markers while its authoritative receipt exists. Earlier siblings stay succeeded and uncalled siblings stay reserved; no model artifact exists.",
+      "test_refs": [
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ]
+    },
+    {
+      "id": "fenced-recovery-preserves-original-authority",
+      "type": "journey",
+      "statement": "Reconstructed workers preserve selected business facts and make no provider calls before the later lease/call-deadline fence. At that fence, the original receipt is reconciled without another invocation of its action, any uncalled sibling executes once, and one model summary completes. Exact action/hash/key/plan, consumed request/decision/use/reservation, attempt and receipt lineage remains intact, with two total durable mock effects.",
+      "test_refs": [
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ]
+    },
+    {
+      "id": "terminal-and-adapter-retries-keep-two-effects",
+      "type": "positive",
+      "statement": "Terminal reconstruction, idle worker passes and repeated HTTP admission preserve original work/run/artifact/receipt IDs. A separate phase invokes a fresh genuine gateway twice per captured original proof: all four retries return the original results, create zero receipts/effects and change no business or audit rows. Worker calls remain two; total observed transport calls are explicitly six.",
+      "test_refs": [
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-11-composed-crash-and-retry",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "interrupted-approved-effect-is-durably-real",
+        "fenced-recovery-preserves-original-authority",
+        "terminal-and-adapter-retries-keep-two-effects"
+      ]
+    },
+    {
+      "id": "ac-11-receipt-recovery-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_email_signup_demo.py",
+        "tests/integration/runtime/test_obj_03_catalog_writes.py::test_obj_03_write_recovers_committed_receipt_after_process_interruption",
+        "tests/contract/test_del_03_durable_mock_composition.py::test_del_03_configured_write_receipt_replays_after_engine_and_bundle_restart",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_three_phase_dispatch_commits_one_receipt_and_replays_after_restart",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_two_dispatch_workers_make_exactly_one_connector_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_durable_receipt_race_restart_and_collision_guards",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_receipt_replay_requires_exact_result_projection",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_final_attempt_lost_response_reconciles_durable_receipt",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_stale_crash_after_receipt_reconciles_without_provider_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_exhausted_pre_call_claim_fails_without_connector_call",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_unavailable_post_call_stale_never_blind_retries",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_run_05_stale_attempt_cannot_overwrite_new_lease_generation",
+        "tests/integration/db/test_run_05_external_action_idempotency.py::test_orch_06_stale_recovery_waits_for_durable_call_deadline"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "interrupted-approved-effect-is-durably-real",
+        "fenced-recovery-preserves-original-authority",
+        "terminal-and-adapter-retries-keep-two-effects"
+      ]
+    },
+    {
+      "id": "ac-11-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "interrupted-approved-effect-is-durably-real",
+        "fenced-recovery-preserves-original-authority",
+        "terminal-and-adapter-retries-keep-two-effects"
+      ]
+    },
+    {
+      "id": "ac-11-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "tests/acceptance/test_ac_11_mock_crash_recovery.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "interrupted-approved-effect-is-durably-real",
+        "fenced-recovery-preserves-original-authority",
+        "terminal-and-adapter-retries-keep-two-effects"
+      ]
+    }
+  ],
+  "limitations": [
+    "The two new cases use default runtime, fresh migrated/seeded SQLite, real public admission/approval routes, original observed provider methods and real workers. A one-shot CancelledError is injected only after the real gateway has committed and returned its mock receipt.",
+    "This is simulated in-process worker interruption and runtime reconstruction, not an OS kill. RunWorker executes its cancellation cleanup and releases its run claim; the separate durable action lease and call-deadline recovery fence remain authoritative.",
+    "No duplicate mock effect does not mean no repeated transport invocation. The worker recovery phase has exactly two write invocations total; four deliberate captured-proof adapter retries are separately counted, raising total observed gateway invocations to six without new effects.",
+    "Snapshot comparisons cover the AC-10 selected business tables and separately scoped run audit rows, excluding worker claims and session bookkeeping. Repeated HTTP admission must append exactly two linked replay audits and advance only the run timeline allocator by two; terminal idle and adapter retries preserve audit rows.",
+    "Positive cases derive the recovery instant from stored timestamps and assert current call-deadline-before-action-lease and run-deadline timing. They do not widen delivery budgets or manufacture proofs, receipts or success responses. The old and reconstructed ledger insert counts sum to two.",
+    "Focused existing regressions supplement actual receipt recovery with races, lost responses, stale generations, exhausted pre-call claims, unknown outcomes and call-deadline fencing. Some lower-level fixtures use create_all or explicit delivery-policy/claim setup; they are not additional default-worker journeys.",
+    "All selected tests are in-process with Python sockets denied except local Unix sockets; they launch no real provider, server or child process. Deterministic mock effects are not real email delivery or a universal distributed exactly-once guarantee. Product code and CI configuration are unchanged."
+  ]
+}
