@@ -26,10 +26,16 @@
   },
   "claims": [
     {
-      "id": "changed-action-supersedes-approval",
+      "id": "changed-action-requires-new-set-epoch",
       "type": "contract",
-      "statement": "Any semantic action mutation invalidates the current request, irreversibly supersedes it, and creates only generation plus one under the same logical action scope.",
-      "test_refs": ["tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_action_mutation_invalidates_and_creates_next_generation"]
+      "statement": "Semantic action mutations invalidate the old exact approval and reject leaf replacement with full_set_epoch_required; this integrity helper does not create or persist a replacement authorization set.",
+      "test_refs": ["tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_action_mutation_invalidates_and_requires_new_set_epoch"]
+    },
+    {
+      "id": "unchanged-expiry-renews-exact-leaf",
+      "type": "contract",
+      "statement": "Expiry renewal alone may create generation plus one for the unchanged exact action, preserving its action ID, authorization-set ID and proposal revision and linking the historical expired request.",
+      "test_refs": ["tests/unit/application/test_run_09_approval_invalidation.py::test_run_09_expiry_renews_only_the_same_exact_action_leaf"]
     },
     {
       "id": "canonical-equivalence-and-stale-hash",
@@ -49,12 +55,12 @@
       "cwd": ".",
       "timeout_seconds": 180,
       "network_requirement": "not_enforced",
-      "covers": ["changed-action-supersedes-approval", "canonical-equivalence-and-stale-hash"]
+      "covers": ["changed-action-requires-new-set-epoch", "unchanged-expiry-renews-exact-leaf", "canonical-equivalence-and-stale-hash"]
     }
   ],
   "connection_witness": {
     "implementation_path_globs": ["apps/api/src/marketing_agents/application/services/approval_integrity.py"],
     "gate_id": "run-09-invalidation-tests"
   },
-  "limitations": ["Atomic persistence of supersession and replacement is implemented with the approval repository later."]
+  "limitations": ["This RUN-09 gate proves unit-level action-integrity and expiry-renewal rules. It does not prove durable/public API rejection or renewal, and the integrity helper does not persist a replacement authorization-set epoch. Durable approval and public API behavior are covered by later requirement suites."]
 }

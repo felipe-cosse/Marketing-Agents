@@ -1,0 +1,162 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-09",
+  "matrix_statement_sha256": "facdf1564caf8c086eae55694e814c2c35718ad5f1df960d114d9d3cc7c00f6f",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_09_approval_rejection.py",
+      "docs/verification/requirements/AC-09.json",
+      "docs/verification/requirements/AC-09.md",
+      "docs/verification/requirements/RUN-09.json",
+      "docs/verification/requirements/RUN-09.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_09_approval_rejection.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/test_ac_09_approval_rejection.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "reused-decisions-preserve-authority",
+      "type": "negative_control",
+      "statement": "A repeated public approval decision is rejected before all-action release and after consumption/completion and runtime reconstruction. Exact run/step/action/request/decision/use/set/head/member/receipt/artifact facts and relevant lifecycle audits remain unchanged. Rejected reuse creates no additional provider calls, attempts or effects.",
+      "test_refs": [
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ]
+    },
+    {
+      "id": "exact-expiry-prevents-release",
+      "type": "negative_control",
+      "statement": "At the exact expiry instant, pending approval and generation-zero reuse fail without authority mutation or calls. The real worker persists both expirations with no use, reservation or effect. Runtime reconstruction retains the expired state and generation-zero reuse remains rejected.",
+      "test_refs": [
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ]
+    },
+    {
+      "id": "unchanged-renewal-and-valid-recovery",
+      "type": "journey",
+      "statement": "Public expiry renewal creates exactly one next-generation leaf per unchanged action with old-leaf linkage and identical action/hash/set/plan/revision/step scope. Renewal replay returns the same resource without mutation; old decisions stay rejected. Partial new approval makes zero calls; both new approvals execute two writes once and produce one unsent draft with exact proof/receipt joins.",
+      "test_refs": [
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ]
+    },
+    {
+      "id": "changed-approved-action-cannot-release-sibling",
+      "type": "negative_control",
+      "statement": "Private database fault injection changes the destination, payload or binding of an already approved action while retaining its old hashes and decision. The sibling's public approval returns a sanitized no-store conflict without reflecting the canary. Raw persisted authority remains unchanged and no use, reservation, release, attempt, receipt, artifact or provider call occurs.",
+      "test_refs": [
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-09-public-rejection-and-renewal",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "reused-decisions-preserve-authority",
+        "exact-expiry-prevents-release",
+        "unchanged-renewal-and-valid-recovery",
+        "changed-approved-action-cannot-release-sibling"
+      ]
+    },
+    {
+      "id": "ac-09-approval-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/unit/application/test_run_09_approval_invalidation.py",
+        "tests/acceptance/test_email_signup_demo.py",
+        "tests/integration/db/test_api_06_approval_repository.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/integration/api/test_api_06_approvals.py",
+        "tests/integration/api/test_run_10_approval_routes.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "reused-decisions-preserve-authority",
+        "exact-expiry-prevents-release",
+        "unchanged-renewal-and-valid-recovery",
+        "changed-approved-action-cannot-release-sibling"
+      ]
+    },
+    {
+      "id": "ac-09-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "reused-decisions-preserve-authority",
+        "exact-expiry-prevents-release",
+        "unchanged-renewal-and-valid-recovery",
+        "changed-approved-action-cannot-release-sibling"
+      ]
+    },
+    {
+      "id": "ac-09-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "tests/acceptance/test_ac_09_approval_rejection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "reused-decisions-preserve-authority",
+        "exact-expiry-prevents-release",
+        "unchanged-renewal-and-valid-recovery",
+        "changed-approved-action-cannot-release-sibling"
+      ]
+    }
+  ],
+  "limitations": [
+    "Five new cases use default local ASGI/runtime composition, fresh migrated and seeded SQLite, controlled time and original observed provider methods. Runtime close/reconstruction proves durable recovery in the same process, not an OS-process crash or real-provider delivery.",
+    "The three new changed-action cases mutate destination, payload or binding in private database storage; they do not simulate a supported public semantic-edit/replan API, which does not exist. Corrupt storage is never repaired to manufacture a successful control.",
+    "Bounded raw snapshots cover authoritative run/step/action/approval/authorization-set/head/member/effect records and selected lifecycle audits, excluding session and worker-claim bookkeeping. Hydrated action reads intentionally fail after corruption, so those negative proofs use raw records.",
+    "RUN-09 and Email/API/decision/boundary regressions supplement the new journeys with action-type, capability, plan/set, stale expected hash, authorization, concurrency, policy, rejection and expiry scenarios. New public cases alone do not claim every field permutation.",
+    "Only unchanged-action expiry renews a leaf; semantic changes require a new full authorization-set epoch. Current RUN-09 documentation is corrected to match existing tests without changing its historical feature, merge, branch, matrix statement/hash or exact-tree evidence.",
+    "All pytest gates run in-process with sockets denied except local Unix sockets. Local deterministic mocks establish no real external delivery or universal exactly-once guarantee. CI remains disabled."
+  ]
+}
