@@ -162,7 +162,7 @@ Allowed status values:
 | AC-11 | Crash/retry after approval cannot repeat same mock action. | 06 | Fault-injection receipt/count test | verified |
 | AC-12 | Scheduled occurrence runs once across workers, persists UTC next time, recovers misfire. | 08 | Race/restart/misfire/DST suite | verified |
 | AC-13 | Queued cancellation cancels; executing is honest best effort. | 03, 05, 06 | Protected public cancellation; real receipt/unknown/READ restart journeys; transactional claim fences and ordered outcome audits; `docs/verification/requirements/AC-13.md` | verified |
-| AC-14 | Every transition and approval appears in audit timeline. | 04, 05, 13 | Timeline completeness + audit rollback test | planned |
+| AC-14 | Every transition and approval appears in audit timeline. | 04, 05, 13 | Independent business/audit/public joins; post-flush command and worker rollback; ordered pagination and expired skeletons; `docs/verification/requirements/AC-14.md` | verified |
 | AC-15 | No test performs external network call. | 14 | Socket/MSW/Playwright/offline CI evidence | planned |
 | AC-16 | Backend/frontend tests, formatting, lint, typing pass. | 14 | `make verify` record | planned |
 | AC-17 | Docs distinguish implementation, mock, targets, assumptions, credentials. | 15 | Documentation claim-taxonomy review | planned |

@@ -229,7 +229,7 @@ class RunWorker:
                     None,
                 )
                 if failed_step is not None:
-                    await TerminalExecutionCleanupService().fail_execution_in_uow(
+                    cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
                         unit_of_work,
                         run_id=run_id,
                         failed_step_id=failed_step.id,
@@ -238,6 +238,7 @@ class RunWorker:
                         occurred_at=dependencies.utc_now(),
                         audit_context=context,
                     )
+                    await unit_of_work.audits.append_many(cleanup.audit_events)
                     await unit_of_work.commit()
                     return
             phase = {
