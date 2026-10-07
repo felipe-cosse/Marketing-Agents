@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import uuid4
 
 from sqlalchemy import and_, case, or_, select, update
@@ -16,7 +16,12 @@ from marketing_agents.application.orchestration import OrchestrationDependencies
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.domain.validation import require_id
 from marketing_agents.infrastructure.db import DatabaseRuntime
-from marketing_agents.infrastructure.db.models import RunRecord, RunWorkerClaimRecord
+from marketing_agents.infrastructure.db.models import (
+    ExecutionAttemptRecord,
+    ExternalActionRecord,
+    RunRecord,
+    RunWorkerClaimRecord,
+)
 from marketing_agents.infrastructure.db.unit_of_work import SQLAlchemyUnitOfWork
 
 
@@ -36,6 +41,11 @@ class RunClaim:
     owner: str
     token: str
     expires_at: datetime
+    purpose: Literal["advance", "cancelled_recovery"] = "advance"
+
+
+class RunRecoveryClaimLost(RuntimeError):
+    """A former owner must not close terminal evidence after a lease takeover."""
 
 
 class RunClaims:
@@ -48,35 +58,58 @@ class RunClaims:
     async def claim_once(self, owner: str) -> RunClaim | None:
         require_id(owner, "run worker ID")
         now = self.runtime.dependencies.utc_now()
+        # A terminal parent is never runnable. Only existing, expired call
+        # evidence makes it eligible for the separate no-call recovery lane.
+        cancelled_recovery = and_(
+            RunRecord.state == "cancelled",
+            or_(
+                select(ExecutionAttemptRecord.id)
+                .where(
+                    ExecutionAttemptRecord.run_id == RunRecord.id,
+                    ExecutionAttemptRecord.outcome.is_(None),
+                    ExecutionAttemptRecord.call_deadline_at <= now,
+                )
+                .exists(),
+                select(ExternalActionRecord.id)
+                .where(
+                    ExternalActionRecord.run_id == RunRecord.id,
+                    ExternalActionRecord.state == "dispatching",
+                    ExternalActionRecord.connector_call_started_at.is_not(None),
+                    ExternalActionRecord.connector_call_deadline_at <= now,
+                    ExternalActionRecord.dispatch_lease_expires_at <= now,
+                )
+                .exists(),
+            ),
+        )
         async with self.runtime.database.session_factory() as session:
             candidates = (
-                (
-                    await session.execute(
-                        select(RunRecord.id)
-                        .outerjoin(RunWorkerClaimRecord)
-                        .where(
-                            RunRecord.state.in_(ACTIVE_STATES),
-                            or_(
-                                RunWorkerClaimRecord.run_id.is_(None),
-                                and_(
-                                    RunWorkerClaimRecord.expires_at <= now,
-                                    RunWorkerClaimRecord.available_at <= now,
-                                ),
+                await session.execute(
+                    select(RunRecord.id, RunRecord.state)
+                    .outerjoin(RunWorkerClaimRecord)
+                    .where(
+                        or_(RunRecord.state.in_(ACTIVE_STATES), cancelled_recovery),
+                        or_(
+                            RunWorkerClaimRecord.run_id.is_(None),
+                            and_(
+                                RunWorkerClaimRecord.expires_at <= now,
+                                RunWorkerClaimRecord.available_at <= now,
                             ),
-                        )
-                        .order_by(
-                            case((RunRecord.state == "awaiting_approval", 1), else_=0),
-                            RunWorkerClaimRecord.available_at.asc().nulls_first(),
-                            RunRecord.updated_at,
-                            RunRecord.id,
-                        )
-                        .limit(16)
+                        ),
                     )
+                    .order_by(
+                        case(
+                            (RunRecord.state == "cancelled", 0),
+                            (RunRecord.state == "awaiting_approval", 2),
+                            else_=1,
+                        ),
+                        RunWorkerClaimRecord.available_at.asc().nulls_first(),
+                        RunRecord.updated_at,
+                        RunRecord.id,
+                    )
+                    .limit(16)
                 )
-                .scalars()
-                .all()
-            )
-        for run_id in candidates:
+            ).all()
+        for run_id, selected_state in candidates:
             token = uuid4().hex
             expires = now + self.duration
             async with self.runtime.database.session_factory() as session, session.begin():
@@ -119,7 +152,13 @@ class RunClaims:
                     )
                     if changed.scalar_one_or_none() is None:
                         continue
-            return RunClaim(run_id, owner, token, expires)
+            return RunClaim(
+                run_id,
+                owner,
+                token,
+                expires,
+                "cancelled_recovery" if selected_state == "cancelled" else "advance",
+            )
         return None
 
     async def renew(self, claim: RunClaim) -> bool:
@@ -147,21 +186,24 @@ class RunClaims:
         commits or rolls back the application mutation, on SQLite and PostgreSQL.
         """
         async with self.runtime.dependencies.unit_of_work() as unit_of_work:
-            if not isinstance(unit_of_work, SQLAlchemyUnitOfWork):
-                raise TypeError("run failure fencing requires the SQL-backed unit of work")
-            session = unit_of_work._require_session()
-            result = await session.execute(
-                update(RunWorkerClaimRecord)
-                .where(
-                    RunWorkerClaimRecord.run_id == claim.run_id,
-                    RunWorkerClaimRecord.owner == claim.owner,
-                    RunWorkerClaimRecord.token == claim.token,
-                    RunWorkerClaimRecord.expires_at > self.runtime.dependencies.utc_now(),
-                )
-                .returning(RunWorkerClaimRecord.run_id)
-                .values(version=RunWorkerClaimRecord.version + 1)
+            yield unit_of_work if await self.fence_owned(unit_of_work, claim) else None
+
+    async def fence_owned(self, unit_of_work: UnitOfWork, claim: RunClaim) -> bool:
+        """Lock current ownership in the same transaction as an outcome and its audit."""
+        if not isinstance(unit_of_work, SQLAlchemyUnitOfWork):
+            raise TypeError("run ownership fencing requires the SQL-backed unit of work")
+        result = await unit_of_work._require_session().execute(
+            update(RunWorkerClaimRecord)
+            .where(
+                RunWorkerClaimRecord.run_id == claim.run_id,
+                RunWorkerClaimRecord.owner == claim.owner,
+                RunWorkerClaimRecord.token == claim.token,
+                RunWorkerClaimRecord.expires_at > self.runtime.dependencies.utc_now(),
             )
-            yield unit_of_work if result.scalar_one_or_none() is not None else None
+            .returning(RunWorkerClaimRecord.run_id)
+            .values(version=RunWorkerClaimRecord.version + 1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def release(self, claim: RunClaim) -> bool:
         now = self.runtime.dependencies.utc_now()

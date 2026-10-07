@@ -24,6 +24,9 @@ from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationService,
 )
 from marketing_agents.application.services.manual_work_intake import ManualDryRunService
+from marketing_agents.application.services.run_cancellation_command import (
+    RunCancellationCommandService,
+)
 from marketing_agents.application.services.run_resources import RunResourceService
 from marketing_agents.application.services.webhook_intake import WebhookAdmissionService
 from marketing_agents.config import Settings
@@ -116,6 +119,7 @@ class LocalRuntime:
         return create_app(
             self.settings,
             manual_dry_run_service=self.manual,
+            run_cancellation_service=RunCancellationCommandService(dependencies),
             instance_configuration_service=self.configurations,
             approval_decision_service=ApprovalDecisionService(dependencies),
             approval_resource_service=ApprovalResourceService(dependencies),

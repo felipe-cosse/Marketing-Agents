@@ -20,6 +20,7 @@ from marketing_agents.api.dependencies import (
     DemoScenarioRegistryExecutor,
     InstanceConfigurationExecutor,
     ManualDryRunExecutor,
+    RunCancellationExecutor,
     RunResourceExecutor,
     WebhookAdmissionExecutor,
 )
@@ -52,6 +53,8 @@ from marketing_agents.api.routes.instance_configuration import (
 )
 from marketing_agents.api.routes.manual_work import ManualWorkRequestBoundsMiddleware
 from marketing_agents.api.routes.manual_work import router as manual_work_router
+from marketing_agents.api.routes.run_cancellation import RunCancellationRequestBoundsMiddleware
+from marketing_agents.api.routes.run_cancellation import router as run_cancellation_router
 from marketing_agents.api.routes.runs import (
     Api07PrivateResponseMiddleware,
     instance_status_router,
@@ -84,6 +87,7 @@ def create_app(
     artifact_resource_service: ArtifactResourceExecutor | None = None,
     audit_resource_service: AuditResourceExecutor | None = None,
     demo_scenario_registry: DemoScenarioRegistryExecutor | None = None,
+    run_cancellation_service: RunCancellationExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -117,6 +121,7 @@ def create_app(
     )
     application.state.webhook_admission_service = webhook_admission_service
     application.state.run_resource_service = run_resource_service
+    application.state.run_cancellation_service = run_cancellation_service
     application.state.artifact_resource_service = artifact_resource_service
     application.state.audit_resource_service = audit_resource_service
     application.state.catalog_query_service = (
@@ -137,6 +142,7 @@ def create_app(
     application.add_exception_handler(StarletteHTTPException, safe_http_exception)
     application.add_exception_handler(Exception, safe_unhandled_exception)
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
+    application.add_middleware(RunCancellationRequestBoundsMiddleware)
     application.add_middleware(DemoScenarioRequestBoundsMiddleware)
     application.add_middleware(InstanceConfigurationRequestBoundsMiddleware)
     application.add_middleware(WebhookRequestBoundsMiddleware)
@@ -156,6 +162,7 @@ def create_app(
     application.include_router(instance_status_router)
     application.include_router(catalog_router)
     application.include_router(runs_router)
+    application.include_router(run_cancellation_router)
     application.include_router(run_artifacts_router)
     application.include_router(artifacts_router)
     application.include_router(audit_events_router)

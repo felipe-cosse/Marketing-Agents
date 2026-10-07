@@ -9,7 +9,9 @@ from marketing_agents.application.orchestration.executable_workflows import (
     ExecutableWorkflowHandler,
 )
 from marketing_agents.application.policies.json_schema import compile_json_schema
+from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services.approval_boundaries import ApprovalBoundaryService
+from marketing_agents.application.services.cancelled_run_recovery import CancelledRunRecoveryService
 from marketing_agents.application.services.run_lifecycle import (
     RunAdvanceDisposition,
     RunLifecycleService,
@@ -27,7 +29,12 @@ from marketing_agents.domain.run_lifecycle import (
 )
 from marketing_agents.domain.schema_hash import canonical_schema_hash
 from marketing_agents.domain.validation import require_id
-from marketing_agents.infrastructure.runtime.run_claims import ACTIVE_STATES, RunClaim, RunClaims
+from marketing_agents.infrastructure.runtime.run_claims import (
+    ACTIVE_STATES,
+    RunClaim,
+    RunClaims,
+    RunRecoveryClaimLost,
+)
 from marketing_agents.security.admission_digest import derive_admission_digests
 
 from .composition import LocalRuntime
@@ -55,7 +62,11 @@ class RunWorker:
         claim = await self.claims.claim_once(self.worker_id)
         if claim is None:
             return False
-        task = asyncio.create_task(self._advance(claim.run_id))
+        task = asyncio.create_task(
+            self._recover_cancelled(claim)
+            if claim.purpose == "cancelled_recovery"
+            else self._advance(claim.run_id)
+        )
         lease_lost = asyncio.Event()
         renewer = asyncio.create_task(self._renew(claim, task, lease_lost))
         try:
@@ -65,8 +76,15 @@ class RunWorker:
             # existing executor recovery paths. It never invents a call outcome.
             if not lease_lost.is_set():
                 raise
+        except RunRecoveryClaimLost:
+            pass  # A current owner, not this stale worker, must close the evidence.
         except Exception:
-            await self._fail(claim)
+            if claim.purpose == "advance":
+                await self._fail(claim)
+            else:
+                # Recovery is not new execution. Surface corrupt evidence;
+                # never rewrite a terminal parent into an invented failure.
+                raise
         finally:
             renewer.cancel()
             await asyncio.gather(renewer, return_exceptions=True)
@@ -75,6 +93,20 @@ class RunWorker:
                 await asyncio.gather(task, return_exceptions=True)
             await self.claims.release(claim)
         return True
+
+    async def _recover_cancelled(self, claim: RunClaim) -> None:
+        async def fence(unit_of_work: UnitOfWork) -> None:
+            if not await self.claims.fence_owned(unit_of_work, claim):
+                raise RunRecoveryClaimLost("cancelled recovery claim was lost")
+
+        await CancelledRunRecoveryService(self.runtime.dependencies).recover(
+            claim.run_id,
+            recovery_fence=fence,
+            audit_context=AuditContext.worker(
+                self.worker_id,
+                correlation_id=self.runtime.dependencies.new_id("cancelled-recovery"),
+            ),
+        )
 
     async def _renew(
         self, claim: RunClaim, task: asyncio.Task[None], lease_lost: asyncio.Event

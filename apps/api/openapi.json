@@ -3281,6 +3281,105 @@
         "title": "RetryPolicyView",
         "type": "object"
       },
+      "RunCancellationInput": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "RunCancellationInput",
+        "type": "object"
+      },
+      "RunCancellationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled_action_ids": {
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "type": "string"
+            },
+            "title": "Cancelled Action Ids",
+            "type": "array"
+          },
+          "cancelled_at": {
+            "format": "date-time",
+            "title": "Cancelled At",
+            "type": "string"
+          },
+          "cancelled_step_ids": {
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "type": "string"
+            },
+            "title": "Cancelled Step Ids",
+            "type": "array"
+          },
+          "effects_reversed": {
+            "const": false,
+            "default": false,
+            "title": "Effects Reversed",
+            "type": "boolean"
+          },
+          "outcome_unknown_effect_count_at_cancellation": {
+            "minimum": 0.0,
+            "title": "Outcome Unknown Effect Count At Cancellation",
+            "type": "integer"
+          },
+          "preserved_action_ids": {
+            "description": "Members not cancelled by this command; no rollback or final delivery claim.",
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "type": "string"
+            },
+            "title": "Preserved Action Ids",
+            "type": "array"
+          },
+          "preserved_step_ids": {
+            "description": "Members not cancelled by this command, including in-flight or terminal work.",
+            "items": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "type": "string"
+            },
+            "title": "Preserved Step Ids",
+            "type": "array"
+          },
+          "run_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_url": {
+            "pattern": "^/api/v1/runs/[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+            "title": "Run Url",
+            "type": "string"
+          },
+          "state": { "const": "cancelled", "title": "State", "type": "string" },
+          "succeeded_effect_count_at_cancellation": {
+            "minimum": 0.0,
+            "title": "Succeeded Effect Count At Cancellation",
+            "type": "integer"
+          },
+          "timeline_url": {
+            "pattern": "^/api/v1/runs/[A-Za-z0-9][A-Za-z0-9:._-]{0,239}/timeline$",
+            "title": "Timeline Url",
+            "type": "string"
+          },
+          "version": { "minimum": 1.0, "title": "Version", "type": "integer" }
+        },
+        "required": [
+          "run_id",
+          "state",
+          "version",
+          "cancelled_at",
+          "cancelled_step_ids",
+          "preserved_step_ids",
+          "cancelled_action_ids",
+          "preserved_action_ids",
+          "succeeded_effect_count_at_cancellation",
+          "outcome_unknown_effect_count_at_cancellation",
+          "run_url",
+          "timeline_url"
+        ],
+        "title": "RunCancellationResponse",
+        "type": "object"
+      },
       "RunExecutionControlView": {
         "additionalProperties": false,
         "properties": {
@@ -8813,6 +8912,126 @@
         },
         "summary": "List Run Artifacts",
         "tags": ["artifacts"]
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "description": "A human operator may cancel queued work and fence future calls. In-flight or completed effects are not reversed. Preserved IDs may be in flight or already terminal, and effect counts are snapshots at cancellation, not final totals. An unavailable response may follow a committed cancellation: inspect the run/timeline before retrying.",
+        "operationId": "cancelRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RunCancellationInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancellationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Cancel Run",
+        "tags": ["runs"]
       }
     },
     "/api/v1/runs/{run_id}/steps/{step_id}": {
