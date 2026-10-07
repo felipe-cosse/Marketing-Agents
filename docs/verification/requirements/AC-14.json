@@ -1,0 +1,304 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-14",
+  "matrix_statement_sha256": "0bab97280c4b7a58c1fbf6462d9fabece956e6f971bedf8a7046e70c5404a437",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "apps/api/src/marketing_agents/workers/runtime/run_loop.py",
+      "tests/acceptance/test_ac_14_audit_timeline.py",
+      "tests/acceptance/test_ac_14_audit_rollback.py",
+      "tests/acceptance/test_ac_14_worker_failure_audit.py",
+      "tests/acceptance/test_ac_14_audit_projection.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/AC-14.json",
+      "docs/verification/requirements/AC-14.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_14_audit_timeline.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/test_ac_14_audit_rollback.py",
+          "tests/acceptance/test_ac_14_worker_failure_audit.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/workers/runtime/run_loop.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-business-audit-public-joins",
+      "type": "journey",
+      "statement": "Real READ completion and Email approval, rejection and renewal journeys independently join persisted Run/Step transitions, approval requests/decisions/uses and execution evidence to exact durable audits, then to paginated public timelines and feeds across runtime reconstruction.",
+      "test_refs": [
+        "tests/acceptance/test_ac_14_audit_timeline.py"
+      ]
+    },
+    {
+      "id": "public-command-audit-rollback",
+      "type": "negative_control",
+      "statement": "First/final approval and queued/prebarrier/released cancellation roll back all persisted tables and both audit allocators when an already-flushed audit fails. The same public command then succeeds once with dense sequences, matching mutation facts and no connector calls.",
+      "test_refs": [
+        "tests/acceptance/test_ac_14_audit_rollback.py"
+      ]
+    },
+    {
+      "id": "unexpected-worker-cleanup-audited",
+      "type": "journey",
+      "statement": "Unexpected execution failure through the default worker atomically appends cleanup audits alongside failed Run/Step and cancelled action mutations. Post-flush audit failure rolls back cleanup and sequence allocation; retry preserves consumed approval authority and produces one audited terminal outcome.",
+      "test_refs": [
+        "tests/acceptance/test_ac_14_worker_failure_audit.py"
+      ]
+    },
+    {
+      "id": "stable-public-order-and-expired-skeleton",
+      "type": "contract",
+      "statement": "Equal-timestamp public audit pages use fixed feed watermarks across genuine appends and reject changed cursor filters. At exact metadata expiry, reconstruction preserves every event and all nonmetadata projection fields, including transition/approval identity, actor, correlation, state and links.",
+      "test_refs": [
+        "tests/acceptance/test_ac_14_audit_projection.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-14-composed-completeness-and-projection",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_14_audit_timeline.py",
+        "tests/acceptance/test_ac_14_audit_projection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    },
+    {
+      "id": "ac-14-public-command-rollback",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_14_audit_rollback.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "public-command-audit-rollback"
+      ]
+    },
+    {
+      "id": "ac-14-worker-failure-atomicity",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-o",
+        "pythonpath=apps/api/src",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_14_worker_failure_audit.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "unexpected-worker-cleanup-audited"
+      ]
+    },
+    {
+      "id": "ac-14-lifecycle-approval-audit-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/db/test_run_01_lifecycle_persistence.py",
+        "tests/integration/db/test_orch_09_audited_step_state.py",
+        "tests/integration/db/test_orch_08_authorization_storage.py",
+        "tests/integration/db/test_orch_08_approval_boundary.py",
+        "tests/integration/db/test_run_10_authorized_approval_decisions.py",
+        "tests/unit/domain/test_orch_09_audit_contracts.py",
+        "tests/unit/application/test_orch_08_audit_events.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "public-command-audit-rollback",
+        "unexpected-worker-cleanup-audited"
+      ]
+    },
+    {
+      "id": "ac-14-public-audit-and-redaction-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/db/test_api_07_audit_feed.py",
+        "tests/security/test_orch_09_audit_redaction.py",
+        "tests/security/test_run_06_timeline_redaction.py",
+        "tests/unit/application/test_api_07_audit_resources.py",
+        "tests/unit/application/test_api_07_run_resources.py",
+        "tests/integration/api/test_api_07_runtime_contracts.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    },
+    {
+      "id": "ac-14-worker-and-cancellation-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/runtime/test_del_05_process_composition.py",
+        "tests/acceptance/test_ac_13_public_cancellation.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "unexpected-worker-cleanup-audited"
+      ]
+    },
+    {
+      "id": "ac-14-source-types",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "mypy",
+        "apps/api/src/marketing_agents"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "public-command-audit-rollback",
+        "unexpected-worker-cleanup-audited",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    },
+    {
+      "id": "ac-14-layer-boundaries",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/verify_architecture_boundaries.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "public-command-audit-rollback",
+        "unexpected-worker-cleanup-audited",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    },
+    {
+      "id": "ac-14-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "apps/api/src/marketing_agents/workers/runtime/run_loop.py",
+        "tests/acceptance/test_ac_14_audit_timeline.py",
+        "tests/acceptance/test_ac_14_audit_rollback.py",
+        "tests/acceptance/test_ac_14_worker_failure_audit.py",
+        "tests/acceptance/test_ac_14_audit_projection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "public-command-audit-rollback",
+        "unexpected-worker-cleanup-audited",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    },
+    {
+      "id": "ac-14-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "apps/api/src/marketing_agents/workers/runtime/run_loop.py",
+        "tests/acceptance/test_ac_14_audit_timeline.py",
+        "tests/acceptance/test_ac_14_audit_rollback.py",
+        "tests/acceptance/test_ac_14_worker_failure_audit.py",
+        "tests/acceptance/test_ac_14_audit_projection.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-business-audit-public-joins",
+        "public-command-audit-rollback",
+        "unexpected-worker-cleanup-audited",
+        "stable-public-order-and-expired-skeleton"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/workers/runtime/run_loop.py"
+    ],
+    "gate_id": "ac-14-worker-failure-atomicity"
+  },
+  "limitations": [
+    "Acceptance uses migrated/seeded file-backed SQLite and local in-process ASGI/runtime composition with deterministic mock adapters. No live provider, PostgreSQL concurrency, OS-kill or deployment claim is made.",
+    "Observers invoke the real provider delegates. Failure seams inject unexpected dispatcher exceptions before provider entry or raise only after the original audit append flushes; no positive response, persisted authority or audit row is manufactured.",
+    "Composed journeys cover completed READ/Email, approval rejection/renewal, cancellation and unexpected worker failure. Existing lifecycle, approval, audit contract, concurrency, redaction and public API gates supplement these concrete paths; this is not an exhaustive enumeration of every possible workflow interleaving.",
+    "Clock-based metadata expiry proves public projection suppression while retaining the complete event skeleton. It does not claim a physical retention sweep or cryptographic tamper-proof storage; direct local database administration remains a residual risk.",
+    "Only the global audit feed promises a fixed pagination high watermark. Run timeline pages use monotonic run sequences. Shared acceptance helpers are reused from previously verified requirement tests.",
+    "All pytest gates deny Python sockets except local Unix sockets. No server or child browser is launched. CI remains disabled; no CI or network-isolated subprocess guarantee is inferred."
+  ]
+}
