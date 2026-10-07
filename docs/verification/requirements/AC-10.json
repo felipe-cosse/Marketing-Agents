@@ -1,0 +1,163 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-10",
+  "matrix_statement_sha256": "cb8b601881205108035a66b86a1fa49d5ee4fbaadd158ccfa98b39cbf3d55ec7",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "tests/acceptance/test_ac_10_webhook_replay.py",
+      "docs/verification/requirements/AC-10.json",
+      "docs/verification/requirements/AC-10.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "tests/acceptance/test_ac_10_webhook_replay.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/test_ac_10_webhook_replay.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "model-replay-preserves-original-execution",
+      "type": "journey",
+      "statement": "A configured signed webhook returns the original receipt, work and run through replay before execution, after completion and after runtime reconstruction. The real worker completes exactly one model call, first successful attempt and provenance-linked artifact. Repeated delivery and idle worker passes preserve all selected durable business facts and make no further calls.",
+      "test_refs": [
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ]
+    },
+    {
+      "id": "approved-fanout-replay-preserves-two-effects",
+      "type": "journey",
+      "statement": "One signed event fans out to two configured attendee instances with one original work/run per instance. Replay across admission, pending approval, authorization and completion preserves original resources. Real public per-run approvals and worker execution produce exactly two gateway calls, first successful dispatch attempts and durable mock receipts; replay and reconstruction produce no additional effect.",
+      "test_refs": [
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ]
+    },
+    {
+      "id": "authentication-and-raw-body-collisions",
+      "type": "negative_control",
+      "statement": "Wrong-secret signatures and edited bytes under an old signature return sanitized 401 responses without business mutation or calls. Correctly signed changed payloads and whitespace-only raw-body changes under the original source/event return 409 without new work. Successful replay adds only expected signature-validation and duplicate-suppression ingress audits.",
+      "test_refs": [
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ]
+    },
+    {
+      "id": "key-pairing-and-receipt-version-fail-closed",
+      "type": "negative_control",
+      "statement": "A different installed digest key prevents normal startup against the original database; restoring the original settings preserves all business facts and allows replay plus one valid model execution. Separately, private corruption of a receipt key-version produces a sanitized 503 after runtime reconstruction without new work or calls, leaving the admitted run received.",
+      "test_refs": [
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-10-signed-replay-execution",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "deny",
+      "covers": [
+        "model-replay-preserves-original-execution",
+        "approved-fanout-replay-preserves-two-effects",
+        "authentication-and-raw-body-collisions",
+        "key-pairing-and-receipt-version-fail-closed"
+      ]
+    },
+    {
+      "id": "ac-10-webhook-admission-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/api/test_api_05_webhooks.py",
+        "tests/integration/db/test_api_05_webhook_intake.py",
+        "tests/integration/db/test_api_05_webhook_receipts.py",
+        "tests/integration/db/test_run_04_work_idempotency.py",
+        "tests/unit/application/test_api_05_webhook_admission_service.py",
+        "tests/unit/webhooks/test_api_05_body_digest.py",
+        "tests/unit/webhooks/test_api_05_hmac_verifier.py",
+        "tests/unit/webhooks/test_api_05_input_mapping.py",
+        "tests/unit/application/test_api_05_webhook_audit_events.py",
+        "tests/integration/runtime/test_obj_03_catalog_workflows.py::test_obj_03_configured_signed_webhook_executes_exact_role_after_restart"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "deny",
+      "covers": [
+        "model-replay-preserves-original-execution",
+        "approved-fanout-replay-preserves-two-effects",
+        "authentication-and-raw-body-collisions"
+      ]
+    },
+    {
+      "id": "ac-10-format",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "format",
+        "--check",
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "model-replay-preserves-original-execution",
+        "approved-fanout-replay-preserves-two-effects",
+        "authentication-and-raw-body-collisions",
+        "key-pairing-and-receipt-version-fail-closed"
+      ]
+    },
+    {
+      "id": "ac-10-lint",
+      "runner": "argv",
+      "argv": [
+        "ruff",
+        "check",
+        "tests/acceptance/test_ac_10_webhook_replay.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "model-replay-preserves-original-execution",
+        "approved-fanout-replay-preserves-two-effects",
+        "authentication-and-raw-body-collisions",
+        "key-pairing-and-receipt-version-fail-closed"
+      ]
+    }
+  ],
+  "limitations": [
+    "Four new cases use default local ASGI/runtime composition, fresh migrated/seeded SQLite, controlled time, public configuration and approval routes, and observation wrappers calling original provider methods. Runtime reconstruction is in-process, not an OS-process crash.",
+    "Exact snapshots cover receipt/delivery/work/run/plan/step/control/attempt/artifact/action/approval/authorization-set and local identity facts, excluding all audits, session and worker-claim bookkeeping. Expected replay/collision webhook audit counts are asserted separately.",
+    "Fan-out approval is per run, not an event-wide all-approvals barrier. Mock effect counts in a new connector bundle start at zero; the two persisted connector receipts are authoritative across reconstruction.",
+    "The mismatched receipt key-version case is isolated private database corruption, not supported key rotation. It does not claim previously admitted valid work is cancelled or made unexecutable; no worker is drained in that negative case.",
+    "New acceptance journeys use sequential replay with fresh-enough signatures and unchanged configured source authority. They do not prove stale-signature replay, mapper drift, source-switch behavior, concurrent races or survival after removal of source authentication configuration.",
+    "Existing regression gates separately cover concurrent fan-out/work admission, transaction rollback, receipt linkage, configured-source replay, signature freshness, input mapping and audit redaction. The configuration-drift regression retains an independently supplied source registry.",
+    "All pytest gates run in-process with sockets denied except local Unix sockets. Deterministic model/connector mocks prove local call and receipt counts, not real-provider delivery or a universal exactly-once guarantee. No product code or CI configuration is changed; CI remains disabled."
+  ]
+}
