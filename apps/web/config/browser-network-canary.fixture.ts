@@ -28,6 +28,12 @@ test.beforeAll(async () => {
       response.end();
       return;
     }
+    if (request.url === "/redirect-same") {
+      response.writeHead(307, { location: "/destination" });
+      response.end();
+      return;
+    }
+    if (request.url === "/destination") requests += 1;
     response.setHeader("Content-Type", "text/html");
     response.end("<main>Approved local server</main>");
   });
@@ -160,4 +166,122 @@ test("DEL-07 mocked redirects never reach the tripwire", async ({ page }) => {
   );
   await page.goto(`${approvedOrigin}/mock-redirect`).catch(() => undefined);
   expect(requests).toBe(0);
+});
+
+test("AC-15 caught direct browser.newPage is recorded before page creation", async ({
+  browser,
+}) => {
+  const before = browser.contexts().length;
+  await expect(browser.newPage()).rejects.toThrow("guarded context");
+  expect(browser.contexts()).toHaveLength(before);
+  expect(requests).toBe(0);
+});
+
+for (const surface of [
+  "request-fixture",
+  "context-request",
+  "page-request",
+  "manual-context-request",
+  "request-factory",
+] as const) {
+  test(`AC-15 caught ${surface} requests cannot reach the tripwire`, async ({
+    request,
+    context,
+    page,
+    browser,
+    playwright,
+  }) => {
+    const child =
+      surface === "manual-context-request"
+        ? await browser.newContext()
+        : undefined;
+    const standalone =
+      surface === "request-factory"
+        ? await playwright.request.newContext()
+        : undefined;
+    const target =
+      surface === "context-request"
+        ? context.request
+        : surface === "page-request"
+          ? page.request
+          : (child?.request ?? standalone ?? request);
+    try {
+      await expect(target.get(tripwireOrigin)).rejects.toThrow(
+        "blocked by test policy",
+      );
+      expect(requests).toBe(0);
+    } finally {
+      await child?.close();
+      await standalone?.dispose();
+    }
+  });
+}
+
+for (const path of ["/redirect", "/redirect-same"]) {
+  test(`AC-15 API ${path} cannot follow redirects despite caller override`, async ({
+    request,
+  }) => {
+    await expect(request.get(path, { maxRedirects: 20 })).rejects.toThrow(
+      "redirect blocked by test policy",
+    );
+    expect(requests).toBe(0);
+  });
+}
+
+test("AC-15 caught service-worker opt-in never creates a context", async ({
+  browser,
+}) => {
+  const before = browser.contexts().length;
+  await expect(browser.newContext({ serviceWorkers: "allow" })).rejects.toThrow(
+    "context options blocked",
+  );
+  expect(browser.contexts()).toHaveLength(before);
+  expect(requests).toBe(0);
+});
+
+test("AC-15 caught off-origin request factory options never reach transport", async ({
+  playwright,
+}) => {
+  await expect(
+    playwright.request.newContext({ baseURL: tripwireOrigin }),
+  ).rejects.toThrow("request options blocked");
+  expect(requests).toBe(0);
+});
+
+test("AC-15 caught route removal cannot disable the context boundary", async ({
+  context,
+}) => {
+  await expect(context.unrouteAll()).rejects.toThrow(
+    "routing policy cannot be removed",
+  );
+  expect(requests).toBe(0);
+});
+
+test("AC-15 approved-origin API surfaces preserve genuine local responses", async ({
+  request,
+  context,
+  page,
+  browser,
+  playwright,
+}) => {
+  const child = await browser.newContext();
+  const standalone = await playwright.request.newContext();
+  try {
+    for (const target of [
+      request,
+      context.request,
+      page.request,
+      child.request,
+      standalone,
+    ]) {
+      const response = await target.post("/approved", { data: "local body" });
+      expect(response.status()).toBe(200);
+      expect(await response.text()).toBe("<main>Approved local server</main>");
+      await response.dispose();
+    }
+    expect(requests).toBe(0);
+  } finally {
+    await child.close();
+    await standalone.dispose();
+  }
 });
