@@ -129,13 +129,16 @@ class GuardRecorder:
 
             setattr(owner, name, counted)
 
-        with socket.socket() as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        # These controls prove destination denial before delegation, not UDP
+        # delivery. The same real AF_INET stream descriptor exercises sendto's
+        # guard without requiring an IP datagram socket in the browser profile.
+        with socket.socket() as tcp:
             canaries = (
                 lambda: socket.getaddrinfo("obj04.invalid", 443),
                 lambda: socket.create_connection(("192.0.2.1", 443), timeout=0.01),
                 lambda: tcp.connect(("192.0.2.2", 443)),
                 lambda: tcp.connect_ex(("192.0.2.3", 443)),
-                lambda: udp.sendto(b"synthetic-canary", ("192.0.2.4", 53)),
+                lambda: tcp.sendto(b"synthetic-canary", ("192.0.2.4", 53)),
             )
             for canary in canaries:
                 try:

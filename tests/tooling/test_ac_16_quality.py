@@ -19,6 +19,11 @@ from unittest.mock import patch
 from scripts import ac_16_quality as quality
 from scripts import verify_local as runner
 from scripts.check_safety_coverage import SafetyCoverageError
+from scripts.del_05_offline_diagnostics import (
+    AC16_DIAGNOSTIC_ERRORS,
+    AC16_DIAGNOSTIC_MAX_DELTA,
+    AC16_DIAGNOSTIC_PREFIX,
+)
 
 
 def reviewed_gates(coverage: Path) -> tuple[runner.Gate, ...]:
@@ -111,6 +116,9 @@ class QualityRecordTests(unittest.TestCase):
         self.root.mkdir()
         self.git("init", "-q")
         self.git("config", "core.filemode", "true")
+        # AC-15: checkout reflogs need local identity without hostname/DNS fallback.
+        self.git("config", "--local", "user.name", "Fixture")
+        self.git("config", "--local", "user.email", "fixture@example.invalid")
         for relative, content in {
             "source.txt": "original source\n",
             ".gitignore": "*.ignored\n",
@@ -256,12 +264,57 @@ class QualityRecordTests(unittest.TestCase):
             policy_path=self.root / "docs/verification/safety-coverage.json",
         )
 
-    def reject(self, report: dict, pattern: str) -> None:
-        with (
-            patch.object(quality, "check_coverage", return_value=self.coverage),
-            self.assertRaisesRegex(quality.QualityError, pattern),
-        ):
-            quality.validate_report(report, self.identity, self.root)
+    def failure_diagnostic(self, report: dict, case: str, actual_error: str) -> dict:
+        # Read only these owned synthetic artifacts, and never include their paths.
+        directory = Path(report["artifact_directory"])
+        artifact_times = {}
+        for name in (".coverage", "coverage.json", "verification.json"):
+            before = after = None
+            try:
+                modified = (directory / name).lstat().st_mtime_ns
+                before = max(
+                    -AC16_DIAGNOSTIC_MAX_DELTA,
+                    min(AC16_DIAGNOSTIC_MAX_DELTA, modified - report["started_ns"]),
+                )
+                after = max(
+                    -AC16_DIAGNOSTIC_MAX_DELTA,
+                    min(AC16_DIAGNOSTIC_MAX_DELTA, report["finished_ns"] - modified),
+                )
+            except OSError:
+                pass
+            artifact_times[name] = {
+                "mtime_minus_started_ns": before,
+                "finished_minus_mtime_ns": after,
+            }
+        return {"case": case, "actual_error": actual_error, "artifact_times": artifact_times}
+
+    def reject(self, report: dict, pattern: str, *, diagnostic_case: str | None = None) -> None:
+        actual_error = "no_quality_error"
+        try:
+            with (
+                patch.object(quality, "check_coverage", return_value=self.coverage),
+                self.assertRaisesRegex(quality.QualityError, pattern),
+            ):
+                try:
+                    quality.validate_report(report, self.identity, self.root)
+                except quality.QualityError as error:
+                    if diagnostic_case is not None:
+                        code = error.args[0] if len(error.args) == 1 else None
+                        actual_error = (
+                            code
+                            if type(code) is str and code in AC16_DIAGNOSTIC_ERRORS
+                            else "other_quality_error"
+                        )
+                    raise
+        except AssertionError as error:
+            if diagnostic_case is not None:
+                try:
+                    diagnostic = self.failure_diagnostic(report, diagnostic_case, actual_error)
+                    error.add_note(AC16_DIAGNOSTIC_PREFIX + json.dumps(diagnostic))
+                except Exception:
+                    # Diagnostics must never replace the original failed assertion.
+                    pass
+            raise
 
     def publish_fixture(self, report: dict) -> Path:
         self.store.mkdir(exist_ok=True)
@@ -296,6 +349,24 @@ class QualityRecordTests(unittest.TestCase):
         self.assertEqual(expected, runner.gates(coverage))
         with patch.object(runner, "gates", return_value=()):
             self.assertEqual(expected, quality.expected_gates(coverage))
+
+    def test_owned_git_fixture_persists_identity_for_checkout_reflogs(self) -> None:
+        self.assertEqual("Fixture", self.git("config", "--local", "--get", "user.name"))
+        self.assertEqual(
+            "fixture@example.invalid", self.git("config", "--local", "--get", "user.email")
+        )
+        child = self.commit_tree(self.identity["commit"])
+        self.git("checkout", "--detach", "-q", child)
+        self.assertEqual(child, self.git("rev-parse", "HEAD"))
+        self.assertEqual(
+            ["Fixture", "fixture@example.invalid"],
+            self.git("reflog", "show", "-1", "--format=%gn%n%ge", "HEAD").splitlines(),
+        )
+        self.assertTrue(
+            self.git("reflog", "show", "-1", "--format=%gs", "HEAD").startswith(
+                "checkout: moving from "
+            )
+        )
 
     def test_source_identity_binds_commit_tree_file_bytes_modes_and_locks(self) -> None:
         self.assertEqual(self.git("rev-parse", "HEAD"), self.identity["commit"])
@@ -467,25 +538,115 @@ class QualityRecordTests(unittest.TestCase):
                 self.reject(report, "observed_(inventory|gate_failure)")
 
     def test_summary_rejects_partial_modes_false_success_and_boolean_counters(self) -> None:
-        for field, value in (
-            ("mode", "backend"),
-            ("mode", "local-plus-acceptance"),
-            ("valid", 1),
-            ("error", "gate_failed"),
-            ("completed_gates", 19),
-            ("passed_gates", 19),
-            ("changed_source_files", 1),
-            ("completed_gates", True),
-            ("passed_gates", True),
-            ("changed_source_files", False),
-            ("source_files", True),
-            ("elapsed_ms", False),
+        for case, field, value in (
+            ("mode_backend", "mode", "backend"),
+            ("mode_local_plus_acceptance", "mode", "local-plus-acceptance"),
+            ("valid_integer", "valid", 1),
+            ("error_string", "error", "gate_failed"),
+            ("completed_gates_short", "completed_gates", 19),
+            ("passed_gates_short", "passed_gates", 19),
+            ("changed_source_files_nonzero", "changed_source_files", 1),
+            ("completed_gates_boolean", "completed_gates", True),
+            ("passed_gates_boolean", "passed_gates", True),
+            ("changed_source_files_boolean", "changed_source_files", False),
+            ("source_files_boolean", "source_files", True),
+            ("elapsed_ms_boolean", "elapsed_ms", False),
         ):
             with self.subTest(field=field, value=value):
                 report, saved = self.fixture_report()
                 saved["summary"][field] = value
                 self.refresh(report, saved)
-                self.reject(report, "incomplete_quality_run")
+                self.reject(report, "incomplete_quality_run", diagnostic_case=case)
+
+    def test_summary_diagnostics_preserve_assertion_and_read_only_artifacts(self) -> None:
+        report, _ = self.fixture_report()
+        directory = Path(report["artifact_directory"])
+        before = {
+            name: ((directory / name).read_bytes(), (directory / name).stat().st_mtime_ns)
+            for name in quality.ARTIFACTS
+        }
+        original = copy.deepcopy(report)
+        with (
+            patch.object(
+                quality, "validate_report", side_effect=quality.QualityError("artifact_not_fresh")
+            ),
+            self.assertRaisesRegex(AssertionError, "incomplete_quality_run") as caught,
+        ):
+            self.reject(report, "incomplete_quality_run", diagnostic_case="mode_backend")
+        diagnostic = json.loads(caught.exception.__notes__[0].removeprefix(AC16_DIAGNOSTIC_PREFIX))
+        self.assertEqual(diagnostic["case"], "mode_backend")
+        self.assertEqual(diagnostic["actual_error"], "artifact_not_fresh")
+        for name, (_, modified) in before.items():
+            self.assertEqual(
+                diagnostic["artifact_times"][name],
+                {
+                    "mtime_minus_started_ns": modified - report["started_ns"],
+                    "finished_minus_mtime_ns": report["finished_ns"] - modified,
+                },
+            )
+            self.assertEqual(
+                ((directory / name).read_bytes(), (directory / name).stat().st_mtime_ns),
+                before[name],
+            )
+        self.assertEqual(report, original)
+
+    def test_summary_diagnostics_never_change_success_or_other_rejections(self) -> None:
+        report, _ = self.fixture_report()
+        with (
+            patch.object(
+                quality,
+                "validate_report",
+                side_effect=quality.QualityError("incomplete_quality_run"),
+            ),
+            patch.object(self, "failure_diagnostic", side_effect=AssertionError("unexpected")),
+        ):
+            self.reject(report, "incomplete_quality_run", diagnostic_case="mode_backend")
+        with (
+            patch.object(quality, "validate_report", return_value=None),
+            self.assertRaises(AssertionError) as caught,
+        ):
+            self.reject(report, "incomplete_quality_run")
+        self.assertFalse(hasattr(caught.exception, "__notes__"))
+
+    def test_summary_diagnostics_categorize_missing_or_unknown_error_without_payload(self) -> None:
+        report, _ = self.fixture_report()
+        for error, category in (
+            (None, "no_quality_error"),
+            (quality.QualityError("private-fixture-canary"), "other_quality_error"),
+        ):
+            with (
+                self.subTest(category=category),
+                patch.object(quality, "validate_report", side_effect=error, return_value=None),
+                self.assertRaises(AssertionError) as caught,
+            ):
+                self.reject(report, "incomplete_quality_run", diagnostic_case="mode_backend")
+            note = caught.exception.__notes__[0]
+            self.assertNotIn("private-fixture-canary", note)
+            self.assertEqual(
+                json.loads(note.removeprefix(AC16_DIAGNOSTIC_PREFIX))["actual_error"], category
+            )
+
+    def test_summary_diagnostics_bound_times_and_do_not_mask_original_failure(self) -> None:
+        report, _ = self.fixture_report()
+        report["started_ns"] = -(10**20)
+        report["finished_ns"] = -(10**20)
+        diagnostic = self.failure_diagnostic(report, "mode_backend", "artifact_not_fresh")
+        for item in diagnostic["artifact_times"].values():
+            self.assertEqual(item["mtime_minus_started_ns"], AC16_DIAGNOSTIC_MAX_DELTA)
+            self.assertEqual(item["finished_minus_mtime_ns"], -AC16_DIAGNOSTIC_MAX_DELTA)
+        with patch.object(Path, "lstat", side_effect=OSError("private-fixture-canary")):
+            diagnostic = self.failure_diagnostic(report, "mode_backend", "artifact_not_fresh")
+        for item in diagnostic["artifact_times"].values():
+            self.assertEqual(
+                item, {"mtime_minus_started_ns": None, "finished_minus_mtime_ns": None}
+            )
+        with (
+            patch.object(quality, "validate_report", return_value=None),
+            patch.object(self, "failure_diagnostic", side_effect=RuntimeError("diagnostic failed")),
+            self.assertRaisesRegex(AssertionError, "QualityError not raised") as caught,
+        ):
+            self.reject(report, "incomplete_quality_run", diagnostic_case="mode_backend")
+        self.assertFalse(hasattr(caught.exception, "__notes__"))
 
     def test_saved_observations_must_equal_external_record(self) -> None:
         report, saved = self.fixture_report()

@@ -1,7 +1,7 @@
 export const DEFAULT_BROWSER_ORIGIN: "http://127.0.0.1:4173";
 
 export interface BrowserNetworkLedger {
-  readonly blocked: readonly ("http" | "websocket")[];
+  readonly blocked: readonly ("http" | "websocket" | "routing-policy")[];
   assertNoExternalAttempts(): void;
 }
 

@@ -48,9 +48,137 @@ EXCEPTIONS = frozenset(
 MAX_STREAM_BYTES = 2 * 1024 * 1024
 MAX_LINE_BYTES = 4096
 MAX_FAILURES = 64
+MAX_ACTIVE_NODES = 64
 MAX_NODE_BYTES = 512
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_COUNT = 1_000_000
+AC16_DIAGNOSTIC_PREFIX = "AC16_FIXTURE_DIAGNOSTIC "
+AC16_DIAGNOSTIC_NODE = (
+    "tests/tooling/test_ac_16_quality.py::QualityRecordTests::"
+    "test_summary_rejects_partial_modes_false_success_and_boolean_counters"
+)
+AC16_DIAGNOSTIC_CASES = frozenset(
+    {
+        "mode_backend",
+        "mode_local_plus_acceptance",
+        "valid_integer",
+        "error_string",
+        "completed_gates_short",
+        "passed_gates_short",
+        "changed_source_files_nonzero",
+        "completed_gates_boolean",
+        "passed_gates_boolean",
+        "changed_source_files_boolean",
+        "source_files_boolean",
+        "elapsed_ms_boolean",
+    }
+)
+# Reviewed literal codes from validate_report and its bounded artifact readers.
+# Never forward an exception's arbitrary message or import the quality runner.
+AC16_DIAGNOSTIC_ERRORS = frozenset(
+    {
+        "artifact_type_or_size",
+        "artifact_changed",
+        "artifact_unreadable",
+        "duplicate_json_key",
+        "nonfinite_json",
+        "invalid_json",
+        "json_not_object",
+        "record_schema",
+        "record_not_successful",
+        "source_identity_mismatch",
+        "source_commit_invalid",
+        "source_commit_not_feature_or_merge",
+        "record_times",
+        "artifact_directory_invalid",
+        "gate_plan_mismatch",
+        "artifact_inventory",
+        "artifact_digest_mismatch",
+        "artifact_not_fresh",
+        "saved_result_mismatch",
+        "summary_schema",
+        "incomplete_quality_run",
+        "observed_inventory",
+        "observed_gate_failure",
+        "tool_record_invalid",
+        "coverage_record_mismatch",
+        "no_quality_error",
+        "other_quality_error",
+    }
+)
+AC16_DIAGNOSTIC_MAX_DELTA = 1_000_000_000_000
+_AC16_ARTIFACTS = frozenset({".coverage", "coverage.json", "verification.json"})
+_AC16_TIME_FIELDS = frozenset({"mtime_minus_started_ns", "finished_minus_mtime_ns"})
+
+
+def _unique_pairs(items: list[tuple[str, object]]) -> dict:
+    result: dict = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError("duplicate diagnostic field")
+        result[key] = value
+    return result
+
+
+def _invalid_constant(value: str) -> None:
+    del value
+    raise ValueError("nonfinite diagnostic number")
+
+
+def _fixture_diagnostic(value: object) -> dict | None:
+    """Copy only this fixture's fixed enums and bounded relative timestamps."""
+    if type(value) is not dict or set(value) != {"case", "actual_error", "artifact_times"}:
+        return None
+    if (
+        type(value["case"]) is not str
+        or value["case"] not in AC16_DIAGNOSTIC_CASES
+        or type(value["actual_error"]) is not str
+        or value["actual_error"] not in AC16_DIAGNOSTIC_ERRORS
+    ):
+        return None
+    artifacts = value["artifact_times"]
+    if type(artifacts) is not dict or set(artifacts) != _AC16_ARTIFACTS:
+        return None
+    times = {}
+    for name in sorted(_AC16_ARTIFACTS):
+        fields = artifacts[name]
+        if type(fields) is not dict or set(fields) != _AC16_TIME_FIELDS:
+            return None
+        deltas = list(fields.values())
+        if not (
+            all(delta is None for delta in deltas)
+            or all(
+                type(delta) is int and abs(delta) <= AC16_DIAGNOSTIC_MAX_DELTA for delta in deltas
+            )
+        ):
+            return None
+        times[name] = {key: fields[key] for key in sorted(_AC16_TIME_FIELDS)}
+    return {"case": value["case"], "actual_error": value["actual_error"], "artifact_times": times}
+
+
+def _fixture_note(report: object) -> dict | None:
+    # Pytest includes PEP 678 notes in this structured field; xdist preserves it.
+    # Do not render longrepr, visit traceback locals, or copy arbitrary note text.
+    crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
+    message = getattr(crash, "message", None)
+    if (
+        type(message) is not str
+        or len(message) > MAX_LINE_BYTES
+        or len(message.encode("utf-8", errors="replace")) > MAX_LINE_BYTES
+    ):
+        return None
+    notes = [line for line in message.splitlines() if line.startswith(AC16_DIAGNOSTIC_PREFIX)]
+    if len(notes) != 1:
+        return None
+    try:
+        value = json.loads(
+            notes[0][len(AC16_DIAGNOSTIC_PREFIX) :],
+            object_pairs_hook=_unique_pairs,
+            parse_constant=_invalid_constant,
+        )
+    except (ValueError, RecursionError):
+        return None
+    return _fixture_diagnostic(value)
 
 
 def source_test_nodes(root: Path) -> frozenset[str]:
@@ -107,7 +235,8 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
     allowed = source_test_nodes(root)
     result: dict = {"schema_version": 1, "stages": [], "failed_tests": [], "truncated": False}
     stages: dict[str, dict] = {}
-    failures: set[tuple[str, str, str]] = set()
+    failures: set[tuple[str, str, str, str | None]] = set()
+    active: dict[str, int] = {}
     for stream in (stdout, stderr):
         data = _bytes(stream)
         if len(data) > MAX_STREAM_BYTES:
@@ -122,7 +251,11 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                 result["truncated"] = True
                 continue
             try:
-                event = json.loads(line[marker + len(PREFIX) :])
+                event = json.loads(
+                    line[marker + len(PREFIX) :],
+                    object_pairs_hook=_unique_pairs,
+                    parse_constant=_invalid_constant,
+                )
             except (ValueError, UnicodeError, RecursionError):
                 continue
             if not isinstance(event, dict):
@@ -151,10 +284,21 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                     continue
                 result["last_stage"] = "pytest"
                 if kind == "test_started":
-                    result["active_test"] = node
+                    count = active.get(node, 0)
+                    if count >= MAX_COUNT or (not count and len(active) >= MAX_ACTIVE_NODES):
+                        result["truncated"] = True
+                        continue
+                    # Parameters are never retained. Count overlapping starts
+                    # of the same source-declared test instead of losing one
+                    # when another parameter instance finishes first.
+                    active.pop(node, None)
+                    active[node] = count + 1
                 elif kind == "test_finished":
-                    if result.get("active_test") == node:
-                        result.pop("active_test", None)
+                    count = active.get(node, 0)
+                    if count > 1:
+                        active[node] = count - 1
+                    else:
+                        active.pop(node, None)
                 else:
                     phase = event.get("phase")
                     exception = event.get("exception")
@@ -167,16 +311,29 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                         continue
                     if not isinstance(exception, str) or exception not in EXCEPTIONS:
                         exception = "OtherError"
-                    failure = (node, phase, exception)
+                    diagnostic = (
+                        _fixture_diagnostic(event.get("fixture_diagnostic"))
+                        if node == AC16_DIAGNOSTIC_NODE
+                        and phase == "call"
+                        and exception == "AssertionError"
+                        else None
+                    )
+                    diagnostic_key = (
+                        json.dumps(diagnostic, sort_keys=True, separators=(",", ":"))
+                        if diagnostic is not None
+                        else None
+                    )
+                    failure = (node, phase, exception, diagnostic_key)
                     if failure in failures:
                         continue
                     if len(failures) >= MAX_FAILURES:
                         result["truncated"] = True
                         continue
                     failures.add(failure)
-                    result["failed_tests"].append(
-                        {"node_id": node, "phase": phase, "exception": exception}
-                    )
+                    record = {"node_id": node, "phase": phase, "exception": exception}
+                    if diagnostic is not None:
+                        record["fixture_diagnostic"] = diagnostic
+                    result["failed_tests"].append(record)
             elif stage == "pytest" and kind == "pytest_finished":
                 summary = {}
                 for key in ("passed", "failed", "skipped", "collection_errors"):
@@ -186,10 +343,19 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                 if summary:
                     result["pytest_summary"] = summary
     result["stages"] = list(stages.values())
+    if active:
+        # Retain the previous scalar for serial consumers; the complete bounded
+        # multiset is authoritative when more than one instance is active.
+        result["active_test"] = next(reversed(active))
+        result["active_tests"] = [
+            {"node_id": node, "count": count} for node, count in active.items()
+        ]
     return result
 
 
 def _emit(event: str, stage: str, **fields: object) -> None:
+    if _is_worker:
+        return
     print(
         PREFIX + json.dumps({"event": event, "stage": stage, **fields}),
         file=sys.__stdout__,
@@ -211,37 +377,56 @@ def _exception_class(report: object) -> str:
 
 _allowed_nodes: frozenset[str] = frozenset()
 _counts = {"passed": 0, "failed": 0, "skipped": 0, "collection_errors": 0}
+_is_worker = False
 
 
 def pytest_configure(config) -> None:
-    global _allowed_nodes
-    _allowed_nodes = source_test_nodes(Path(config.rootpath))
+    global _allowed_nodes, _is_worker
+    # xdist 3.8.0 replays these hooks on its controller. Workers must not emit
+    # duplicate protocol or write directly to their execnet transport stdout.
+    _is_worker = hasattr(config, "workerinput")
+    _allowed_nodes = frozenset() if _is_worker else source_test_nodes(Path(config.rootpath))
     for key in _counts:
         _counts[key] = 0
 
 
 def pytest_runtest_logstart(nodeid, location) -> None:
     del location
+    if _is_worker:
+        return
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
         _emit("test_started", "pytest", node_id=node)
 
 
 def pytest_runtest_logfinish(nodeid, location) -> None:
     del location
+    if _is_worker:
+        return
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
         _emit("test_finished", "pytest", node_id=node)
 
 
 def pytest_runtest_logreport(report) -> None:
+    if _is_worker:
+        return
     if report.failed:
         _counts["failed"] += 1
         if (node := safe_node(report.nodeid, _allowed_nodes)) is not None:
+            exception = _exception_class(report)
+            diagnostic = (
+                _fixture_note(report)
+                if node == AC16_DIAGNOSTIC_NODE
+                and report.when == "call"
+                and exception == "AssertionError"
+                else None
+            )
             _emit(
                 "test_failed",
                 "pytest",
                 node_id=node,
                 phase=report.when,
-                exception=_exception_class(report),
+                exception=exception,
+                **({"fixture_diagnostic": diagnostic} if diagnostic is not None else {}),
             )
     elif report.skipped:
         _counts["skipped"] += 1
@@ -250,6 +435,8 @@ def pytest_runtest_logreport(report) -> None:
 
 
 def pytest_collectreport(report) -> None:
+    if _is_worker:
+        return
     if report.failed:
         _counts["collection_errors"] += 1
         if (node := safe_node(report.nodeid, _allowed_nodes)) is not None:
@@ -264,6 +451,8 @@ def pytest_collectreport(report) -> None:
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     del session, exitstatus
+    if _is_worker:
+        return
     _emit("pytest_finished", "pytest", **_counts)
 
 

@@ -1,4 +1,4 @@
-"""OBJ-04 guard controls require no native frontend dependencies or real egress."""
+"""OBJ-04 / AC-15 guard controls need no native frontend dependencies or real egress."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import json
 import signal
 import socket
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -150,3 +152,267 @@ def test_obj_04_cleanup_retries_denied_probes_until_confirmed_absent_or_bounded_
         else:
             assert calls == [0, signal.SIGKILL, 0, 0]
     assert log.closed
+
+
+_OBJ04_CANARY_PROBE = r"""
+import errno
+import json
+import socket
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from tests.acceptance.obj_04_guard import GuardRecorder
+from tests.network import python_network_guard as policy
+
+report = Path(sys.argv[2])
+mode = sys.argv[3]
+boundaries = (
+    "getaddrinfo", "create_connection", "connect", "connect_ex", "sendto"
+)
+assert mode == "healthy" or mode in boundaries
+real_socket = socket.socket
+allocations = {"stream": 0, "datagram": 0}
+native_delegate_calls = 0
+observed = []
+sendto_sockets = []
+
+
+class NoIPDatagrams(real_socket):
+    def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM,
+                 proto=0, fileno=None):
+        if family in (socket.AF_INET, socket.AF_INET6):
+            if type & 0xF == socket.SOCK_DGRAM:
+                allocations["datagram"] += 1
+                raise OSError(errno.EAFNOSUPPORT, "datagram_allocation_forbidden")
+            if type & 0xF == socket.SOCK_STREAM:
+                allocations["stream"] += 1
+        super().__init__(family, type, proto, fileno=fileno)
+
+
+def native_backstop(*args, **kwargs):
+    global native_delegate_calls
+    native_delegate_calls += 1
+    raise AssertionError("native_delegate_backstop")
+
+
+# Allocate a real stream socket, but no test failure may reach a real network
+# delegate. These backstops sit BELOW the recorder's own delegate tripwires.
+socket.socket = NoIPDatagrams
+for name in ("connect", "connect_ex", "sendto", "sendmsg"):
+    if hasattr(NoIPDatagrams, name):
+        setattr(NoIPDatagrams, name, native_backstop)
+for name in (
+    "getaddrinfo", "create_connection", "gethostbyname", "gethostbyname_ex",
+    "gethostbyaddr", "getnameinfo",
+):
+    setattr(socket, name, native_backstop)
+
+real_install = policy.install_network_guard
+
+
+def controlled_install():
+    installed = real_install()
+    if mode != "healthy":
+        # Restore just this method's recorder tripwire, not its OS delegate.
+        matches = [item for item in installed.originals if item[1] == mode]
+        assert len(matches) == 1
+        owner, name, tripwire = matches[0]
+        setattr(owner, name, tripwire)
+    for name in boundaries:
+        owner = socket if name in ("getaddrinfo", "create_connection") else socket.socket
+        guarded = getattr(owner, name)
+
+        def witness(*args, _name=name, _guarded=guarded, **kwargs):
+            observed.append(_name)
+            if _name == "sendto":
+                instance = args[0]
+                assert isinstance(instance, real_socket)
+                assert instance.fileno() >= 0
+                sendto_sockets.append({
+                    "family": int(instance.family), "type": int(instance.type)
+                })
+            return _guarded(*args, **kwargs)
+
+        setattr(owner, name, witness)
+    return installed
+
+
+policy.install_network_guard = controlled_install
+recorder = GuardRecorder(report, "isolated-regression")
+before = policy.network_attempt_counts()
+after_install = None
+outcome = "not_started"
+try:
+    recorder.install()
+    after_install = policy.network_attempt_counts()
+    if mode != "healthy":
+        outcome = "broken_boundary_not_detected"
+    else:
+        # Catching a later application denial must not reset either ledger or
+        # reclassify it as one of the five startup canaries.
+        try:
+            socket.getaddrinfo("obj04.invalid", 443)
+        except policy.NetworkAccessBlocked:
+            outcome = "healthy"
+        else:
+            outcome = "post_install_denial_missing"
+except OSError as error:
+    outcome = (
+        "datagram_allocation_forbidden"
+        if error.errno == errno.EAFNOSUPPORT and allocations["datagram"]
+        else "unexpected_os_error"
+    )
+except AssertionError as error:
+    outcome = (
+        "tripwire"
+        if str(error) == "OBJ-04 external call reached delegate tripwire"
+        else "native_delegate_backstop"
+        if str(error) == "native_delegate_backstop"
+        else "unexpected_assertion"
+    )
+except Exception:
+    outcome = "unexpected_exception"
+
+fields = ("canaries_blocked", "external_attempts", "delegate_violations")
+persisted = json.loads(report.read_text()) if report.exists() else {}
+print(json.dumps({
+    "outcome": outcome,
+    "allocations": allocations,
+    "native_delegate_calls": native_delegate_calls,
+    "boundaries": observed,
+    "sendto_sockets": sendto_sockets,
+    "ledger_before": before,
+    "ledger_after_install": after_install,
+    "ledger_after": policy.network_attempt_counts(),
+    "canary_phase": recorder.canary_phase,
+    "counts": {name: recorder.data[name] for name in fields},
+    "persisted_counts": {name: persisted.get(name) for name in fields},
+}, sort_keys=True))
+"""
+
+
+def _obj04_isolated_canary_probe(tmp_path, mode):
+    root = Path(python_network_guard.__file__).resolve().parents[2]
+    before_counts = python_network_guard.network_attempt_counts()
+    before_apis = (
+        socket.socket,
+        socket.socket.connect,
+        socket.socket.connect_ex,
+        socket.socket.sendto,
+        socket.getaddrinfo,
+        socket.create_connection,
+    )
+    result = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            _OBJ04_CANARY_PROBE,
+            str(root),
+            str(tmp_path / "child-report.json"),
+            mode,
+        ),
+        cwd=tmp_path,
+        env={},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert python_network_guard.network_attempt_counts() == before_counts
+    assert (
+        socket.socket,
+        socket.socket.connect,
+        socket.socket.connect_ex,
+        socket.socket.sendto,
+        socket.getaddrinfo,
+        socket.create_connection,
+    ) == before_apis
+    assert result.returncode == 0
+    assert result.stderr == ""
+    proof = json.loads(result.stdout)
+    assert proof["native_delegate_calls"] == 0, proof
+    return proof
+
+
+def test_obj_04_canaries_need_no_ip_datagram_and_preserve_post_install_ledger(tmp_path):
+    proof = _obj04_isolated_canary_probe(tmp_path, "healthy")
+    assert proof["outcome"] == "healthy", proof
+    assert proof["allocations"] == {"stream": 1, "datagram": 0}
+    assert proof["native_delegate_calls"] == 0
+    assert proof["boundaries"] == [
+        "getaddrinfo",
+        "create_connection",
+        "connect",
+        "connect_ex",
+        "sendto",
+        "getaddrinfo",
+    ]
+    assert proof["sendto_sockets"] == [
+        {"family": int(socket.AF_INET), "type": int(socket.SOCK_STREAM)}
+    ]
+    assert proof["ledger_before"] == [0, 0]
+    # Recorder startup canaries are caught intentionally inside install(); they
+    # are not pytest expected-denial scopes and must remain in the child ledger.
+    assert proof["ledger_after_install"] == [5, 5]
+    assert proof["ledger_after"] == [6, 6]
+    assert proof["canary_phase"] is False
+    assert (
+        proof["counts"]
+        == proof["persisted_counts"]
+        == {
+            "canaries_blocked": 5,
+            "external_attempts": 1,
+            "delegate_violations": 0,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "boundary,preceding",
+    (
+        ("getaddrinfo", 0),
+        ("create_connection", 1),
+        ("connect", 2),
+        ("connect_ex", 3),
+        ("sendto", 4),
+    ),
+)
+def test_obj_04_each_broken_canary_hits_tripwire_without_datagram_or_egress(
+    tmp_path, boundary, preceding
+):
+    proof = _obj04_isolated_canary_probe(tmp_path, boundary)
+    assert proof["outcome"] == "tripwire", proof
+    assert proof["allocations"] == {"stream": 1, "datagram": 0}
+    assert proof["native_delegate_calls"] == 0
+    assert (
+        proof["boundaries"]
+        == [
+            "getaddrinfo",
+            "create_connection",
+            "connect",
+            "connect_ex",
+            "sendto",
+        ][: preceding + 1]
+    )
+    assert proof["sendto_sockets"] == (
+        [{"family": int(socket.AF_INET), "type": int(socket.SOCK_STREAM)}]
+        if boundary == "sendto"
+        else []
+    )
+    assert proof["ledger_before"] == [0, 0]
+    assert proof["ledger_after_install"] is None
+    assert proof["ledger_after"] == [preceding, preceding]
+    assert proof["canary_phase"] is True
+    assert (
+        proof["counts"]
+        == proof["persisted_counts"]
+        == {
+            "canaries_blocked": preceding,
+            "external_attempts": 0,
+            "delegate_violations": 1,
+        }
+    )
