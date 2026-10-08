@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { installPlaywrightIsolation } from "../../../scripts/playwright-network-isolation.mjs";
 
 const args = process.argv.slice(2);
 assert.equal(
@@ -23,7 +24,7 @@ assert.equal(
 );
 assert.equal(origin.pathname, "/");
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= "0";
-const { chromium, expect } = await import("@playwright/test");
+const { chromium, expect, request } = await import("@playwright/test");
 const evidence = await mkdtemp(
   join(tmpdir(), "marketing-agents-del05-browser-"),
 );
@@ -34,17 +35,14 @@ const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
   serviceWorkers: "block",
 });
+const isolation = await installPlaywrightIsolation({
+  browser,
+  context,
+  requestFactory: request,
+  allowedOrigin: origin.origin,
+});
 
 try {
-  await context.route("**/*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.origin !== origin.origin) {
-      failures.push("nonlocal_request_blocked");
-      await route.abort("blockedbyclient");
-      return;
-    }
-    await route.continue();
-  });
   await context.routeWebSocket(/.*/, (socket) => {
     failures.push("unexpected_websocket_blocked");
     socket.close();
@@ -117,6 +115,7 @@ try {
     [],
     "production browser must remain healthy and same-origin",
   );
+  await isolation.assertNoExternalAttempts();
   console.log(
     JSON.stringify({
       ok: true,
@@ -135,6 +134,7 @@ try {
     }),
   );
 } finally {
+  isolation.restore();
   await context.close();
   await browser.close();
 }

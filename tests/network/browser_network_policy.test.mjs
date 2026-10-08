@@ -230,6 +230,22 @@ test("DEL-07 WebSocket policy never connects an unapproved origin", async () => 
   assert.throws(() => ledger.assertNoExternalAttempts(), /1 unapproved/);
 });
 
+test("AC-15 caught route removal or HAR replacement cannot disable the guard", async () => {
+  const context = fakeContext();
+  const ledger = await installPlaywrightNetworkGuard(context);
+  const page = fakeSurface();
+  context.emit("page", page);
+  for (const surface of [context, page])
+    for (const method of ["unroute", "unrouteAll", "routeFromHAR"])
+      await assert.rejects(surface[method]("**/*"), /cannot be removed/);
+  assert.deepEqual(ledger.blocked, Array(6).fill("routing-policy"));
+  await context.handler(fakeRoute("http://127.0.0.1:4173/still-guarded"));
+  const denied = fakeRoute("http://127.0.0.1:9999/still-denied");
+  await context.handler(denied);
+  assert.equal(denied.outcome, "aborted");
+  assert.throws(() => ledger.assertNoExternalAttempts(), /7 unapproved/);
+});
+
 test("DEL-07 every committed browser journey imports the automatic guarded fixture", () => {
   const root = fileURLToPath(new URL("../../apps/web/e2e", import.meta.url));
   const specs = readdirSync(root).filter((name) => name.endsWith(".spec.ts"));

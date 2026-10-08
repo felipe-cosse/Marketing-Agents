@@ -1,13 +1,16 @@
-"""Offline gate failures are actionable without exposing runtime payloads."""
+"""AC-15 offline gate failures are actionable without exposing runtime payloads."""
 
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -346,4 +349,261 @@ def test_del_05_diagnostics_actual_collection_error_retains_source_file_not_mess
     assert failure["node_id"] == "tests/test_example.py"
     assert failure["phase"] == "collection"
     assert projected["pytest_summary"]["collection_errors"] == 1
+    assert CANARY not in json.dumps(projected)
+
+
+def _isolated_diagnostics_module():
+    # Never change the real registered plugin's controller/worker globals while
+    # these very tests are executing inside an offline xdist worker.
+    spec = importlib.util.spec_from_file_location(
+        "standalone_diagnostics_probe", project_diagnostics.__code__.co_filename
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_del_05_diagnostics_worker_hooks_never_emit_or_aggregate(source, monkeypatch):
+    module = _isolated_diagnostics_module()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("a worker must not scan controller sources or emit protocol")
+
+    monkeypatch.setattr(module, "source_test_nodes", forbidden)
+    module.pytest_configure(SimpleNamespace(rootpath=source, workerinput={"workerid": CANARY}))
+    assert module._is_worker and module._allowed_nodes == frozenset()
+    monkeypatch.setattr(module, "_emit", forbidden)
+    module.pytest_runtest_logstart(NODE + "[" + CANARY + "]", None)
+    module.pytest_runtest_logfinish(NODE + "[" + CANARY + "]", None)
+    for outcome in ("passed", "failed", "skipped"):
+        report = SimpleNamespace(
+            nodeid=NODE,
+            passed=outcome == "passed",
+            failed=outcome == "failed",
+            skipped=outcome == "skipped",
+            when="call",
+        )
+        module.pytest_runtest_logreport(report)
+        module.pytest_collectreport(report)
+    module.pytest_sessionfinish(None, 1)
+    assert module._counts == {"passed": 0, "failed": 0, "skipped": 0, "collection_errors": 0}
+
+
+def test_del_05_diagnostics_worker_emitter_has_independent_safety_backstop(source, capsys):
+    module = _isolated_diagnostics_module()
+    module.pytest_configure(SimpleNamespace(rootpath=source, workerinput={}))
+    module._emit("pytest_finished", "pytest", private=CANARY)
+    assert capsys.readouterr().out == ""
+
+
+def test_del_05_diagnostics_controller_counts_parameters_without_emitting_ids(source, monkeypatch):
+    module = _isolated_diagnostics_module()
+    module.pytest_configure(SimpleNamespace(rootpath=source))
+    emitted = []
+    monkeypatch.setattr(
+        module,
+        "_emit",
+        lambda kind, stage, **fields: emitted.append({"event": kind, "stage": stage, **fields}),
+    )
+    for index, outcome in enumerate(("passed", "passed", "failed", "skipped")):
+        node = f"{NODE}[{CANARY}-{index}]"
+        module.pytest_runtest_logstart(node, None)
+        module.pytest_runtest_logreport(
+            SimpleNamespace(
+                nodeid=node,
+                passed=outcome == "passed",
+                failed=outcome == "failed",
+                skipped=outcome == "skipped",
+                when="call",
+            )
+        )
+        module.pytest_runtest_logfinish(node, None)
+    module.pytest_collectreport(SimpleNamespace(failed=True, nodeid="tests/test_example.py"))
+    module.pytest_sessionfinish(None, 1)
+    assert emitted[-1] == {
+        "event": "pytest_finished",
+        "stage": "pytest",
+        "passed": 2,
+        "failed": 1,
+        "skipped": 1,
+        "collection_errors": 1,
+    }
+    assert sum(item["event"] == "test_started" for item in emitted) == 4
+    assert sum(item["event"] == "test_finished" for item in emitted) == 4
+    assert CANARY not in json.dumps(emitted)
+
+
+def test_del_05_diagnostics_overlapping_parameter_instances_keep_the_remaining_count(source):
+    other = "tests/test_example.py::TestExample::test_method"
+    output = b"".join(
+        (
+            event("test_started", node_id=f"{NODE}[{CANARY}-first]"),
+            event("test_started", node_id=f"{NODE}[{CANARY}-second]"),
+            event("test_started", node_id=other),
+            event("test_finished", node_id=f"{NODE}[{CANARY}-first]"),
+        )
+    )
+    projected = project_diagnostics(output, None, source)
+    assert projected["active_tests"] == [
+        {"node_id": NODE, "count": 1},
+        {"node_id": other, "count": 1},
+    ]
+    assert projected["active_test"] == other
+    assert CANARY not in json.dumps(projected)
+    output += event("test_finished", node_id=other)
+    projected = project_diagnostics(output, None, source)
+    assert projected["active_tests"] == [{"node_id": NODE, "count": 1}]
+    assert projected["active_test"] == NODE
+    output += event("test_finished", node_id=f"{NODE}[{CANARY}-second]")
+    projected = project_diagnostics(output, None, source)
+    assert "active_test" not in projected and "active_tests" not in projected
+
+
+def test_del_05_diagnostics_active_inventory_and_counts_are_bounded(source, monkeypatch):
+    module = _isolated_diagnostics_module()
+    nodes = [
+        f"tests/test_many.py::test_case_{index}" for index in range(module.MAX_ACTIVE_NODES + 1)
+    ]
+    (source / "tests/test_many.py").write_text(
+        "\n".join(f"def test_case_{index}(): pass" for index in range(len(nodes)))
+    )
+    output = b"".join(event("test_started", node_id=node) for node in nodes)
+    projected = module.project_diagnostics(output, None, source)
+    assert projected["truncated"]
+    assert len(projected["active_tests"]) == module.MAX_ACTIVE_NODES
+    assert len(json.dumps(projected)) < 48_000
+    monkeypatch.setattr(module, "MAX_COUNT", 2)
+    projected = module.project_diagnostics(event("test_started", node_id=NODE) * 3, None, source)
+    assert projected["active_tests"] == [{"node_id": NODE, "count": 2}]
+    assert projected["truncated"]
+
+
+def _xdist_diagnostics_fixture(source):
+    # Missing acquisition is a failure, never an optional/skipped proof.
+    assert importlib.metadata.version("pytest-xdist") == "3.8.0"
+    (source / "pytest.ini").write_text("[pytest]\n")
+    (source / "conftest.py").write_text(
+        "from scripts import del_05_offline_diagnostics as diagnostics\n"
+        "def pytest_configure(config):\n"
+        "    if hasattr(config, 'workerinput'):\n"
+        "        def forbidden(*args, **kwargs):\n"
+        "            raise AssertionError('worker attempted diagnostic protocol')\n"
+        "        diagnostics._emit = forbidden\n"
+    )
+
+
+def _run_xdist_diagnostics(source):
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTEST_ADDOPTS", "PYTEST_PLUGINS"}
+    }
+    environment.update(PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1")
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.del_05_offline_diagnostics",
+            "pytest",
+            "--",
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-n",
+            "2",
+            "--dist=loadfile",
+            "--max-worker-restart=0",
+            "-p",
+            "scripts.del_05_offline_diagnostics",
+        ],
+        cwd=source,
+        env=environment,
+        capture_output=True,
+        timeout=40,
+        check=False,
+    )
+
+
+def _diagnostic_events(output):
+    events = []
+    for line in output.splitlines():
+        marker = line.find(PREFIX.encode())
+        if marker >= 0:
+            events.append(json.loads(line[marker + len(PREFIX) :]))
+    return events
+
+
+def test_del_05_diagnostics_actual_two_workers_emit_one_redacted_aggregate(source):
+    _xdist_diagnostics_fixture(source)
+    (source / "tests/test_example.py").unlink()
+    (source / "barrier").mkdir()
+    for name in ("a", "b"):
+        (source / f"tests/test_{name}.py").write_text(
+            "from pathlib import Path\nimport time\nimport pytest\n"
+            "@pytest.mark.parametrize('value', [0, 1, 2], "
+            f"ids=['{CANARY}-0', '{CANARY}-1', '{CANARY}-2'])\n"
+            "def test_shared(value, worker_id):\n"
+            "    if value == 0:\n"
+            "        assert worker_id in {'gw0', 'gw1'}\n"
+            "        (Path('barrier') / worker_id).write_text('ready')\n"
+            "        deadline = time.monotonic() + 10\n"
+            "        while len(list(Path('barrier').glob('gw[01]'))) != 2:\n"
+            "            assert time.monotonic() < deadline, 'two workers did not overlap'\n"
+            "            time.sleep(0.01)\n"
+            f"    if value == 1 and {name!r} == 'a':\n"
+            f"        raise ValueError('{CANARY}')\n"
+            f"    if value == 2 and {name!r} == 'b':\n"
+            f"        pytest.skip('{CANARY}')\n"
+        )
+    process = _run_xdist_diagnostics(source)
+    assert process.returncode == 1
+    assert {path.name for path in (source / "barrier").iterdir()} == {"gw0", "gw1"}
+    assert CANARY.encode() in process.stdout
+    emitted = _diagnostic_events(process.stdout)
+    assert CANARY not in json.dumps(emitted)
+    assert sum(item["event"] == "test_started" for item in emitted) == 6
+    assert sum(item["event"] == "test_finished" for item in emitted) == 6
+    assert sum(item["event"] == "pytest_finished" for item in emitted) == 1
+    projected = project_diagnostics(process.stdout, process.stderr, source)
+    assert projected["pytest_summary"] == {
+        "passed": 4,
+        "failed": 1,
+        "skipped": 1,
+        "collection_errors": 0,
+    }
+    assert projected["failed_tests"] == [
+        {"node_id": "tests/test_a.py::test_shared", "phase": "call", "exception": "ValueError"}
+    ]
+    assert "active_test" not in projected and "active_tests" not in projected
+    assert projected["stages"] == [{"stage": "pytest", "status": "failed", "returncode": 1}]
+    assert CANARY not in json.dumps(projected)
+    partial = b""
+    maximum_active = 0
+    for item in emitted:
+        partial += (PREFIX + json.dumps(item) + "\n").encode()
+        active = project_diagnostics(partial, None, source).get("active_tests", [])
+        maximum_active = max(maximum_active, sum(item["count"] for item in active))
+    assert maximum_active == 2
+
+
+def test_del_05_diagnostics_actual_two_worker_collection_error_is_not_duplicated(source):
+    _xdist_diagnostics_fixture(source)
+    (source / "tests/test_example.py").write_text(f"raise ImportError('{CANARY}')\n")
+    process = _run_xdist_diagnostics(source)
+    assert process.returncode != 0
+    emitted = _diagnostic_events(process.stdout)
+    assert sum(item["event"] == "pytest_finished" for item in emitted) == 1
+    assert CANARY not in json.dumps(emitted)
+    projected = project_diagnostics(process.stdout, process.stderr, source)
+    assert projected["pytest_summary"] == {
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "collection_errors": 1,
+    }
+    assert len(projected["failed_tests"]) == 1
+    assert projected["failed_tests"][0]["node_id"] == "tests/test_example.py"
+    assert projected["failed_tests"][0]["phase"] == "collection"
     assert CANARY not in json.dumps(projected)
