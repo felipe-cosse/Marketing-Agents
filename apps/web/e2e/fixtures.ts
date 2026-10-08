@@ -1,6 +1,6 @@
 import { test as base, type BrowserContext } from "@playwright/test";
 
-import { installPlaywrightNetworkGuard } from "../../../scripts/browser-network-policy.mjs";
+import { installPlaywrightIsolation } from "../../../scripts/playwright-network-isolation.mjs";
 
 export { expect } from "@playwright/test";
 export type {
@@ -19,7 +19,7 @@ export type {
 const guardedContexts = new WeakSet<BrowserContext>();
 export const test = base.extend<{ del07NetworkIsolation: undefined }>({
   del07NetworkIsolation: [
-    async ({ browser, baseURL, context }, runFixture) => {
+    async ({ browser, baseURL, context, request, playwright }, runFixture) => {
       if (baseURL === undefined)
         throw new Error(
           "DEL-07 browser tests require an exact configured baseURL",
@@ -30,25 +30,18 @@ export const test = base.extend<{ del07NetworkIsolation: undefined }>({
         );
       }
       guardedContexts.add(context);
-      const original = browser.newContext.bind(browser);
-      const guards: Awaited<
-        ReturnType<typeof installPlaywrightNetworkGuard>
-      >[] = [await installPlaywrightNetworkGuard(context, baseURL)];
-      browser.newContext = async (options = {}) => {
-        if (options.serviceWorkers === "allow")
-          throw new Error("DEL-07 browser tests cannot enable service workers");
-        const context = await original({
-          ...options,
-          serviceWorkers: "block",
-        });
-        guards.push(await installPlaywrightNetworkGuard(context, baseURL));
-        return context;
-      };
+      const isolation = await installPlaywrightIsolation({
+        browser,
+        context,
+        request,
+        requestFactory: playwright.request,
+        allowedOrigin: baseURL,
+      });
       try {
         await runFixture(undefined);
       } finally {
-        browser.newContext = original;
-        for (const guard of guards) guard.assertNoExternalAttempts();
+        isolation.restore();
+        await isolation.assertNoExternalAttempts();
       }
     },
     { auto: true },

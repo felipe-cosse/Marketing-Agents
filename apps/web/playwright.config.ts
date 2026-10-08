@@ -41,6 +41,7 @@ export default defineConfig({
       url: "http://127.0.0.1:8000/health/live",
       reuseExistingServer: false,
       timeout: 30_000,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     },
     {
       command: "node_modules/.bin/vite preview --host 127.0.0.1 --port 4173",
@@ -48,6 +49,7 @@ export default defineConfig({
       url: "http://127.0.0.1:4173",
       reuseExistingServer: false,
       timeout: 30_000,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     },
   ],
 });

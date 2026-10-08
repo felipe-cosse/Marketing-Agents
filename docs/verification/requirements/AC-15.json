@@ -1,0 +1,289 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-15",
+  "matrix_statement_sha256": "f088ce7e415bea355ae75e3f96de8a0a736cca0e5b5b10d759ba6c1e62656dda",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "pyproject.toml",
+      "uv.lock",
+      "docker/ac-15.Dockerfile",
+      "scripts/ac_15_offline.py",
+      "scripts/ac_15_browser_transport.py",
+      "scripts/ac_15_kernel_boundary.py",
+      "scripts/ac_15_kernel_bytecode.py",
+      "scripts/ac_15_kernel_client.py",
+      "scripts/ac_15_kernel_collector.py",
+      "scripts/ac_15_kernel_host.py",
+      "scripts/del_05_offline_diagnostics.py",
+      "scripts/browser-network-policy.mjs",
+      "scripts/browser-network-policy.d.mts",
+      "scripts/playwright-network-isolation.mjs",
+      "scripts/playwright-network-isolation.d.mts",
+      "tests/conftest.py",
+      "tests/network/python_network_guard.py",
+      "tests/network/test_safe_11_network_isolation.py",
+      "tests/network/test_ac_15_python_isolation.py",
+      "tests/acceptance/obj_04_guard.py",
+      "tests/acceptance/test_obj_04_native_guard.py",
+      "tests/network/browser_network_policy.test.mjs",
+      "tests/network/playwright_network_isolation.test.mjs",
+      "tests/tooling/test_ac_15_offline.py",
+      "tests/tooling/test_ac_15_streaming.py",
+      "tests/tooling/test_ac_15_browser_transport.py",
+      "tests/tooling/test_ac_15_kernel_boundary.py",
+      "tests/tooling/test_ac_15_kernel_bytecode.py",
+      "tests/tooling/test_ac_15_kernel_collector.py",
+      "tests/tooling/test_ac_15_kernel_protocol.py",
+      "tests/tooling/test_del_05_offline_diagnostics.py",
+      "apps/web/e2e/fixtures.ts",
+      "apps/web/e2e/obj-06-fixtures.ts",
+      "apps/web/config/browser-network-canary.fixture.ts",
+      "apps/web/scripts/run-browser-network-canary.mjs",
+      "apps/web/scripts/run-del-05-e2e.mjs",
+      "apps/web/playwright.config.ts",
+      "apps/web/vitest.config.ts",
+      "apps/web/config/ac15Execution.test.ts",
+      "docs/verification/requirements/AC-15.json",
+      "docs/verification/requirements/AC-15.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "apps/web/config/browser-network-canary.fixture.ts"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/network/test_ac_15_python_isolation.py",
+          "tests/tooling/test_ac_15_offline.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "scripts/ac_15_offline.py",
+          "scripts/playwright-network-isolation.mjs",
+          "tests/network/python_network_guard.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "python-denials-survive-catches",
+      "type": "negative_control",
+      "statement": "Python transport and DNS guards precede delegates, preserve numeric loopback and Unix traffic, and fail caught collection, fixture, body and session denials. Expected-denial scopes acknowledge exactly one real denial and cannot leak acknowledgement to later async work or hide invalid scopes.",
+      "test_refs": [
+        "tests/network/test_ac_15_python_isolation.py",
+        "tests/conftest.py",
+        "tests/acceptance/test_obj_04_native_guard.py"
+      ]
+    },
+    {
+      "id": "browser-transports-fail-closed",
+      "type": "journey",
+      "statement": "Automatic exact-origin browser isolation covers existing and future contexts plus direct API request clients, denies route removal and unsafe context options, and prevents redirects. Actual Chromium negative controls fail teardown with zero loopback-tripwire hits, while permitted local requests and native Fetch Metadata remain usable.",
+      "test_refs": [
+        "apps/web/config/browser-network-canary.fixture.ts",
+        "tests/network/playwright_network_isolation.test.mjs",
+        "tests/network/browser_network_policy.test.mjs"
+      ]
+    },
+    {
+      "id": "exact-source-isolated-full-suites",
+      "type": "journey",
+      "statement": "Explicit frozen dependency acquisition creates a clean committed-source image. All backend, frontend, 16 unfiltered browser runners and explicit native acceptance tests execute in fresh inspected non-root network-none targets with no host mounts. A separate read-only collector has only BPF/PERFMON capabilities. Both roles bind the source and immutable image, preserve private namespaces and use exact owned cleanup; strict phase inventory and descendant quiescence precede every audit snapshot.",
+      "test_refs": [
+        "scripts/ac_15_offline.py",
+        "tests/tooling/test_ac_15_offline.py",
+        "tests/tooling/test_ac_15_streaming.py",
+        "tests/tooling/test_ac_15_kernel_boundary.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_del_05_offline_diagnostics.py",
+        "apps/web/config/ac15Execution.test.ts"
+      ]
+    },
+    {
+      "id": "kernel-and-child-attempt-accountability",
+      "type": "negative_control",
+      "statement": "Kernel denial precedes tests. Native ARM64 target-cgroup entry hooks audit connect/sendto/sendmsg/sendmmsg/prctl/seccomp before filtering; paired exits validate output-only queries. ABI/ELF, inherited-FD, io_uring and quiescence proofs are mandatory. Canaries expose caught external/descendant attempts and both filter installation and denied connect. Browser datagram denial retains real TCP/Unix/Netlink controls. Unknowns, read/state errors and incomplete evidence fail.",
+      "test_refs": [
+        "scripts/ac_15_offline.py",
+        "tests/tooling/test_ac_15_offline.py",
+        "scripts/ac_15_browser_transport.py",
+        "tests/tooling/test_ac_15_browser_transport.py",
+        "scripts/ac_15_kernel_boundary.py",
+        "scripts/ac_15_kernel_bytecode.py",
+        "scripts/ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_boundary.py",
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-15-python-and-runner-controls",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/network/test_ac_15_python_isolation.py",
+        "tests/network/test_safe_11_network_isolation.py",
+        "tests/acceptance/test_obj_04_native_guard.py",
+        "tests/tooling/test_ac_15_offline.py",
+        "tests/tooling/test_ac_15_browser_transport.py",
+        "tests/tooling/test_ac_15_streaming.py",
+        "tests/tooling/test_ac_15_kernel_boundary.py",
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_del_05_offline_diagnostics.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "python-denials-survive-catches",
+        "exact-source-isolated-full-suites",
+        "kernel-and-child-attempt-accountability"
+      ]
+    },
+    {
+      "id": "ac-15-node-transport-and-inventory-controls",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "--test",
+        "tests/network/browser_network_policy.test.mjs",
+        "tests/network/node_network_guard.test.mjs",
+        "tests/network/obj_06_control_witness.test.mjs",
+        "tests/network/playwright_network_isolation.test.mjs",
+        "tests/network/web_e2e_inventory.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "browser-transports-fail-closed",
+        "exact-source-isolated-full-suites"
+      ]
+    },
+    {
+      "id": "ac-15-complete-offline-backend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "backend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "python-denials-survive-catches",
+        "exact-source-isolated-full-suites",
+        "kernel-and-child-attempt-accountability"
+      ]
+    },
+    {
+      "id": "ac-15-complete-offline-frontend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "frontend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "python-denials-survive-catches",
+        "exact-source-isolated-full-suites",
+        "kernel-and-child-attempt-accountability"
+      ]
+    },
+    {
+      "id": "ac-15-complete-offline-browser",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "browser"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "browser-transports-fail-closed",
+        "exact-source-isolated-full-suites",
+        "kernel-and-child-attempt-accountability"
+      ]
+    },
+    {
+      "id": "ac-15-complete-offline-native",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "native"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "python-denials-survive-catches",
+        "exact-source-isolated-full-suites",
+        "kernel-and-child-attempt-accountability"
+      ]
+    },
+    {
+      "id": "ac-15-guard-format",
+      "runner": "argv",
+      "argv": [
+        "apps/web/node_modules/.bin/prettier",
+        "--check",
+        "scripts/browser-network-policy.mjs",
+        "scripts/browser-network-policy.d.mts",
+        "scripts/playwright-network-isolation.mjs",
+        "scripts/playwright-network-isolation.d.mts",
+        "tests/network/browser_network_policy.test.mjs",
+        "tests/network/playwright_network_isolation.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "browser-transports-fail-closed"
+      ]
+    }
+  ],
+  "limitations": [
+    "CI remains disabled at the user's request. All reported execution is local; acquisition downloads are explicitly separate from test execution.",
+    "The host Python and Node guards are not security sandboxes for arbitrary preloaded plugins, native libraries or ordinary subprocesses. Complete-suite evidence additionally requires the inspected Linux network namespace and qualified native ARM64 target-cgroup observation. No ptrace fallback or foreign-ABI acceptance is provided.",
+    "The separate collector requires exactly BPF/PERFMON capabilities, a supported live BTF hook and source-bound bytecode. Global hook attachment filters the target cgroup before register or user-memory reads. Target user-memory snapshots are not an atomic copy of the kernel's later read; no universal adversarial-memory guarantee is claimed.",
+    "Native-only execution is qualified by a fixed inherited audit-architecture guard and bounded native/foreign ELF probes, not by assuming CONFIG_COMPAT is absent. Connected-send evidence depends on no inherited sockets/rings and actual io_uring_setup denial. The writable target layer supports existing cache/build behavior; the separate collector root is read-only.",
+    "The kernel negative controls intentionally attempt the reserved TEST-NET address only after proving that loopback is the sole active interface and all routes remain local. Dormant kernel interfaces must be administratively and operationally down. Browser controls use owned loopback tripwires; Python and Node transport controls use harmless delegates.",
+    "Default suites use deterministic mock providers, SQLite and local browser stacks. Optional PostgreSQL remains opt-in and its default skips do not qualify a real database or providers. This is not deployment or adversarial Docker-administrator isolation.",
+    "Browser evidence qualifies the explicit IP-datagram-disabled test profile, not stock Chromium networking or UDP, QUIC, WebRTC and ordinary DNS behavior. Backend, frontend and native suites do not install the extra browser policy.",
+    "In-memory frontend transport mocks are the repository's existing substitute for MSW. Network denial is independently enforced; no claim is made that MSW is installed.",
+    "Each offline suite requires a clean exact commit and one matching acquired image. It refuses missing dependencies/images, unsafe runtime opt-ins, ambiguous identities or source drift; it never acquires dependencies as a verification fallback."
+  ]
+}

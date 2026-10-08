@@ -64,6 +64,7 @@ export async function installPlaywrightNetworkGuard(
   const promise = (async () => {
     const blocked = [];
     const observed = new WeakSet();
+    const protectedSurfaces = new WeakSet();
     const record = (request, kind) => {
       if (observed.has(request)) return;
       observed.add(request);
@@ -151,6 +152,8 @@ export async function installPlaywrightNetworkGuard(
       return handler(socket);
     };
     const protectRouting = (surface) => {
+      if (protectedSurfaces.has(surface)) return;
+      protectedSurfaces.add(surface);
       const originalRoute = surface.route;
       surface.route = function (pattern, handler, options) {
         return originalRoute.call(this, pattern, httpHandler(handler), options);
@@ -163,6 +166,15 @@ export async function installPlaywrightNetworkGuard(
           websocketHandler(handler),
         );
       };
+      // Removing all routes or replaying HARs can bypass the final boundary.
+      // Individual fixture routes remain supported through the wrappers above.
+      for (const method of ["unroute", "unrouteAll", "routeFromHAR"])
+        surface[method] = () => {
+          blocked.push("routing-policy");
+          return Promise.reject(
+            new Error("browser routing policy cannot be removed or replaced"),
+          );
+        };
     };
     // Independent auditing catches fulfilled requests too; wrapping later route
     // handlers prevents page.route(... route.continue()) bypassing context.route.
