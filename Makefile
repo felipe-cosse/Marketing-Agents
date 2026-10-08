@@ -161,8 +161,8 @@ verify-architecture:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/verify_architecture_boundaries.py
 
 test-network:
-	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m unittest tests.network.test_safe_11_network_isolation
-	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m pytest -q tests/network/test_safe_11_network_isolation.py tests/network/test_ac_15_python_isolation.py
+	node --test tests/network/node_network_guard.test.mjs tests/network/browser_network_policy.test.mjs tests/network/obj_06_control_witness.test.mjs tests/network/playwright_network_isolation.test.mjs tests/network/web_e2e_inventory.test.mjs
 
 test-arch-08-backend:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run pytest -q \
@@ -456,12 +456,12 @@ test-del-05-tooling:
 verify-del-05-offline-backend:
 	python -m scripts.del_05_offline_diagnostics ruff-format-source -- python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 	python -m scripts.del_05_offline_diagnostics ruff-check-source -- python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
-	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py
-	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
 	python -m scripts.del_05_offline_diagnostics mypy -- python -m mypy apps/api/src/marketing_agents
 	python -m scripts.del_05_offline_diagnostics architecture -- python scripts/verify_architecture_boundaries.py
 	python -m scripts.del_05_offline_diagnostics catalog -- python -m marketing_agents.workers.catalog_cli validate --root catalog/v1
-	python -m scripts.del_05_offline_diagnostics pytest -- python -m pytest -q -p scripts.del_05_offline_diagnostics
+	python -m scripts.del_05_offline_diagnostics pytest -- python -m pytest -q -n 2 --dist=loadfile --max-worker-restart=0 -p scripts.del_05_offline_diagnostics
 
 verify-del-05-offline-web:
 	cd apps/web && node_modules/.bin/prettier --check .
@@ -469,3 +469,16 @@ verify-del-05-offline-web:
 	cd apps/web && node_modules/.bin/tsc -b --pretty false
 	cd apps/web && node_modules/.bin/vitest run
 	cd apps/web && node_modules/.bin/vite build
+
+# AC-15: acquisition is explicit; verification only uses an existing immutable
+# image of clean HEAD and cannot install dependencies or enable container egress.
+.PHONY: acquire-offline-tests verify-offline-tests
+AC15_IMAGE ?=
+AC15_SUITE ?=
+AC15_REPORT ?=
+
+acquire-offline-tests:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ac_15_offline.py acquire $(if $(AC15_REPORT),--report "$(AC15_REPORT)",)
+
+verify-offline-tests:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ac_15_offline.py run $(if $(AC15_IMAGE),--image "$(AC15_IMAGE)",) $(if $(AC15_SUITE),--suite "$(AC15_SUITE)",) $(if $(AC15_REPORT),--report "$(AC15_REPORT)",)

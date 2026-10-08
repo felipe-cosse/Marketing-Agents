@@ -48,6 +48,7 @@ EXCEPTIONS = frozenset(
 MAX_STREAM_BYTES = 2 * 1024 * 1024
 MAX_LINE_BYTES = 4096
 MAX_FAILURES = 64
+MAX_ACTIVE_NODES = 64
 MAX_NODE_BYTES = 512
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_COUNT = 1_000_000
@@ -108,6 +109,7 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
     result: dict = {"schema_version": 1, "stages": [], "failed_tests": [], "truncated": False}
     stages: dict[str, dict] = {}
     failures: set[tuple[str, str, str]] = set()
+    active: dict[str, int] = {}
     for stream in (stdout, stderr):
         data = _bytes(stream)
         if len(data) > MAX_STREAM_BYTES:
@@ -151,10 +153,21 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                     continue
                 result["last_stage"] = "pytest"
                 if kind == "test_started":
-                    result["active_test"] = node
+                    count = active.get(node, 0)
+                    if count >= MAX_COUNT or (not count and len(active) >= MAX_ACTIVE_NODES):
+                        result["truncated"] = True
+                        continue
+                    # Parameters are never retained. Count overlapping starts
+                    # of the same source-declared test instead of losing one
+                    # when another parameter instance finishes first.
+                    active.pop(node, None)
+                    active[node] = count + 1
                 elif kind == "test_finished":
-                    if result.get("active_test") == node:
-                        result.pop("active_test", None)
+                    count = active.get(node, 0)
+                    if count > 1:
+                        active[node] = count - 1
+                    else:
+                        active.pop(node, None)
                 else:
                     phase = event.get("phase")
                     exception = event.get("exception")
@@ -186,10 +199,19 @@ def project_diagnostics(stdout: bytes | str | None, stderr: bytes | str | None, 
                 if summary:
                     result["pytest_summary"] = summary
     result["stages"] = list(stages.values())
+    if active:
+        # Retain the previous scalar for serial consumers; the complete bounded
+        # multiset is authoritative when more than one instance is active.
+        result["active_test"] = next(reversed(active))
+        result["active_tests"] = [
+            {"node_id": node, "count": count} for node, count in active.items()
+        ]
     return result
 
 
 def _emit(event: str, stage: str, **fields: object) -> None:
+    if _is_worker:
+        return
     print(
         PREFIX + json.dumps({"event": event, "stage": stage, **fields}),
         file=sys.__stdout__,
@@ -211,28 +233,38 @@ def _exception_class(report: object) -> str:
 
 _allowed_nodes: frozenset[str] = frozenset()
 _counts = {"passed": 0, "failed": 0, "skipped": 0, "collection_errors": 0}
+_is_worker = False
 
 
 def pytest_configure(config) -> None:
-    global _allowed_nodes
-    _allowed_nodes = source_test_nodes(Path(config.rootpath))
+    global _allowed_nodes, _is_worker
+    # xdist 3.8.0 replays these hooks on its controller. Workers must not emit
+    # duplicate protocol or write directly to their execnet transport stdout.
+    _is_worker = hasattr(config, "workerinput")
+    _allowed_nodes = frozenset() if _is_worker else source_test_nodes(Path(config.rootpath))
     for key in _counts:
         _counts[key] = 0
 
 
 def pytest_runtest_logstart(nodeid, location) -> None:
     del location
+    if _is_worker:
+        return
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
         _emit("test_started", "pytest", node_id=node)
 
 
 def pytest_runtest_logfinish(nodeid, location) -> None:
     del location
+    if _is_worker:
+        return
     if (node := safe_node(nodeid, _allowed_nodes)) is not None:
         _emit("test_finished", "pytest", node_id=node)
 
 
 def pytest_runtest_logreport(report) -> None:
+    if _is_worker:
+        return
     if report.failed:
         _counts["failed"] += 1
         if (node := safe_node(report.nodeid, _allowed_nodes)) is not None:
@@ -250,6 +282,8 @@ def pytest_runtest_logreport(report) -> None:
 
 
 def pytest_collectreport(report) -> None:
+    if _is_worker:
+        return
     if report.failed:
         _counts["collection_errors"] += 1
         if (node := safe_node(report.nodeid, _allowed_nodes)) is not None:
@@ -264,6 +298,8 @@ def pytest_collectreport(report) -> None:
 
 def pytest_sessionfinish(session, exitstatus) -> None:
     del session, exitstatus
+    if _is_worker:
+        return
     _emit("pytest_finished", "pytest", **_counts)
 
 
