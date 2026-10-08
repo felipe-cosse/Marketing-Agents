@@ -111,6 +111,9 @@ class QualityRecordTests(unittest.TestCase):
         self.root.mkdir()
         self.git("init", "-q")
         self.git("config", "core.filemode", "true")
+        # AC-15: checkout reflogs need local identity without hostname/DNS fallback.
+        self.git("config", "--local", "user.name", "Fixture")
+        self.git("config", "--local", "user.email", "fixture@example.invalid")
         for relative, content in {
             "source.txt": "original source\n",
             ".gitignore": "*.ignored\n",
@@ -296,6 +299,24 @@ class QualityRecordTests(unittest.TestCase):
         self.assertEqual(expected, runner.gates(coverage))
         with patch.object(runner, "gates", return_value=()):
             self.assertEqual(expected, quality.expected_gates(coverage))
+
+    def test_owned_git_fixture_persists_identity_for_checkout_reflogs(self) -> None:
+        self.assertEqual("Fixture", self.git("config", "--local", "--get", "user.name"))
+        self.assertEqual(
+            "fixture@example.invalid", self.git("config", "--local", "--get", "user.email")
+        )
+        child = self.commit_tree(self.identity["commit"])
+        self.git("checkout", "--detach", "-q", child)
+        self.assertEqual(child, self.git("rev-parse", "HEAD"))
+        self.assertEqual(
+            ["Fixture", "fixture@example.invalid"],
+            self.git("reflog", "show", "-1", "--format=%gn%n%ge", "HEAD").splitlines(),
+        )
+        self.assertTrue(
+            self.git("reflog", "show", "-1", "--format=%gs", "HEAD").startswith(
+                "checkout: moving from "
+            )
+        )
 
     def test_source_identity_binds_commit_tree_file_bytes_modes_and_locks(self) -> None:
         self.assertEqual(self.git("rev-parse", "HEAD"), self.identity["commit"])
