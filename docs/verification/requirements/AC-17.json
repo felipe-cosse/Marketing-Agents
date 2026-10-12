@@ -1,0 +1,111 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-17",
+  "matrix_statement_sha256": "fd52a4584c96e1c812d6e70902ed7c6b5071e75f83bf257f56f94bc45f4a9dc9",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "README.md",
+      "docs/architecture.md",
+      "docs/catalog-authoring.md",
+      "docs/operations.md",
+      "docs/testing.md",
+      "docs/verification.md",
+      "scripts/verify_ac_17_claims.py",
+      "tests/tooling/test_ac_17_claim_taxonomy.py",
+      "docs/verification/requirements/AC-17.json",
+      "docs/verification/requirements/AC-17.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/tooling/test_ac_17_claim_taxonomy.py"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_ac_17_claim_taxonomy.py"]},
+      {"kind": "implementation", "one_of": ["README.md", "docs/testing.md"]},
+      {"kind": "control", "one_of": ["scripts/verify_ac_17_claims.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "current-guide-claim-review",
+      "type": "journey",
+      "statement": "The offline documentation review traverses all 13 required product guides and checks a curated set of significant sections for claim labels, scope limits and local evidence. Current workflow, verification-command and browser-fixture descriptions match their inspected source contracts rather than stale demo-only or unimplemented-aggregate statements.",
+      "test_refs": ["tests/tooling/test_ac_17_claim_taxonomy.py"]
+    },
+    {
+      "id": "credentials-assumptions-and-residual-risks",
+      "type": "documentation",
+      "statement": "The reviewed guides distinguish credential-free deterministic mocks and networked dependency acquisition from deferred credential-bearing provider work. They preserve the assumption register and explicit local self-approval, host trust, web outbound, retention, optional PostgreSQL and remote exactly-once limitations.",
+      "test_refs": ["tests/tooling/test_ac_17_claim_taxonomy.py"]
+    },
+    {
+      "id": "historical-evidence-is-not-current-acceptance",
+      "type": "documentation",
+      "statement": "The dated AC-17 documentation review identifies the inspected product baseline, separates source review from product reruns, preserves historical results and their limitations, and explicitly leaves AC-15, AC-16 and final-source acceptance unverified. Command availability or successful documentation checks do not promote those targets to verified behavior.",
+      "test_refs": ["tests/tooling/test_ac_17_claim_taxonomy.py"]
+    },
+    {
+      "id": "claim-distinction-negative-controls",
+      "type": "negative_control",
+      "statement": "Copied-root controls delete or misclassify significant claim distinctions, remove evidence and restore stale scopes; the bounded checker rejects them without executing examples or fetching external pages. A separate witness restores only corrected guides to main while retaining the new checker/tests and must fail for documentation content.",
+      "test_refs": ["tests/tooling/test_ac_17_claim_taxonomy.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-17-current-claim-review",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.verify_ac_17_claims"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["current-guide-claim-review", "credentials-assumptions-and-residual-risks", "historical-evidence-is-not-current-acceptance"]
+    },
+    {
+      "id": "ac-17-claim-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "unittest", "tests.tooling.test_ac_17_claim_taxonomy"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["current-guide-claim-review", "credentials-assumptions-and-residual-risks", "historical-evidence-is-not-current-acceptance", "claim-distinction-negative-controls"]
+    },
+    {
+      "id": "ac-17-product-doc-regressions",
+      "runner": "argv",
+      "argv": ["make", "test-del-06-docs", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["current-guide-claim-review", "claim-distinction-negative-controls"]
+    },
+    {
+      "id": "ac-17-assumption-register",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "unittest", "tests.source.test_src_03_assumption_register"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["credentials-assumptions-and-residual-risks"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "README.md",
+      "docs/architecture.md",
+      "docs/catalog-authoring.md",
+      "docs/operations.md",
+      "docs/testing.md",
+      "docs/verification.md"
+    ],
+    "gate_id": "ac-17-current-claim-review"
+  },
+  "limitations": [
+    "This acceptance requirement is a documentation-reading journey, not a browser, worker, provider or deployment journey. It changes no application, adapter, database, network enforcement, Docker settings or CI behavior.",
+    "Curated section contracts and negative controls catch specific omissions and regressions; they are not a semantic proof of arbitrary prose. Independent source review supplements the mechanical tests, and referenced historical behavior tests were not rerun by AC-17.",
+    "The inspection baseline is main after AC-14. The unmerged AC-15 checkpoint and separate diagnostics remain unchanged, and AC-15, AC-16 and final-source acceptance remain unverified.",
+    "All documentation checks are offline, read-only source consumers. This does not establish kernel-level network isolation for arbitrary test subprocesses or complete the four full AC-15 suites.",
+    "Real provider credentials and delivery, optional PostgreSQL runtime, physical retention maintenance, multi-user production identity and remote exactly-once effects are not qualified by documentation checks.",
+    "GitHub CI remains paused by user direction. No remote checks, publication or history rewrite are part of this requirement; historical verification dates, outcomes and limitations are preserved."
+  ]
+}

@@ -48,7 +48,7 @@ ignored caches or build output.
 | `make verify-clean REF=HEAD` | Exact committed export, fresh Docker storage, deployed demos/replay, offline suites, production browser smoke, owned cleanup. Does not test uncommitted edits. |
 | `make verify` | Ordered catalog-first local static, repository, network, backend coverage, frontend and full browser gates, then source-drift comparison. Stops at the first failure. |
 | `make test` | Catalog validation, full backend discovery, network canaries, frontend units and full browser journeys, sequential even under parallel Make. Static/coverage enforcement belongs to `verify`. |
-| `make test-frontend` / `make test-e2e` | Frontend unit suite / all 15 owned browser specs. New unowned, missing, empty or filtered browser inventory fails closed. |
+| `make test-frontend` / `make test-e2e` | Frontend unit suite / all 16 owned browser runners, including OBJ-06. New unowned, missing, empty or filtered browser inventory fails closed. |
 | `make test-contract` / `make test-integration` | Independently runnable Python contract / integration directories. Empty pytest collection fails. |
 | `make test-del-07-backend` | Catalog-first backend static/full pytest and all 17 coverage thresholds, using the same gates and fresh report isolation as `verify`. |
 | `make test-del-07-browser-network` | Actual Chromium positive/negative controls for the automatic exact-origin fixture, using a private loopback tripwire and no external destination. |
@@ -97,8 +97,13 @@ exercises the actual setup connection with stub delegates, so even a broken
 guard cannot egress during its negative control. This remains application-level
 instrumentation, not an OS firewall or protection against arbitrary child tools.
 
-All browser specs now use the automatic [fixture](../apps/web/e2e/fixtures.ts).
-It guards default and explicitly created contexts, blocks service workers,
+## Current browser verification scope
+
+Claim: **Implemented but not live-tested** by this documentation review — the
+current [browser inventory](../apps/web/scripts/browser-evidence-inventory.mjs)
+declares 16 browser runners with unfiltered execution. The 15 established browser
+runners use the automatic [fixture](../apps/web/e2e/fixtures.ts). It guards default
+and explicitly created contexts, blocks service workers,
 permits only the configured loopback origin (and matching WebSocket origin),
 and fails on denied HTTP/WebSocket attempts even if the page catches the error.
 In-memory API route mocks remain usable; registered route handlers cannot
@@ -108,11 +113,26 @@ responses are denied before fulfillment (304 cache responses remain allowed).
 This intentionally rejects even same-origin redirects; context reuse is also
 unsupported and rejected. The separate actual Chromium canary checks zero
 requests reached its unapproved loopback tripwire.
-The recorded full rerun passed all 15 runners and 32 cases with this boundary.
-Demo browser mutations use explicit route mocks. A separate composed native
-smoke verifies real overview endpoints and desktop/mobile UI health, while
-actual API/worker mutation and restart behavior has separate process tests;
-their combined successes are not one integrated browser-to-worker journey.
+Demo browser mutations in those runners use explicit route mocks.
+
+Claim: **Deterministic mock behavior** — the separate
+[OBJ-06 fixture](../apps/web/e2e/obj-06-fixtures.ts) drives the real supervised
+local API, workers and UI with native browser transport, not route-mocked
+application responses. Its exact-origin and response-stage controls preserve
+redirect and external-request denial. The
+[OBJ-06 record](verification/requirements/OBJ-06.md) scopes two journeys: desktop
+approval and mobile artifact inspection, not browser coverage of every role. Its
+providers remain deterministic mocks, so these integrated browser-to-worker
+journeys do not prove external delivery.
+
+The historical DEL-07 run on 2026-09-11 passed 15 runners and 32 cases, as recorded
+in [verification](verification.md). Those counts are not the current inventory or
+a new result for the expanded suite. This documentation review establishes no
+fresh full-suite pass, AC-15 no-external-call acceptance, AC-16 quality-gate pass,
+or final release acceptance. Browser interception is not a universal
+operating-system egress boundary for arbitrary child processes.
+
+## Optional PostgreSQL compatibility
 
 Optional PostgreSQL tests use an opt-in temporary Unix-socket cluster and the
 project's optional `postgresql` dependency. Install the extra and supported
