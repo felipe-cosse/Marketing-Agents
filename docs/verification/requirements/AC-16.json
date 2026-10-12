@@ -1,0 +1,65 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-16",
+  "matrix_statement_sha256": "aad8edf2b4bf58c67859e0154999c7c429c87380390985569d5dc4dee8a0fb7d",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "scripts/ac_16_quality.py",
+      "tests/tooling/test_ac_16_quality.py",
+      "Makefile",
+      "docs/verification/requirements/AC-16.json",
+      "docs/verification/requirements/AC-16.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "journey", "one_of": ["tests/tooling/test_ac_16_quality.py"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_ac_16_quality.py"]},
+      {"kind": "control", "one_of": ["scripts/ac_16_quality.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "source-bound-complete-quality-journey",
+      "type": "journey",
+      "statement": "The AC-16 run wrapper invokes the complete, unfiltered 20-gate local quality aggregate behind make verify and binds its external record to the source tree. Acceptance requires an independently observed full run and a matching complete successful record; wrapper tests or a report audit alone are not execution proof.",
+      "test_refs": ["tests/tooling/test_ac_16_quality.py"]
+    },
+    {
+      "id": "quality-report-consistency-boundary",
+      "type": "negative_control",
+      "statement": "The bounded audit rejects missing, incomplete, failed or source-mismatched quality evidence. It checks a host-trusted tree-keyed record for consistency, not authenticated execution, and does not convert local quality results into AC-15 no-external-network proof or final clean-state acceptance.",
+      "test_refs": ["tests/tooling/test_ac_16_quality.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-16-quality-wrapper-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "unittest", "tests.tooling.test_ac_16_quality"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["source-bound-complete-quality-journey", "quality-report-consistency-boundary"]
+    },
+    {
+      "id": "ac-16-source-bound-quality-audit",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.ac_16_quality", "audit"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["source-bound-complete-quality-journey", "quality-report-consistency-boundary"]
+    }
+  ],
+  "limitations": [
+    "The full quality run is a separately observed execution of python -B -m scripts.ac_16_quality run. The short manifest gates exercise wrapper regressions and audit its actual external record; they do not rerun the full aggregate or replace direct observation with synthetic evidence.",
+    "The audit checks source and report consistency on a trusted local host. It does not authenticate execution or defend against an administrator fabricating a fully consistent report. Missing actual full-run evidence remains a verification failure.",
+    "The complete local aggregate contains 20 gates, the existing 17-module safety-coverage policy and all 16 registered browser runners. The policy's existing source-pinned coverage exclusion remains explicit; a coverage pass is not exhaustive semantic or interleaving proof.",
+    "The local quality aggregate does not select the additional clean-state and paired Compose backup acceptance gates or separately qualify native startup/restart acceptance. It is not DEL-01, EXEC-07 or final-source release acceptance.",
+    "Existing local network guards and canaries remain unchanged. AC-15's independent kernel-level no-external-network acceptance and its pending classification decision are neither completed nor waived; no Docker or network policy change is authorized by AC-16.",
+    "History evidence gate deadlines remain unchanged. The separately observed aggregate retains its existing per-gate timeouts; the bounded audit is not a weakened or filtered substitute for that execution.",
+    "CI remains paused. No provider credentials, external delivery, optional PostgreSQL qualification, production identity, deployment or remote exactly-once result is established by this local quality requirement. Generated evidence remains sanitized and outside Git."
+  ]
+}
