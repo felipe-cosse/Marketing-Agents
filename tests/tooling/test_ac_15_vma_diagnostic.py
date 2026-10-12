@@ -1,5 +1,7 @@
 """Fake-only VMA diagnostic tests: never create mappings, Docker, or BPF hooks."""
 
+import gzip
+import hashlib
 import json
 import subprocess
 from contextlib import nullcontext
@@ -16,6 +18,13 @@ from tests.tooling import test_ac_15_kernel_protocol as protocol
 SOURCE = protocol.SOURCE
 IMAGE = "sha256:" + "f" * 64
 MANIFEST = {**SOURCE, "files": {"scripts/ac_15_kernel_boundary.py": {"sha256": "e" * 64}}}
+CONFIGURATION = {
+    "release": "7.0.14-test",
+    "config_sha256": "1" * 64,
+    "anon_vma_name": "disabled",
+    "reason": None,
+}
+READ_KERNEL_CONFIGURATION = diagnostic.kernel_configuration
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +36,8 @@ def no_native_execution(monkeypatch):
     monkeypatch.setattr(diagnostic.subprocess, "run", forbidden)
     monkeypatch.setattr(diagnostic.subprocess, "Popen", forbidden)
     monkeypatch.setattr(diagnostic.boundary, "qualify_target", forbidden)
+    monkeypatch.setattr(diagnostic, "bounded_read", forbidden)
+    monkeypatch.setattr(diagnostic, "kernel_configuration", lambda: deepcopy(CONFIGURATION))
 
 
 def fake_runner(tmp_path):
@@ -53,7 +64,192 @@ def observation(case="untouched", error=0):
         "return_code": -1 if error else 0,
         "errno": error,
         "mappings_released": True,
+        "kernel_configuration": deepcopy(CONFIGURATION),
     }
+
+
+def fake_configuration(monkeypatch, raw, *, compressed=None):
+    calls = []
+
+    def read(path, maximum):
+        calls.append((path, maximum))
+        return gzip.compress(raw, mtime=0) if compressed is None else compressed
+
+    monkeypatch.setattr(diagnostic.platform, "release", lambda: "7.0.14-test")
+    monkeypatch.setattr(diagnostic, "bounded_read", read)
+    result = READ_KERNEL_CONFIGURATION()
+    assert calls == [("/proc/config.gz", 2 * 1024**2)]
+    diagnostic.validate_configuration(result)
+    return result
+
+
+@pytest.mark.parametrize(
+    "raw,state,reason",
+    [
+        (b"CONFIG_ANON_VMA_NAME=y\n", "enabled", None),
+        (b"# CONFIG_ANON_VMA_NAME is not set\n", "disabled", None),
+        (b"CONFIG_OTHER=y\n", "unknown", "missing_symbol"),
+        (b"CONFIG_ANON_VMA_NAME_EXTRA=y\n", "unknown", "missing_symbol"),
+        (b"CONFIG_ANON_VMA_NAME=y\n" * 2, "unknown", "duplicate_symbol"),
+        (
+            b"CONFIG_ANON_VMA_NAME=y\n# CONFIG_ANON_VMA_NAME is not set\n",
+            "unknown",
+            "duplicate_symbol",
+        ),
+        (b"CONFIG_ANON_VMA_NAME=n\n", "unknown", "invalid_symbol"),
+        (b"CONFIG_ANON_VMA_NAME=m\n", "unknown", "invalid_symbol"),
+        (b" CONFIG_ANON_VMA_NAME=y\n", "unknown", "invalid_symbol"),
+        (b"# CONFIG_ANON_VMA_NAME not set\n", "unknown", "invalid_symbol"),
+    ],
+)
+def test_live_configuration_exact_symbol_and_raw_config_hash(monkeypatch, raw, state, reason):
+    result = fake_configuration(monkeypatch, raw)
+    assert result == {
+        "release": "7.0.14-test",
+        "config_sha256": hashlib.sha256(raw).hexdigest(),
+        "anon_vma_name": state,
+        "reason": reason,
+    }
+
+
+@pytest.mark.parametrize(
+    "failure,reason",
+    [
+        (FileNotFoundError, "config_missing"),
+        (PermissionError, "config_denied"),
+        (OSError, "config_unavailable"),
+        (ValueError, "compressed_bound"),
+    ],
+)
+def test_live_configuration_unavailable_is_unknown_and_sanitized(monkeypatch, failure, reason):
+    calls = []
+
+    def read(path, maximum):
+        calls.append((path, maximum))
+        raise failure("do-not-disclose-config-path-or-content")
+
+    monkeypatch.setattr(diagnostic.platform, "release", lambda: "7.0.14-test")
+    monkeypatch.setattr(diagnostic, "bounded_read", read)
+    result = READ_KERNEL_CONFIGURATION()
+    assert calls == [("/proc/config.gz", 2 * 1024**2)]
+    assert result == {
+        "release": "7.0.14-test",
+        "config_sha256": None,
+        "anon_vma_name": "unknown",
+        "reason": reason,
+    }
+    diagnostic.validate_configuration(result)
+
+
+@pytest.mark.parametrize("release", ["7.0.14\nSECRET", "x" * 129, "", None, True, OSError])
+def test_live_configuration_invalid_release_does_not_read_config(monkeypatch, release):
+    def read_release():
+        if release is OSError:
+            raise OSError("do-not-disclose")
+        return release
+
+    monkeypatch.setattr(diagnostic.platform, "release", read_release)
+    # The autouse guard rejects any config read in this branch.
+    result = READ_KERNEL_CONFIGURATION()
+    assert result == {
+        "release": None,
+        "config_sha256": None,
+        "anon_vma_name": "unknown",
+        "reason": "release_unavailable",
+    }
+    diagnostic.validate_configuration(result)
+
+
+@pytest.mark.parametrize("fault", ["invalid", "truncated", "concatenated", "trailing", "text"])
+def test_live_configuration_invalid_compression_or_text_is_unknown(monkeypatch, fault):
+    raw = b"CONFIG_ANON_VMA_NAME=y\n"
+    compressed = gzip.compress(raw, mtime=0)
+    if fault == "invalid":
+        compressed = b"not-gzip"
+    elif fault == "truncated":
+        compressed = compressed[:-1]
+    elif fault == "concatenated":
+        compressed += gzip.compress(raw, mtime=0)
+    elif fault == "trailing":
+        compressed += b"trailing-content"
+    else:
+        compressed = gzip.compress(raw + b"\xff", mtime=0)
+    result = fake_configuration(monkeypatch, raw, compressed=compressed)
+    assert result["anon_vma_name"] == "unknown"
+    assert result["config_sha256"] is None
+    assert result["reason"] == ("invalid_config_text" if fault == "text" else "invalid_gzip")
+
+
+@pytest.mark.parametrize("excess", [0, 1, 100000])
+def test_live_configuration_decompression_cannot_exceed_bound(monkeypatch, excess):
+    raw = b"CONFIG_ANON_VMA_NAME=y\n"
+    monkeypatch.setattr(diagnostic, "MAX_CONFIG_DECOMPRESSED", len(raw))
+    result = fake_configuration(monkeypatch, raw + b"#" * excess)
+    if excess:
+        assert result["anon_vma_name"] == "unknown"
+        assert result["config_sha256"] is None
+        assert result["reason"] == "decompressed_bound"
+    else:
+        assert result["anon_vma_name"] == "enabled"
+        assert result["config_sha256"] == hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("release", None),
+        ("release", "7.0.14\nSECRET"),
+        ("release", True),
+        ("config_sha256", None),
+        ("config_sha256", "A" * 64),
+        ("config_sha256", "1" * 63),
+        ("config_sha256", False),
+        ("anon_vma_name", "unknown"),
+        ("anon_vma_name", "yes"),
+        ("anon_vma_name", []),
+        ("reason", "config_missing"),
+        ("reason", []),
+        ("raw_config", "CONFIG_ANON_VMA_NAME=y"),
+        ("path", "/proc/config.gz"),
+    ],
+)
+def test_configuration_projection_rejects_invalid_known_metadata(key, value):
+    body = deepcopy(CONFIGURATION)
+    body[key] = value
+    with pytest.raises(VerificationFailure, match="config_invalid"):
+        diagnostic.validate_configuration(body)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"reason": None},
+        {"reason": "not_fixed_reason"},
+        {"reason": "config_missing", "config_sha256": "1" * 64},
+        {"reason": "release_unavailable", "release": "7.0.14-test"},
+        {"reason": "config_denied", "release": None},
+        {"reason": "missing_symbol"},
+    ],
+)
+def test_configuration_unknown_requires_consistent_evidence(changes):
+    body = {**CONFIGURATION, "anon_vma_name": "unknown", "config_sha256": None, **changes}
+    with pytest.raises(VerificationFailure, match="config_invalid"):
+        diagnostic.validate_configuration(body)
+
+
+@pytest.mark.parametrize("key", ["release", "config_sha256", "anon_vma_name", "reason"])
+def test_probe_requires_complete_configuration_metadata(key):
+    body = observation()
+    del body["kernel_configuration"][key]
+    with pytest.raises(VerificationFailure, match="config_invalid"):
+        diagnostic.validate_probe(body, "untouched")
+
+
+def test_probe_cannot_omit_live_configuration_metadata():
+    body = observation()
+    del body["kernel_configuration"]
+    with pytest.raises(VerificationFailure, match="probe_invalid"):
+        diagnostic.validate_probe(body, "untouched")
 
 
 @pytest.mark.parametrize("case", diagnostic.CASES)
@@ -85,6 +281,15 @@ def test_probe_makes_one_fixed_native_call_and_unmaps_only_owned_pages(monkeypat
         return SimpleNamespace(value=0)
 
     monkeypatch.setattr(diagnostic.ctypes, "c_ubyte", SimpleNamespace(from_address=read))
+
+    def configuration():
+        assert [item for item in calls if item[0] == "munmap"] == [
+            ("munmap", (0x2000, 4096)),
+            ("munmap", (0x1000, 4096)),
+        ]
+        return deepcopy(CONFIGURATION)
+
+    monkeypatch.setattr(diagnostic, "kernel_configuration", configuration)
     result = diagnostic.probe(case)
     assert result == observation(case, error)
     assert calls[0] == ("profile",)

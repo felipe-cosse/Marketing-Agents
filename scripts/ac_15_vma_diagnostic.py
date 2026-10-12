@@ -10,13 +10,16 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 from scripts import ac_15_kernel_boundary as boundary
@@ -48,6 +51,106 @@ HOST_SECONDS = 60
 CLEANUP_SECONDS = 30
 SOURCE_KEYS = ("source_commit", "source_tree", "source_sha256")
 FAILURES = (VerificationFailure, OSError, ValueError, KeyError, subprocess.SubprocessError)
+MAX_CONFIG_COMPRESSED = 2 * 1024**2
+MAX_CONFIG_DECOMPRESSED = 4 * 1024**2
+CONFIG_VALUE_REASONS = frozenset({"missing_symbol", "duplicate_symbol", "invalid_symbol"})
+CONFIG_UNAVAILABLE_REASONS = frozenset(
+    {
+        "release_unavailable",
+        "config_missing",
+        "config_denied",
+        "config_unavailable",
+        "compressed_bound",
+        "decompressed_bound",
+        "invalid_gzip",
+        "invalid_config_text",
+    }
+)
+
+
+def kernel_configuration() -> dict:
+    """Read the live kernel's embedded config, never an installed substitute.
+
+    Hash only the bounded decompressed bytes. Missing/ambiguous evidence is
+    unknown, not disabled. No raw config, path, or exception text is returned.
+    """
+    result = {"release": None, "config_sha256": None, "anon_vma_name": "unknown", "reason": None}
+    try:
+        release = platform.release()
+        if type(release) is not str or not re.fullmatch(r"[A-Za-z0-9_.+-]{1,128}", release):
+            raise ValueError
+        result["release"] = release
+    except (OSError, ValueError):
+        return {**result, "reason": "release_unavailable"}
+    try:
+        compressed = bounded_read("/proc/config.gz", MAX_CONFIG_COMPRESSED)
+    except FileNotFoundError:
+        return {**result, "reason": "config_missing"}
+    except PermissionError:
+        return {**result, "reason": "config_denied"}
+    except OSError:
+        return {**result, "reason": "config_unavailable"}
+    except ValueError:
+        return {**result, "reason": "compressed_bound"}
+    try:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = decoder.decompress(compressed, MAX_CONFIG_DECOMPRESSED + 1)
+        if len(raw) > MAX_CONFIG_DECOMPRESSED:
+            return {**result, "reason": "decompressed_bound"}
+        if not decoder.eof or decoder.unconsumed_tail or decoder.unused_data:
+            return {**result, "reason": "invalid_gzip"}
+        text = raw.decode("ascii")
+    except zlib.error:
+        return {**result, "reason": "invalid_gzip"}
+    except UnicodeDecodeError:
+        return {**result, "reason": "invalid_config_text"}
+    result["config_sha256"] = hashlib.sha256(raw).hexdigest()
+    matches = [
+        line
+        for line in text.splitlines()
+        if re.match(r"(?:#\s+)?CONFIG_ANON_VMA_NAME(?:[=\s]|$)", line.lstrip())
+    ]
+    if not matches:
+        return {**result, "reason": "missing_symbol"}
+    if len(matches) != 1:
+        return {**result, "reason": "duplicate_symbol"}
+    if matches[0] == "CONFIG_ANON_VMA_NAME=y":
+        return {**result, "anon_vma_name": "enabled"}
+    if matches[0] == "# CONFIG_ANON_VMA_NAME is not set":
+        return {**result, "anon_vma_name": "disabled"}
+    return {**result, "reason": "invalid_symbol"}
+
+
+def validate_configuration(value: dict) -> None:
+    require(
+        type(value) is dict
+        and set(value) == {"release", "config_sha256", "anon_vma_name", "reason"},
+        "vma_diagnostic_config_invalid",
+    )
+    release, digest, state, reason = (
+        value[key] for key in ("release", "config_sha256", "anon_vma_name", "reason")
+    )
+    release_valid = type(release) is str and re.fullmatch(r"[A-Za-z0-9_.+-]{1,128}", release)
+    digest_valid = type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest)
+    known = state in ("enabled", "disabled") and release_valid and digest_valid and reason is None
+    unavailable = (
+        state == "unknown"
+        and type(reason) is str
+        and reason in CONFIG_UNAVAILABLE_REASONS
+        and digest is None
+        and (
+            (reason == "release_unavailable" and release is None)
+            or (reason != "release_unavailable" and release_valid)
+        )
+    )
+    ambiguous = (
+        state == "unknown"
+        and type(reason) is str
+        and reason in CONFIG_VALUE_REASONS
+        and release_valid
+        and digest_valid
+    )
+    require(known or unavailable or ambiguous, "vma_diagnostic_config_invalid")
 
 
 def read_manifest() -> dict:
@@ -146,13 +249,20 @@ def probe(case: str) -> dict:
             except (OSError, ValueError):
                 clean = False
         require(clean, "vma_diagnostic_mapping_cleanup_failed")
-    return {"case": case, "return_code": result, "errno": error, "mappings_released": True}
+    return {
+        "case": case,
+        "return_code": result,
+        "errno": error,
+        "mappings_released": True,
+        "kernel_configuration": kernel_configuration(),
+    }
 
 
 def validate_probe(value: dict, case: str) -> None:
     require(
         type(value) is dict
-        and set(value) == {"case", "return_code", "errno", "mappings_released"}
+        and set(value)
+        == {"case", "return_code", "errno", "mappings_released", "kernel_configuration"}
         and value["case"] == case
         and type(value["return_code"]) is int
         and value["return_code"] in (0, -1)
@@ -162,6 +272,7 @@ def validate_probe(value: dict, case: str) -> None:
         and value["mappings_released"] is True,
         "vma_diagnostic_probe_invalid",
     )
+    validate_configuration(value["kernel_configuration"])
 
 
 def strict_observation(summary: dict) -> str | None:
