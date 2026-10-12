@@ -304,6 +304,50 @@ async def test_del_07_stale_snapshot_recovery_keeps_cas_losses_and_live_leases_n
 
 
 @pytest.mark.asyncio
+async def test_ac_16_unknown_outcome_recovery_preserves_a_newer_success_without_side_effects() -> (
+    None
+):
+    fixture = _completion_fixture()
+    snapshot = replace(fixture.action, delivery_attempt_limit=fixture.action.delivery_attempt_count)
+    completed = replace(fixture.completed, delivery_attempt_limit=snapshot.delivery_attempt_limit)
+    now = fixture.clock.now()
+    assert (
+        dispatch_module.classify_stale_action_recovery(snapshot, now=now)
+        is StaleActionRecoveryDecision.OUTCOME_UNKNOWN
+    )
+    # Earlier reconciliation found no authoritative result. A concurrent worker
+    # succeeds before the fresh read at the outcome-unknown finalization boundary.
+    fixture.dispatcher._finalize_terminal_parent_call = AsyncMock(return_value=None)
+    fixture.dispatcher._reconcile_durable_receipt = AsyncMock(return_value=None)
+    fixture.uow.external_actions.get.return_value = completed
+    fixture.dispatcher._write_completion_context = AsyncMock()
+    fixture.dispatcher._finalize_write_outcome_in_uow = AsyncMock()
+    fixture.dispatcher._release_stale = AsyncMock()
+    fixture.dispatcher.dispatch_once = AsyncMock()
+
+    result = await fixture.dispatcher._recover_snapshot(
+        snapshot, lease_owner="worker.recovery", now=now
+    )
+
+    assert result is not None
+    assert result.disposition is DispatchDisposition.ALREADY_SUCCEEDED
+    assert result.action is completed
+    fixture.uow.external_actions.get.assert_awaited_once_with(snapshot.id)
+    fixture.dispatcher._finalize_terminal_parent_call.assert_awaited_once_with(snapshot)
+    assert snapshot.lease is not None
+    fixture.dispatcher._reconcile_durable_receipt.assert_awaited_once_with(
+        snapshot, lease_owner=snapshot.lease.owner
+    )
+    fixture.dispatcher._write_completion_context.assert_not_awaited()
+    fixture.dispatcher._finalize_write_outcome_in_uow.assert_not_awaited()
+    fixture.dispatcher._release_stale.assert_not_awaited()
+    fixture.dispatcher.dispatch_once.assert_not_awaited()
+    fixture.uow.audits.append_many.assert_not_awaited()
+    fixture.uow.commit.assert_not_awaited()
+    fixture.gateway.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_del_07_stale_release_cas_loss_does_not_commit_and_missing_action_is_explicit() -> (
     None
 ):

@@ -350,6 +350,8 @@ api-contract-generate:
 	node tools/api-contract/generate.mjs --write
 
 verify-repository:
+	$(UV) run --offline --frozen ruff format --check scripts/ac_16_quality.py tests/tooling/test_ac_16_quality.py
+	$(UV) run --offline --frozen ruff check scripts/ac_16_quality.py tests/tooling/test_ac_16_quality.py
 	$(UV) run --offline --frozen ruff format --check scripts/check_safety_coverage.py scripts/export_openapi.py scripts/verify_local.py scripts/verify_repository_text.py tests/tooling/test_del_07_*.py tests/contract/test_del_07_openapi_snapshot.py
 	$(UV) run --offline --frozen ruff check scripts/check_safety_coverage.py scripts/export_openapi.py scripts/verify_local.py scripts/verify_repository_text.py tests/tooling/test_del_07_*.py tests/contract/test_del_07_openapi_snapshot.py
 	node apps/web/scripts/require-pinned-node.mjs
@@ -365,6 +367,15 @@ test-del-07-tooling:
 
 verify:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_local
+
+# Same full aggregate as verify; requires a clean committed source and records
+# local report consistency, not authenticated execution or AC-15 isolation.
+.PHONY: verify-ac-16 audit-ac-16
+verify-ac-16:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.ac_16_quality run
+
+audit-ac-16:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.ac_16_quality audit
 
 acceptance:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_local --acceptance --ref "$(REF)"
