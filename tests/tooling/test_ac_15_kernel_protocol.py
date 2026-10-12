@@ -17,6 +17,7 @@ from scripts import ac_15_kernel_boundary as boundary
 from scripts import ac_15_kernel_client as client
 from scripts import ac_15_kernel_host as host
 from scripts import ac_15_offline as offline
+from scripts.ac_15_kernel_bytecode import READ_DIAGNOSTIC_NAMES
 from scripts.del_05_clean_state import VerificationFailure
 
 IMAGE = "sha256:" + "a" * 64
@@ -225,6 +226,92 @@ def test_counter_missing_and_regression_fail_closed():
         client.phase_summary(counters(loopback=1), counters())
 
 
+def test_read_diagnostic_schema_has_only_fixed_site_and_cause_counters():
+    expected = tuple(
+        f"control_read_{site}_{cause}"
+        for site in (
+            "prctl_args",
+            "seccomp_args",
+            "vma_name",
+            "action_value",
+            "exit_syscall",
+            "exit_result",
+            "notify_sizes",
+        )
+        for cause in ("efault", "other", "wrap")
+    )
+    assert expected == READ_DIAGNOSTIC_NAMES
+    assert len(client.counter_names()) == 45
+    assert client.counter_names()[24:] == expected
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+@pytest.mark.parametrize("value", [-1, True, False, 1.0, "1", None, 2**63, float("inf")])
+def test_each_read_diagnostic_requires_bounded_unsigned_integer(name, value):
+    invalid = counters(**{name: value})
+    with pytest.raises(VerificationFailure, match="overflow_or_type"):
+        client.validate_counters(invalid)
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_each_read_diagnostic_is_mandatory_and_cannot_regress(name):
+    invalid = counters()
+    del invalid[name]
+    with pytest.raises(VerificationFailure, match="counter_schema"):
+        client.validate_counters(invalid)
+    before = counters(control_read_error=1, **{name: 1})
+    other = next(key for key in READ_DIAGNOSTIC_NAMES if key != name)
+    after = counters(control_read_error=1, **{other: 1})
+    with pytest.raises(VerificationFailure, match="counter_regression"):
+        client.phase_summary(before, after)
+
+
+@pytest.mark.parametrize("name", ["control_read_prctl_args_private", "control_read_unknown_efault"])
+def test_unknown_read_diagnostic_site_or_cause_is_not_an_extension_point(name):
+    with pytest.raises(VerificationFailure, match="counter_schema"):
+        client.validate_counters(counters(**{name: 0}))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"control_read_error": 1},
+        {"control_read_prctl_args_efault": 1},
+        {"control_read_error": 2, "control_read_prctl_args_efault": 1},
+        {
+            "control_read_error": 1,
+            "control_read_prctl_args_efault": 1,
+            "control_read_exit_result_other": 1,
+        },
+    ],
+)
+def test_read_diagnostics_must_conserve_the_original_error_counter(changes):
+    with pytest.raises(VerificationFailure, match="diagnostic_conservation"):
+        client.validate_counters(counters(**changes))
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_read_diagnostics_are_hash_bound_but_do_not_double_count_rejection(name):
+    before = counters(control_read_error=2, **{name: 2})
+    after = counters(control_read_error=5, **{name: 5})
+    summary = client.phase_summary(before, after)
+    assert summary["rejected"] == 3
+    assert summary["counters"]["control_read_error"] == summary["counters"][name] == 3
+    evidence = {key: summary[key] for key in ("schema_version", "observer", "counters")}
+    assert summary["sha256"] == hashlib.sha256(client.canonical(evidence)).hexdigest()
+    client.validate_counters(counters(control_read_error=2**63 - 1, **{name: 2**63 - 1}))
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+@pytest.mark.parametrize("suite", tuple(offline.SUITES))
+@pytest.mark.parametrize("emulation", [False, True])
+def test_read_diagnostics_never_exempt_a_regular_health_or_canary_phase(name, suite, emulation):
+    summary = client.phase_summary(counters(), counters(control_read_error=1, **{name: 1}))
+    for index in range(len(offline.audit_phase_commands(suite, emulation=emulation))):
+        with pytest.raises(VerificationFailure, match="incomplete_phase"):
+            host.validate_phase(summary, index, suite, emulation=emulation)
+
+
 def test_phase_delta_all_rejections_and_hash_bind_exact_counters():
     before = counters(entry_connect=10, unix=3)
     after = dict(before)
@@ -241,6 +328,7 @@ def test_phase_delta_all_rejections_and_hash_bind_exact_counters():
     )
     for key in rejecting:
         after[key] += 1
+    after["control_read_prctl_args_efault"] += 1
     after["messages"] += 3
     summary = client.phase_summary(before, after)
     assert summary["rejected"] == 9 and summary["unix"] == 0
@@ -361,7 +449,10 @@ def test_expected_fault_canaries_never_leak_to_regular_phases(suite, offset):
     ],
 )
 def test_incomplete_classifier_evidence_is_never_canary_allowance(field):
-    summary = client.phase_summary(counters(), counters(external=1, **{field: 1}))
+    changes = {field: 1}
+    if field == "control_read_error":
+        changes["control_read_prctl_args_efault"] = 1
+    summary = client.phase_summary(counters(), counters(external=1, **changes))
     with pytest.raises(VerificationFailure, match="incomplete_phase"):
         host.validate_phase(summary, 0, "backend")
 
@@ -1451,6 +1542,9 @@ def test_emulation_health_phase_is_additional_and_never_an_ordinary_command_allo
     ],
 )
 def test_emulation_control_never_waives_missed_external_unix_or_error_evidence(changes):
+    changes = dict(changes)
+    if changes.get("control_read_error"):
+        changes["control_read_prctl_args_efault"] = 1
     summary = client.phase_summary(counters(), counters(**changes))
     with pytest.raises(VerificationFailure):
         host.validate_phase(summary, 4, "backend", emulation=True)

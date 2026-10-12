@@ -63,6 +63,8 @@ def counter_names() -> tuple[str, ...]:
 
 
 def validate_counters(value: dict) -> None:
+    from scripts.ac_15_kernel_bytecode import READ_DIAGNOSTIC_NAMES
+
     require(type(value) is dict and set(value) == set(counter_names()), "kernel_counter_schema")
     require(
         all(type(count) is int and 0 <= count < 2**63 for count in value.values()),
@@ -87,6 +89,10 @@ def validate_counters(value: dict) -> None:
     require(
         value["output_queries_started"] == value["output_queries_completed"],
         "kernel_output_query_incomplete",
+    )
+    require(
+        sum(value[key] for key in READ_DIAGNOSTIC_NAMES) == value["control_read_error"],
+        "kernel_control_read_diagnostic_conservation",
     )
 
 

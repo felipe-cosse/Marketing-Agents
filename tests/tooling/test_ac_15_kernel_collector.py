@@ -9,7 +9,7 @@ import struct
 import pytest
 
 from scripts import ac_15_kernel_collector as collector
-from scripts.ac_15_kernel_bytecode import COUNTER_NAMES
+from scripts.ac_15_kernel_bytecode import COUNTER_NAMES, READ_DIAGNOSTIC_NAMES
 
 
 def native_btf(
@@ -259,6 +259,58 @@ def test_counter_high_half_or_decrease_marks_overflow_sticky():
     assert instance.snapshot()["overflow"]
 
 
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_read_diagnostics_are_reported_without_reset_and_must_conserve_total(name):
+    instance, api, _ = attached()
+    original = COUNTER_NAMES.index("control_read_error")
+    diagnostic = COUNTER_NAMES.index(name)
+    api.counts[original] = api.counts[diagnostic] = 3
+    first = instance.snapshot()
+    assert first["counters"]["control_read_error"] == first["counters"][name] == 3
+    assert first["conservation"] and first["monotonic"] and not first["overflow"]
+    assert instance.snapshot()["counters"] == first["counters"]
+    api.counts[original] = 4
+    assert not instance.snapshot()["conservation"]
+    api.counts[diagnostic] = 5
+    assert not instance.snapshot()["conservation"]
+    api.counts[original] = 5
+    assert instance.snapshot()["conservation"]
+    assert first["counters"][name] == 3
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+@pytest.mark.parametrize("value", [-1, True, False, 1.0, "1", None, 2**64])
+def test_read_diagnostic_malformed_values_fail_before_snapshot(name, value):
+    instance, api, _ = attached()
+    api.counts[COUNTER_NAMES.index(name)] = value
+    with pytest.raises(ValueError, match="invalid_counter_value"):
+        instance.snapshot()
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_each_read_diagnostic_high_half_sets_sticky_overflow(name):
+    instance, api, _ = attached()
+    api.counts[COUNTER_NAMES.index(name)] = collector.COUNTER_LIMIT
+    assert instance.snapshot()["overflow"]
+    api.counts[COUNTER_NAMES.index(name)] = 0
+    assert instance.snapshot()["overflow"]
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_read_diagnostic_regression_is_detected_even_when_original_total_is_constant(name):
+    instance, api, _ = attached()
+    original = COUNTER_NAMES.index("control_read_error")
+    diagnostic = COUNTER_NAMES.index(name)
+    other = next(key for key in READ_DIAGNOSTIC_NAMES if key != name)
+    api.counts[original] = api.counts[diagnostic] = 1
+    assert instance.snapshot()["monotonic"]
+    api.counts[diagnostic] = 0
+    api.counts[COUNTER_NAMES.index(other)] = 1
+    changed = instance.snapshot()
+    assert changed["conservation"] and not changed["monotonic"] and changed["overflow"]
+    assert instance.snapshot()["overflow"]
+
+
 def test_snapshot_reports_each_recursion_miss_but_rejects_identity_change():
     instance, api, _ = attached()
     api.misses = 2
@@ -373,6 +425,31 @@ def test_main_source_bound_startup_ready_protocol_and_bounded_lifetime(monkeypat
     assert set(ready["maps"]) == {"counters", "pending"}
     assert len(closed) == 6 and not instance.descriptors
     assert alarms == [1720, 0] and checked == [True, True]
+
+
+def test_ready_with_expanded_diagnostics_stays_below_unchanged_wire_limit(monkeypatch):
+    _, _, _, _, _, output = main_harness(monkeypatch)
+    assert collector.main(["123"]) == 0
+    ready = json.loads(output.getvalue().splitlines()[0])
+
+    def largest_integer_encoding(value):
+        # Overapproximate wire size only: this is intentionally not valid READY
+        # evidence, whose baseline must remain entirely zero and sequence one.
+        if type(value) is int:
+            return 2**64 - 1
+        if type(value) is dict:
+            return {key: largest_integer_encoding(item) for key, item in value.items()}
+        if type(value) is list:
+            return [largest_integer_encoding(item) for item in value]
+        return value
+
+    bounded = io.StringIO()
+    upper_bound = largest_integer_encoding(ready)
+    del upper_bound["event"]
+    del upper_bound["schema_version"]
+    collector.emit(bounded, "READY", **upper_bound)
+    assert len(bounded.getvalue().encode()) <= collector.MAX_LINE == 16384
+    assert set(json.loads(bounded.getvalue())["baseline"]["counters"]) == set(COUNTER_NAMES)
 
 
 def test_main_attach_failure_is_sanitized_and_closes_partial_allocation(monkeypatch):
