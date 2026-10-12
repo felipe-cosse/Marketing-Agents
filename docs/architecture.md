@@ -26,7 +26,7 @@ flowchart TB
         Init[One-shot key initializer]
         Seed[One-shot migrations and compiled catalog seed]
         API[FastAPI API]
-        Worker[Run worker: implemented demo workflows]
+        Worker[Run worker: registered catalog and demo workflows]
         Scheduler[Scheduler worker: due occurrence admission]
     end
     Browser -->|HTTP on host 127.0.0.1 only| Web
@@ -130,13 +130,26 @@ unrelated artifacts and invalid pointers fail closed. Evidence:
 [ORCH-05](verification/requirements/ORCH-05.md) and
 [typed binding tests](../tests/unit/application/test_orch_05_typed_artifact_bindings.py).
 
-Claim: Deterministic mock behavior — the deployed run worker executes the **five
-registered demo workflows**. It does not turn all 43 catalog instances into a
-general arbitrary-workflow executor. Unsupported workflows fail honestly; webhook
-and scheduler fixtures proving admission/replay do not prove generic execution.
-The demos produce local artifacts and, only for approved Email actions, durable
-mock receipts. See [DEL-03](verification/requirements/DEL-03.md),
-[DEL-05](verification/requirements/DEL-05.md), and [demos](demos.md).
+## Current workflow scope
+
+Claim: Deterministic mock behavior — the worker's
+[executable registry](../apps/api/src/marketing_agents/infrastructure/executable_workflows.py)
+supports five named demo workflows plus explicit manual dry-run paths for all
+43 catalog instances. The 37 read-role instances produce catalog-schema outputs
+through a deterministic mock model or a local transform; the six write-only
+instances produce inert write-proposal previews. A preview grants no action, approval or dispatch
+authority. Explicit mock execution of the write-only roles separately requires
+exact-action approval and produces durable mock receipts, not external delivery.
+
+[OBJ-03](verification/requirements/OBJ-03.md) records API admission and restarted
+worker evidence for those paths. Role input must satisfy its catalog schema;
+write-role previews and execution require the matching typed operator command,
+not arbitrary prose or generated actions. Saved schedule input has an
+installation-keyed binding, and schedules support only `dry_run`. Supported
+webhook execution remains bound to explicitly registered contracts; neither catalog
+visibility nor successful intake proves arbitrary workflow execution. The five
+[demos](demos.md) retain their own contracts, including Email's two-action approval
+barrier. This documentation review does not rerun those behavior gates.
 
 ## Approval and external-action sequence
 
@@ -172,10 +185,19 @@ post-call cancellation cannot recall a sent request. See
 Claim: Implemented and verified — file-backed SQLite is the required local
 database and the supplied Compose topology. Database and private digest key are
 one restart/recovery unit. Frozen migrations own schema changes; startup does not
-replace a lost key or silently adopt an unversioned database. The current local
-schema includes DEL-05 revision `0006`. Evidence:
+replace a lost key or silently adopt an unversioned database. The historical
+DEL-05 record qualified its revision `0006`. Evidence:
 [DEL-04](verification/requirements/DEL-04.md),
 [DEL-05](verification/requirements/DEL-05.md), and [operations](operations.md).
+
+## Current migration scope
+
+Claim: Implemented but not live-tested by this documentation review — the
+committed [migration head](../apps/api/src/marketing_agents/infrastructure/db/migrations.py)
+is [revision `0009`](../apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0009_recurrence_resolution_snapshots.py),
+which adds recurrence-resolution snapshots after `0008`. This is a current source
+fact, not a fresh migration run or PostgreSQL qualification. Historical migration
+results remain attached to the revisions and environments that produced them.
 
 Claim: Implemented but not live-tested — optional PostgreSQL support uses the
 `postgresql` dependency extra, an explicit `postgresql+asyncpg` URL, repository/UoW

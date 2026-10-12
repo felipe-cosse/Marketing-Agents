@@ -165,7 +165,7 @@ Allowed status values:
 | AC-14 | Every transition and approval appears in audit timeline. | 04, 05, 13 | Independent business/audit/public joins; post-flush command and worker rollback; ordered pagination and expired skeletons; `docs/verification/requirements/AC-14.md` | verified |
 | AC-15 | No test performs external network call. | 14 | Socket/MSW/Playwright/offline CI evidence | planned |
 | AC-16 | Backend/frontend tests, formatting, lint, typing pass. | 14 | `make verify` record | planned |
-| AC-17 | Docs distinguish implementation, mock, targets, assumptions, credentials. | 15 | Documentation claim-taxonomy review | planned |
+| AC-17 | Docs distinguish implementation, mock, targets, assumptions, credentials. | 15 | Thirteen-guide source review, current-scope claim contracts and copied-root negative controls; `docs/verification/requirements/AC-17.md` | verified |
 
 ## Execution-approach compliance
 

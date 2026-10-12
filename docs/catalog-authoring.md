@@ -83,10 +83,23 @@ canonical semantic hash, including their declared file and reference paths.
 Renaming those references can change the hash. Absolute checkout location,
 mtimes, and load timestamps are not semantic release identity.
 
+## Current executable catalog boundary
+
 Claim: Deterministic mock behavior — a catalog capability or schema is a contract,
-not a working vendor connection. The current runtime executes five registered demo
-workflows; editing YAML does not register a new workflow, renderer, connector
-operation, or real provider. See [adapter contracts](adapter-contracts.md).
+not a working vendor connection. Alongside five named demo workflows, the
+[executable registry](../apps/api/src/marketing_agents/infrastructure/executable_workflows.py)
+has explicit manual dry-run paths for all 43 catalog instances: 37 read-role/local
+outputs and six inert write-proposal previews. Explicit mock execution of the
+write-only roles is separate and requires exact-action approval; a preview grants
+no dispatch authority. Role input must satisfy its catalog schema; write-role
+previews and execution require the matching typed operator command, not arbitrary
+prose or generated actions. See the scoped [OBJ-03 evidence](verification/requirements/OBJ-03.md).
+
+Editing YAML alone does not prove a new workflow, renderer, connector operation
+or real provider is implemented and verified. The executable registry and typed
+handler contracts must also support the proposed change. Catalog validation is
+not execution proof, and a mock receipt is not external delivery. See
+[adapter contracts](adapter-contracts.md) for the integration boundary.
 
 ## Validate a proposed edit
 

@@ -7,11 +7,20 @@ Email 5, Community 14, and Partnerships 6. Community's seven templates each back
 two distinct instances; their duplication has no invented business meaning.
 The Marketing Orchestrator is a separate control plane, not a 44th instance.
 
-This is a runnable single-operator local foundation, not an autonomous marketing
-service or a production deployment. Catalog cards describe 43 deployed roles;
-the executable worker currently advances only the five implemented demo
-workflows. A card's presence does not imply a general-purpose workflow or a real
-integration.
+## Current workflow scope
+
+Claim: **Deterministic mock behavior** — this is a runnable single-operator local
+foundation, not an autonomous marketing service or a production deployment. The
+worker's [executable registry](apps/api/src/marketing_agents/infrastructure/executable_workflows.py)
+supports five named demo workflows and explicit manual dry-run paths for
+all 43 catalog instances: 37 read-role/local-output paths and six inert
+write-proposal previews. Explicit mock execution of the write-only roles is a
+separate operation requiring exact-action approval; a preview grants no dispatch
+authority. [OBJ-03](docs/verification/requirements/OBJ-03.md) records the scoped
+API/worker evidence. Role submissions require valid catalog-schema input;
+write-role previews and execution require the matching typed operator command,
+not arbitrary prose or generated actions. Catalog visibility does not imply an
+arbitrary workflow or a real integration, and a mock receipt is not external delivery.
 
 Claims in these guides distinguish **deterministic mock behavior**, implemented
 controls with linked verification evidence, acceptance targets, assumptions,
@@ -129,7 +138,11 @@ fails with a bootstrap instruction; it does not fetch it automatically.
 fresh state, an empty home, five mock demos, and a restart. See the
 [OBJ-04 evidence and guard limits](docs/verification/requirements/OBJ-04.md).
 
-After bootstrap, these existing commands cover different checks:
+## Current verification commands
+
+Claim: **Implemented but not live-tested** by this documentation review — the
+[Makefile](Makefile) and [local verifier](scripts/verify_local.py) implement the
+following commands. After bootstrap, they cover different checks:
 
 ```sh
 make verify-catalog-release
@@ -141,10 +154,14 @@ make web-test-e2e
 ```
 
 `web-bootstrap` separately acquires the pinned browser. `verify-web` is not the
-browser suite, and the current `make test` is only the source/tooling/network
-aggregate. The planned full `make verify` and acceptance aggregation are not
-implemented at this revision. Consult [testing](docs/testing.md) before treating
-any individual command as release acceptance.
+browser suite. `make test` runs catalog, backend, network, frontend unit and full
+browser checks in order. `make verify` adds static checks, safety coverage and
+source-drift checks. `make acceptance REF=HEAD` additionally requires source
+matching the selected commit, committed clean-state verification and paired
+Compose backup/restore. Command availability and historical results are not a
+fresh passing result. This documentation review does not establish AC-15,
+AC-16, or final release acceptance. Consult [testing](docs/testing.md) for the
+command boundaries and [verification](docs/verification.md) for dated evidence.
 
 ```sh
 make verify-clean REF=HEAD

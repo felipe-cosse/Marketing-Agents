@@ -82,15 +82,28 @@ then API/workers/web. Liveness only means a process responds; readiness checks
 the initialized database/catalog and mock composition. A successful web page load
 or safe-mode banner is not evidence that a queued run completed.
 
-Use **Runs & audit** to inspect run state and timeline. Use **Approvals** for each
-immutable proposed action. The current worker executes only registered demo
-workflows; catalog visibility and successful intake do not promise arbitrary role
-execution. Never interpret a mock receipt as real delivery.
-
 The default persistent data and local-secret volumes form a pair. The API socket
 volume is disposable IPC, not a backup of either. Native and Compose paths are
 separate installations. Changing a project name creates new storage rather than
 migrating an old installation.
+
+## Current workflow scope
+
+Claim: **Deterministic mock behavior** — the worker's
+[executable registry](../apps/api/src/marketing_agents/infrastructure/executable_workflows.py)
+supports five named demo workflows and explicit manual dry-run paths for all
+43 catalog instances: 37 read-role/local-output paths and six inert write-proposal
+previews. Explicit mock execution of the write-only roles is separate and requires
+exact-action approval. A preview grants no dispatch authority, and a mock receipt is not
+external delivery. The scoped [OBJ-03 record](verification/requirements/OBJ-03.md)
+describes the implemented paths and their API/worker evidence. Supply valid
+catalog-schema input and, for write-role previews or execution, the matching typed
+operator command; arbitrary prose and generated actions are not commands.
+
+Use **Runs & audit** to inspect run state and timeline. Use **Approvals** for each
+immutable proposed action. Catalog visibility and successful intake do not promise
+arbitrary workflow execution, completion or a real integration. This documentation
+review is not a fresh health check of the running installation.
 
 ## Backup and recovery
 

@@ -15,7 +15,70 @@ explains a mechanism; only a matching executed gate establishes tested behavior.
 | Assumption | An explicit choice in the [register](assumptions.md), with a revisit trigger rather than an observed external fact. |
 | Residual risk | A known trust boundary, limitation, or incomplete guarantee that remains after the scoped checks. |
 
+## AC-17 current documentation review
+
+Review date: **2026-10-12**. Product-source baseline:
+`09a732609f8d871fc5a6495e84f5347e3c939be5` (main after AC-14).
+This review updates documentation and adds bounded claim-contract tests; it does
+not change product behavior. The final AC-17 feature identity and executed gates
+belong to its [manifest](verification/requirements/AC-17.json) and
+[requirement record](verification/requirements/AC-17.md), with committed-tree
+attestation stored outside Git. No document can embed its own final commit hash.
+
+Claim: **Implemented but not live-tested** in this documentation review — the
+current source provides five demos and 43 explicit role dry-run paths, aggregate
+verification commands, and 16 browser runners. These are source-reviewed facts,
+not freshly executed application results. Previous requirement records retain
+their own dates, revisions, commands, pass/fail/skip counts and limitations.
+The significant distinctions reviewed across the 13 required guides are:
+
+| Subject and current guide | Category and bounded claim | Source/evidence reviewed |
+| --- | --- | --- |
+| [Workflow scope](../README.md#current-workflow-scope), [architecture](architecture.md#current-workflow-scope), [catalog authoring](catalog-authoring.md#current-executable-catalog-boundary), [operations](operations.md#current-workflow-scope) | Deterministic mock behavior: 37 read/local-output paths and six inert previews; explicit approved mock writes are separate. No live delivery or arbitrary workflow execution. | [OBJ-03 record](verification/requirements/OBJ-03.md), [workflow registry](../apps/api/src/marketing_agents/infrastructure/executable_workflows.py). |
+| [Current commands](../README.md#current-verification-commands) and [browser scope](testing.md#current-browser-verification-scope) | Implemented but not live-tested here: command availability is not a passing aggregate. OBJ-06's real-runtime/native transport is distinct from route-mocked browser tests. | [Makefile](../Makefile), [local verifier](../scripts/verify_local.py), [OBJ-06 record](verification/requirements/OBJ-06.md). |
+| [Demo walkthroughs](demos.md) and [adapters](adapter-contracts.md) | Deterministic mock behavior: displayed expectations, accepted intake, approval decisions, and completed mock receipts are different facts. | [Scenario registry](../apps/api/src/marketing_agents/demos/registry.py), [DEL-03 record](verification/requirements/DEL-03.md). |
+| [Security](security.md), [identity](identity-and-authorization.md), and [data handling](data-handling.md) | Implemented and verified only in their linked scoped historical tests; local identity is not production authentication, and projection expiry is not physical erasure. | [RUN-10 record](verification/requirements/RUN-10.md), [SAFE-07 record](verification/requirements/SAFE-07.md), [ADR-0010](adr/0010-data-retention.md). |
+| [Assumptions](assumptions.md) and [local operations](local-operations.md) | Assumption and residual risk: local self-approval, trusted host access, web outbound capability, no physical retention sweeper, optional PostgreSQL, and no remote exactly-once guarantee remain explicit. | [Assumption tests](../tests/source/test_src_03_assumption_register.py), [ADR-0007](adr/0007-external-action-delivery.md), [Compose](../compose.yaml). |
+| [Real adapters](adapter-contracts.md#adding-a-real-integration) | Deferred real-adapter work: local mocks require no provider credentials. Separate dependency acquisition may use registry networking; it is not runtime delivery or live-provider qualification. | [Runtime composition](../apps/api/src/marketing_agents/workers/runtime/composition.py), [testing prerequisites](testing.md#claim-status-and-prerequisites). |
+
+The [AC-17 checker](../scripts/verify_ac_17_claims.py) combines the existing
+guide/link/pin checks with a curated set of significant section contracts.
+Copied-root negative controls remove classifications, scope limits or evidence,
+restore stale statements, and promote mocks/targets to unsupported success.
+These checks detect those particular regressions; they do not prove arbitrary
+prose is true or execute linked behavior tests. Its linked behavior evidence is
+source review only, not product reruns. Independent source review remains
+necessary. [Regression tests](../tests/tooling/test_ac_17_claim_taxonomy.py)
+exercise these distinctions. A restored-base witness must fail for the corrected documentation
+claims while retaining the checker, tests and dependencies.
+
+Claim: **Acceptance target not yet verified** — AC-15, AC-16 and final-source
+acceptance remain unverified. The separate AC-15 diagnostic checkpoint is not
+merged into this baseline and its browser failure is not waived. AC-17 does not
+rerun the four complete suites, qualify a live provider, or certify PostgreSQL.
+Historical counts below are not current results. The
+[requirements matrix](implementation-plan/16-requirements-traceability-matrix.md)
+remains the requirement inventory. GitHub CI remains paused by
+user direction; this review does not poll, re-enable, or retry it.
+
+The AC-17 requirement record reports the actual documentation-gate commands,
+host/toolchain, results and witness outcome. Networked dependency acquisition is
+recorded separately from the offline checks. Credentials, raw payloads, database
+files and secret-bearing backup bundles are not verification artifacts.
+
+Claim: **Implemented and verified** for documentation checks only — the combined
+AC-17, DEL-06 and assumption-register regression run passed 62 tests in 12.727
+seconds on macOS/Python 3.12.12. The new AC-17 module separately passed 37 tests
+and 107 subtests; its lint and formatting checks passed. The actual committed-tree
+gates and restored-base witness remain required before merging. None of these
+documentation results is a fresh product or full-suite acceptance result.
+
 ## Source and environment
+
+Historical DEL-06 record: all dates, environments and results in this section and
+the following **Local DEL-06 checks** section belong to that requirement. They
+are preserved, not refreshed by AC-17. The later DEL-07 and OBJ-03 sections are
+likewise dated historical snapshots, including their then-pending attestations.
 
 Record date: **2026-09-11**. Product-code baseline:
 `d28b40a317207cd24446657b01ed83fb41b2eeeb` (main before DEL-06).
