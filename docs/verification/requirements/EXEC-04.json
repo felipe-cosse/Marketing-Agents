@@ -1,0 +1,66 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-04",
+  "matrix_statement_sha256": "f4468fbc8e4100a4919c4eb840e92121bbca8dc699ca9e0b81afeabc6b5222a3",
+  "evidence_class": "process_gate",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "scripts/verify_exec_04.py",
+      "tests/tooling/test_exec_04_foundation_gate.py",
+      "tests/acceptance/test_exec_04_foundation_restart.py",
+      "docs/verification/requirements/EXEC-04.json",
+      "docs/verification/requirements/EXEC-04.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md"
+    ],
+    "required_path_groups": [
+      {"kind": "control", "one_of": ["scripts/verify_exec_04.py", "Makefile"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_exec_04_foundation_gate.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "ordered-foundation-prerequisites",
+      "type": "contract",
+      "statement": "The dedicated local prerequisite command runs serial M3 domain/migration/reseed, M4 runtime/deterministic-mock and M5 approval-safety qualification. Whole-file inventories, per-milestone deadlines, nonzero status propagation and source-drift checks fail closed. This qualifies the foundation before proceeding to EXEC-05 without changing the complete verifier's gate inventory or deadlines.",
+      "test_refs": ["tests/tooling/test_exec_04_foundation_gate.py"]
+    },
+    {
+      "id": "restarted-read-only-evidence",
+      "type": "journey",
+      "statement": "A real read-only API admission survives local runtime reconstruction, finishes through the actual worker and deterministic mock, produces a schema-valid provenance-linked artifact and complete paginated public audit witnesses derived from persisted business facts. A second reconstruction does not repeat work or effects.",
+      "test_refs": ["tests/acceptance/test_exec_04_foundation_restart.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-04-control-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_exec_04_foundation_gate.py"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "loopback_only",
+      "covers": ["ordered-foundation-prerequisites"]
+    },
+    {
+      "id": "exec-04-live-foundation",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.verify_exec_04"],
+      "cwd": ".",
+      "timeout_seconds": 900,
+      "network_requirement": "loopback_only",
+      "covers": ["ordered-foundation-prerequisites", "restarted-read-only-evidence"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["Makefile", "scripts/verify_exec_04.py"],
+    "gate_id": "exec-04-control-regressions"
+  },
+  "limitations": [
+    "This verifies present milestone ordering, not the historical order in which already-merged API/UI features were developed. CI remains paused.",
+    "M3 qualifies the local SQLite installation; the PostgreSQL fixture control does not constitute a live PostgreSQL service test.",
+    "Runtime reconstruction and controlled in-process cancellation are exercised; this does not claim OS-kill recovery or real-provider delivery.",
+    "Python guards and frozen offline dependency settings do not replace AC-15's full-suite kernel isolation. This focused prerequisite is not the complete AC-16 or EXEC-07 aggregate."
+  ]
+}

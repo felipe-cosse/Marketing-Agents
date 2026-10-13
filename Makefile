@@ -16,6 +16,10 @@ HEAD ?= HEAD
 .PHONY: test-del-03-contracts test-del-03-demos
 .PHONY: init-local-secret migrate seed seed-check test-del-04-persistence test-del-04-postgresql test-del-04-regression
 .PHONY: verify-native-offline
+.PHONY: verify-exec-04
+
+verify-exec-04:
+	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_exec_04
 
 DATABASE_URL ?= sqlite+aiosqlite:///./data/marketing_agents.db
 MARKETING_AGENTS_DIGEST_KEY_PATH ?= data/digest.key
@@ -350,6 +354,8 @@ api-contract-generate:
 	node tools/api-contract/generate.mjs --write
 
 verify-repository:
+	$(UV) run --offline --frozen ruff format --check scripts/verify_exec_04.py tests/tooling/test_exec_04_foundation_gate.py
+	$(UV) run --offline --frozen ruff check scripts/verify_exec_04.py tests/tooling/test_exec_04_foundation_gate.py
 	$(UV) run --offline --frozen ruff format --check scripts/ac_16_quality.py tests/tooling/test_ac_16_quality.py
 	$(UV) run --offline --frozen ruff check scripts/ac_16_quality.py tests/tooling/test_ac_16_quality.py
 	$(UV) run --offline --frozen ruff format --check scripts/check_safety_coverage.py scripts/export_openapi.py scripts/verify_local.py scripts/verify_repository_text.py tests/tooling/test_del_07_*.py tests/contract/test_del_07_openapi_snapshot.py
