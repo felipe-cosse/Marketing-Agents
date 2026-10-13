@@ -387,3 +387,95 @@ def test_del_07_write_contract_compares_persisted_revision_idempotency_and_timeo
             gateway.contract_for(drifted)
         assert failure.value.code == "delivery_contract_drift"
         assert failure.value.request_may_have_left_process is False
+
+
+@pytest.mark.parametrize("fault", ("family", "missing_handler"))
+def test_ac_16_write_contract_rejects_corrupt_binding_before_provider_invocation(
+    fault: str,
+) -> None:
+    fixture = _write_fixture()
+    metadata = fixture.registration.metadata
+    envelope = fixture.authorization.action
+    prototype = _decision_fixture().action
+    from marketing_agents.domain.approval import ProposedExternalAction
+
+    proposal = ProposedExternalAction.create(
+        envelope,
+        redacted_destination="configured list",
+        payload_schema={"type": "object"},
+    )
+    contract = DeliveryContractSnapshot(
+        metadata.capability_id,
+        metadata.connector_family,
+        envelope.binding_id,
+        1,
+        metadata.request_schema_id,
+        "required",
+        metadata.default_timeout_seconds,
+    )
+    action = ExternalAction.proposed(
+        proposal, prototype.approval_policy, contract, prototype.created_at
+    )
+    method = AsyncMock()
+    gateway = RegistryConnectorWriteGateway(
+        fixture.registry,
+        replace(fixture.bundle, newsletter=SimpleNamespace(subscribe=method)),
+        binding_configuration_revisions={action.connector_binding_id: 1},
+    )
+    assert gateway.contract_for(action).connector_family == metadata.connector_family
+    method.assert_not_called()
+
+    # Normal composition rejects these states. Simulate a corrupted binding to
+    # exercise the independent dispatch-time check after a valid composition.
+    binding = gateway._bindings.resolve(action.connector_binding_id)
+    if fault == "family":
+        object.__setattr__(binding, "connector_family", "social")
+    else:
+        object.__setattr__(binding, "handlers", {})
+    with pytest.raises(ConnectorDeliveryFailure) as failure:
+        gateway.contract_for(action)
+    assert failure.value.code == "delivery_contract_unavailable"
+    assert failure.value.request_may_have_left_process is False
+    method.assert_not_called()
+    method.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("fault", "changed"),
+    (
+        ("effect", Effect.READ),
+        ("family", "social"),
+        ("revision", 0),
+        ("revision", -1),
+        ("revision", True),
+        ("revision", 1.0),
+        ("revision", "1"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_ac_16_write_execute_rejects_corrupt_registration_before_provider_invocation(
+    fault: str, changed: object
+) -> None:
+    fixture = _write_fixture()
+    method = AsyncMock()
+    gateway = RegistryConnectorWriteGateway(
+        fixture.registry,
+        replace(fixture.bundle, newsletter=SimpleNamespace(subscribe=method)),
+        binding_configuration_revisions={"mock.newsletter.default": 1},
+    )
+    # Corruption occurs only after the constructor has validated the binding.
+    if fault == "revision":
+        gateway._binding_revisions = {fixture.authorization.action.binding_id: changed}
+    else:
+        field = "effect" if fault == "effect" else "connector_family"
+        registration = replace(
+            fixture.registration,
+            metadata=replace(fixture.registration.metadata, **{field: changed}),
+        )
+        gateway._registry = SimpleNamespace(resolve=Mock(return_value=registration))
+    with pytest.raises(ConnectorDeliveryFailure) as failure:
+        await gateway.execute(fixture.authorization)
+    assert failure.value.code == "connector_request_rejected"
+    assert failure.value.request_may_have_left_process is False
+    method.assert_not_called()
+    method.assert_not_awaited()

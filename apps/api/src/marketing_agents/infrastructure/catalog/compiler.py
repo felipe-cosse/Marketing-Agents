@@ -51,6 +51,8 @@ ID_PATTERNS = {
     "policy": re.compile(r"^policy\.[a-z0-9]+(?:[.-][a-z0-9]+)*$"),
 }
 
+type _StructuralValidators = dict[tuple[Path, bytes], Draft202012Validator]
+
 
 class IdentifiedRecord(Protocol):
     @property
@@ -90,10 +92,19 @@ def _structural_validate(
     value: dict[str, Any],
     source_path: str,
     issues: list[CatalogIssue],
+    validators: _StructuralValidators,
 ) -> None:
-    schema = json.loads((schema_root / schema_name).read_text(encoding="utf-8"))
-    Draft202012Validator.check_schema(schema)
-    validator = Draft202012Validator(schema)
+    # Read on every record: path/mtime-only reuse could hide a changed schema.
+    # This memo belongs to one compile; no result or failed validation is cached.
+    schema_path = (schema_root / schema_name).resolve()
+    payload = schema_path.read_bytes()
+    identity = (schema_path, payload)
+    validator = validators.get(identity)
+    if validator is None:
+        schema = json.loads(payload.decode("utf-8"))
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        validators[identity] = validator
     for error in sorted(validator.iter_errors(value), key=lambda item: list(item.absolute_path)):
         _issue(
             issues,
@@ -134,6 +145,7 @@ def _load_record_group[ModelT: BaseModel](
     model: type[ModelT],
     schema_root: Path,
     issues: list[CatalogIssue],
+    validators: _StructuralValidators,
 ) -> list[ModelT]:
     parsed: list[ModelT] = []
     for relative in relative_paths:
@@ -152,7 +164,7 @@ def _load_record_group[ModelT: BaseModel](
             issues.extend(instance_field_ownership_issues(records, relative))
         for index, record in enumerate(records):
             before = len(issues)
-            _structural_validate(schema_root, schema_name, record, relative, issues)
+            _structural_validate(schema_root, schema_name, record, relative, issues, validators)
             if len(issues) != before:
                 continue
             item = _parse_model(model, record, relative, index, issues)
@@ -241,10 +253,11 @@ def compile_catalog(
     catalog_root = catalog_root.resolve()
     schema_root = _schema_root(catalog_root)
     issues: list[CatalogIssue] = []
+    validators: _StructuralValidators = {}
     try:
         manifest_data = load_yaml(catalog_root, "manifest.yaml")
         _structural_validate(
-            schema_root, "manifest.schema.json", manifest_data, "manifest.yaml", issues
+            schema_root, "manifest.schema.json", manifest_data, "manifest.yaml", issues, validators
         )
         manifest = CatalogManifest.model_validate(manifest_data)
     except (OSError, UnicodeError, ValueError, ValidationError) as exc:
@@ -266,6 +279,7 @@ def compile_catalog(
         DepartmentRecord,
         schema_root,
         issues,
+        validators,
     )
     functions = _load_record_group(
         catalog_root,
@@ -275,6 +289,7 @@ def compile_catalog(
         FunctionRecord,
         schema_root,
         issues,
+        validators,
     )
     capabilities = _load_record_group(
         catalog_root,
@@ -284,6 +299,7 @@ def compile_catalog(
         ToolCapabilityRecord,
         schema_root,
         issues,
+        validators,
     )
     policies = _load_record_group(
         catalog_root,
@@ -293,6 +309,7 @@ def compile_catalog(
         ApprovalPolicyRecord,
         schema_root,
         issues,
+        validators,
     )
     templates = _load_record_group(
         catalog_root,
@@ -302,6 +319,7 @@ def compile_catalog(
         AgentTemplateRecord,
         schema_root,
         issues,
+        validators,
     )
     instances = _load_record_group(
         catalog_root,
@@ -311,6 +329,7 @@ def compile_catalog(
         AgentInstanceRecord,
         schema_root,
         issues,
+        validators,
     )
 
     _check_unique_ids(departments, "department", manifest.files.departments, issues)
