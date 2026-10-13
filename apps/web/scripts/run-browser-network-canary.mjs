@@ -26,11 +26,11 @@ assert.equal(result.signal, null);
 assert.equal(
   result.status,
   1,
-  "expected the fixture's eight intentional teardown denials",
+  "expected the fixture's nineteen intentional teardown denials",
 );
 const report = JSON.parse(result.stdout);
-assert.equal(report.stats.expected, 1);
-assert.equal(report.stats.unexpected, 8);
+assert.equal(report.stats.expected, 2);
+assert.equal(report.stats.unexpected, 19);
 assert.equal(report.stats.skipped, 0);
 assert.deepEqual(report.errors, []);
 const cases = report.suites
@@ -52,7 +52,7 @@ const reused = spawnSync(
     "config/playwright-network-canary.config.ts",
     "--reporter=json",
     "--grep",
-    "approved-origin",
+    "DEL-07 approved-origin in-memory routes remain usable",
   ],
   {
     cwd: webRoot,
@@ -82,5 +82,5 @@ assert.match(
   /does not support reused contexts/,
 );
 console.log(
-  "DEL-07 browser network canary passed: HTTP, WebSocket, overrides, and redirects denied before the loopback tripwire; in-memory route passed; context reuse rejected.",
+  "AC-15 browser network canary passed: 19 caught HTTP/WebSocket/redirect/routing/context/API attempts fail teardown with zero owned-loopback tripwire hits; in-memory routing and genuine local API responses pass; context reuse rejected.",
 );

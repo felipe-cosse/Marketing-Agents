@@ -2,6 +2,7 @@
 import { test as base } from "@playwright/test";
 import { isAbsolute } from "node:path";
 
+import { installPlaywrightIsolation } from "../../../scripts/playwright-network-isolation.mjs";
 import { installObj06NativeNetworkGuard } from "../config/obj-06-native-network";
 
 export { expect } from "@playwright/test";
@@ -38,34 +39,25 @@ export const test = base.extend<{
     await runFixture({ stateDirectory, evidenceDirectory });
   },
   obj06NetworkIsolation: [
-    async ({ browser, context, baseURL }, runFixture) => {
+    async ({ browser, context, baseURL, request, playwright }, runFixture) => {
       if (
         baseURL !== "http://127.0.0.1:4173" ||
         process.env.PW_TEST_REUSE_CONTEXT
       )
         throw new Error("OBJ-06 requires a fresh exact-origin browser context");
-      const guards = [await installObj06NativeNetworkGuard(context, baseURL)];
-      const original = browser.newContext.bind(browser);
-      const originalNewPage = browser.newPage.bind(browser);
-      browser.newPage = () =>
-        Promise.reject(
-          new Error(
-            "OBJ-06 requires pages to be created through a guarded context",
-          ),
-        );
-      browser.newContext = async (options = {}) => {
-        if (options.serviceWorkers === "allow")
-          throw new Error("OBJ-06 forbids service workers");
-        const child = await original({ ...options, serviceWorkers: "block" });
-        guards.push(await installObj06NativeNetworkGuard(child, baseURL));
-        return child;
-      };
+      const isolation = await installPlaywrightIsolation({
+        browser,
+        context,
+        request,
+        requestFactory: playwright.request,
+        allowedOrigin: baseURL,
+        installContextGuard: installObj06NativeNetworkGuard,
+      });
       try {
         await runFixture(undefined);
       } finally {
-        browser.newContext = original;
-        browser.newPage = originalNewPage;
-        for (const guard of guards) await guard.assertNoUnexpectedAttempts();
+        isolation.restore();
+        await isolation.assertNoExternalAttempts();
       }
     },
     { auto: true },
