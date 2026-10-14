@@ -78,8 +78,8 @@ class ClaimTaxonomyTests(unittest.TestCase):
         # These independently reviewed expectations are not generated from the
         # checker's contracts; source mutations below must invalidate the docs.
         self.assertEqual(16, original["browser_runners"])
-        # EXEC-05 adds standalone brief audit shapes at the reviewed revision 0010.
-        self.assertEqual("0010", original["migration_head"])
+        # EXEC-06 adds retention tracking and bounded audit shapes at revision 0011.
+        self.assertEqual("0011", original["migration_head"])
         self.assertEqual(43, original["instances"])
         self.assertIs(False, original["acceptance_verified"])
 
@@ -295,8 +295,8 @@ class ClaimTaxonomyTests(unittest.TestCase):
     def test_ac_17_source_migration_head_drift_invalidates_current_revision(self) -> None:
         self.rewrite(
             "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
-            'HEAD_REVISION = "0010"',
             'HEAD_REVISION = "0011"',
+            'HEAD_REVISION = "0012"',
         )
         self.reject("ac17_claim:migration")
 
@@ -339,15 +339,15 @@ class ClaimTaxonomyTests(unittest.TestCase):
         path = self.root / "apps/api/src/marketing_agents/infrastructure/db/migrations.py"
         original = path.read_text()
         for binding in (
-            'HEAD_REVISION: str = "0010"',
+            'HEAD_REVISION: str = "0011"',
             "HEAD_REVISION = compute_revision()",
-            'HEAD_REVISION = "001" + "0"',
+            'HEAD_REVISION = "001" + "1"',
             "HEAD_REVISION = 1010",
-            'if condition:\n    HEAD_REVISION = "0010"',
-            'OTHER = HEAD_REVISION = "0010"',
+            'if condition:\n    HEAD_REVISION = "0011"',
+            'OTHER = HEAD_REVISION = "0011"',
         ):
             with self.subTest(binding=binding):
-                path.write_text(original.replace('HEAD_REVISION = "0010"', binding))
+                path.write_text(original.replace('HEAD_REVISION = "0011"', binding))
                 self.reject("ac17_migration_source")
         path.write_text(original)
 
@@ -356,7 +356,7 @@ class ClaimTaxonomyTests(unittest.TestCase):
         path.write_text(
             path.read_text() + '\nraise RuntimeError("product_source_must_not_execute")\n'
         )
-        self.assertEqual("0010", claims.verify(self.root)["migration_head"])
+        self.assertEqual("0011", claims.verify(self.root)["migration_head"])
 
     def test_ac_17_evidence_must_be_linked_from_the_relevant_section(self) -> None:
         cases = (
@@ -455,17 +455,17 @@ class ClaimTaxonomyTests(unittest.TestCase):
                 self.reject("ac17_claim:receipt")
             path.write_text(original)
 
-    def test_ac_17_retention_projection_is_not_physical_erasure(self) -> None:
+    def test_ac_17_bounded_retention_is_not_secure_media_erasure_or_deletion_sla(self) -> None:
         path = self.root / "docs/data-handling.md"
         original = path.read_text()
         for old, new in (
-            ("policy and projection only", "automatic deletion"),
-            (
-                "Acceptance target not yet verified / unimplemented maintenance",
-                "Implemented and verified maintenance",
-            ),
-            ("There is no physical retention sweeper", "There is a physical retention sweeper"),
-            ("Hiding an API field is not disk erasure", "Hiding an API field is disk erasure"),
+            ("Implemented; candidate verification required", "Fully verified release acceptance"),
+            ("at most 50 details", "an unlimited number of details"),
+            ("a failed audit or lost lease rolls back the batch", "audit failure is ignored"),
+            ("Active runs, unresolved actions", "All runs and actions"),
+            ("logical field erasure, not a secure overwrite", "secure media sanitization"),
+            ("TTL is an eligibility threshold, not a deletion SLA", "TTL is a deletion SLA"),
+            ("A stopped scheduler does not purge", "A stopped scheduler still purges"),
         ):
             with self.subTest(change=old):
                 self.rewrite("docs/data-handling.md", old, new)

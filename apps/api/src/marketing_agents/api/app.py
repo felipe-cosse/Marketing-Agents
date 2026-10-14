@@ -25,6 +25,7 @@ from marketing_agents.api.dependencies import (
     WebhookAdmissionExecutor,
 )
 from marketing_agents.api.errors import (
+    safe_detail_expired,
     safe_http_exception,
     safe_request_validation_error,
     safe_unhandled_exception,
@@ -58,6 +59,8 @@ from marketing_agents.api.routes.instance_configuration import (
 )
 from marketing_agents.api.routes.manual_work import ManualWorkRequestBoundsMiddleware
 from marketing_agents.api.routes.manual_work import router as manual_work_router
+from marketing_agents.api.routes.retained_details import RetainedResourceExecutor
+from marketing_agents.api.routes.retained_details import router as retained_details_router
 from marketing_agents.api.routes.run_cancellation import RunCancellationRequestBoundsMiddleware
 from marketing_agents.api.routes.run_cancellation import router as run_cancellation_router
 from marketing_agents.api.routes.runs import (
@@ -75,12 +78,15 @@ from marketing_agents.api.routes.session import router as session_router
 from marketing_agents.api.routes.webhooks import WebhookRequestBoundsMiddleware
 from marketing_agents.api.routes.webhooks import router as webhooks_router
 from marketing_agents.api.schemas.problems import ProblemDetails
+from marketing_agents.api.telemetry import LocalTelemetryMiddleware
 from marketing_agents.application.ports.identity import IdentityProvider
 from marketing_agents.application.ports.readiness import ReadinessProbe
 from marketing_agents.config import Settings, get_settings
 from marketing_agents.demos import build_demo_scenario_registry
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.infrastructure.adapters.identity import LocalIdentityProvider
 from marketing_agents.infrastructure.readiness import LocalReadinessProbe
+from marketing_agents.observability import LocalTelemetry
 
 
 def create_app(
@@ -100,6 +106,8 @@ def create_app(
     run_cancellation_service: RunCancellationExecutor | None = None,
     schedule_control_service: ScheduleControlExecutor | None = None,
     campaign_brief_service: CampaignBriefExecutor | None = None,
+    telemetry: LocalTelemetry | None = None,
+    retained_resource_service: RetainedResourceExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -115,6 +123,7 @@ def create_app(
         },
     )
     application.state.settings = active_settings
+    application.state.telemetry = telemetry if telemetry is not None else LocalTelemetry()
     csrf_token = ProcessLocalCsrfToken()
     application.state.csrf_token = csrf_token
     application.state.identity_provider = (
@@ -138,6 +147,7 @@ def create_app(
     application.state.audit_resource_service = audit_resource_service
     application.state.schedule_control_service = schedule_control_service
     application.state.campaign_brief_service = campaign_brief_service
+    application.state.retained_resource_service = retained_resource_service
     application.state.catalog_query_service = (
         catalog_query_service
         if catalog_query_service is not None
@@ -155,6 +165,7 @@ def create_app(
     )
     application.add_exception_handler(StarletteHTTPException, safe_http_exception)
     application.add_exception_handler(Exception, safe_unhandled_exception)
+    application.add_exception_handler(DetailExpired, safe_detail_expired)
     application.add_middleware(ManualWorkRequestBoundsMiddleware)
     application.add_middleware(RunCancellationRequestBoundsMiddleware)
     application.add_middleware(DemoScenarioRequestBoundsMiddleware)
@@ -169,11 +180,13 @@ def create_app(
         settings=active_settings,
         csrf_token=csrf_token,
     )
+    application.add_middleware(LocalTelemetryMiddleware, telemetry=application.state.telemetry)
     application.include_router(health_router)
     application.include_router(session_router)
     application.include_router(instance_configuration_router)
     application.include_router(schedules_router)
     application.include_router(campaign_briefs_router)
+    application.include_router(retained_details_router)
     application.include_router(manual_work_router)
     application.include_router(demo_scenarios_router)
     application.include_router(webhooks_router)

@@ -901,6 +901,9 @@ class SQLAlchemyExecutionControlRepository:
         )
 
     async def get_attempt(self, attempt_id: str) -> ExecutionAttempt | None:
+        from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
+
+        await require_live_detail(self._session, "attempt", attempt_id)
         record = (
             await self._session.execute(
                 select(ExecutionAttemptRecord)
@@ -924,6 +927,10 @@ class SQLAlchemyExecutionControlRepository:
                 )
             ).all()
         )
+        from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
+
+        for record in records:
+            await require_live_detail(self._session, "attempt", record.id)
         attempts = tuple(self._attempt_from_record(record) for record in records)
         if tuple(item.attempt_number for item in attempts) != tuple(range(1, len(attempts) + 1)):
             _raise_corrupt("persisted attempt numbers are not contiguous")

@@ -34,6 +34,7 @@ from marketing_agents.application.services.artifact_resources import (
     ArtifactSummary,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 
 _RESOURCE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$"
 _PRIVATE_HEADERS = {
@@ -239,6 +240,8 @@ async def list_run_artifacts(
         page = await executor.list_for_run(query, principal=principal)
     except ArtifactResourceServiceError as error:
         _raise_service_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     if (
@@ -297,6 +300,8 @@ async def get_artifact(
         resource = await executor.read(artifact_id, principal=principal)
     except ArtifactResourceServiceError as error:
         _raise_service_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     if type(resource) is not ArtifactResource or resource.artifact_id != artifact_id:

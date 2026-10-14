@@ -14,7 +14,10 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import WorkItem
 from marketing_agents.domain.enums import WorkMode
+from marketing_agents.domain.retained_details import RetainedWorkItem
 from marketing_agents.infrastructure.db.models.work import WorkItemRecord
+from marketing_agents.infrastructure.db.retention_tracking import erased_detail, verify_retained
+from marketing_agents.security.digest_key import DigestKey
 
 
 def _plain_payload(work_item: WorkItem) -> dict[str, Any]:
@@ -85,23 +88,64 @@ class SQLAlchemyWorkRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(self, work_item_id: str) -> WorkItem | None:
+    async def _hydrate(self, record: WorkItemRecord) -> WorkItem | RetainedWorkItem:
+        from .retention import work_binding
+
+        detail = await erased_detail(self._session, "work", record.id)
+        if detail is None:
+            return _to_domain(record)
+        expected = work_binding(record)
+        binding = detail.skeleton["binding"]
+        if (
+            record.admitted_payload
+            or record.redacted_input_projection
+            or set(binding) != set(expected) | {"projection_digest"}
+            or any(binding[name] != value for name, value in expected.items())
+        ):
+            raise ValueError("retained work identity is corrupt")
+        key = cast(DigestKey, self._session.info["retention_key"])
+        return RetainedWorkItem(
+            id=record.id,
+            source=record.source,
+            event_id=record.event_id,
+            instance_id=record.agent_instance_id,
+            trigger_id=record.trigger_id,
+            workflow_id=record.workflow_id,
+            mode=WorkMode(record.mode),
+            brief_id=record.campaign_brief_id,
+            brief_revision=record.campaign_brief_revision,
+            configuration_revision=record.configuration_revision,
+            created_at=record.created_at,
+            input_schema_id=record.input_schema_id,
+            input_schema_hash=record.input_schema_hash,
+            input_classification=DataClassification(record.input_classification),
+            input_projection_created_at=record.input_projection_created_at,
+            input_projection_expires_at=record.input_projection_expires_at,
+            input_digest=record.input_digest,
+            admission_digest=record.admission_digest,
+            digest_key_version=record.digest_key_version,
+            input_projection_integrity_digest=record.input_projection_integrity_digest,
+            projection_digest=binding["projection_digest"],
+            retention=verify_retained(detail, key),
+        )
+
+    async def get(self, work_item_id: str) -> WorkItem | RetainedWorkItem | None:
         record = await self._session.get(WorkItemRecord, work_item_id)
-        return None if record is None else _to_domain(record)
+        return None if record is None else await self._hydrate(record)
 
     async def get_by_source_key(
         self,
         source: str,
         event_id: str,
         instance_id: str,
-    ) -> WorkItem | None:
+    ) -> WorkItem | RetainedWorkItem | None:
         statement = select(WorkItemRecord).where(
             WorkItemRecord.source == source,
             WorkItemRecord.event_id == event_id,
             WorkItemRecord.agent_instance_id == instance_id,
         )
         record = (await self._session.execute(statement)).scalar_one_or_none()
-        return None if record is None else _to_domain(record)
+        return None if record is None else await self._hydrate(record)
 
     async def add(self, work_item: WorkItem) -> None:
         self._session.add(_to_record(work_item))

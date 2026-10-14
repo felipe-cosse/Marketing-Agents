@@ -22,6 +22,7 @@ from marketing_agents.domain.entities import (
     WorkItem,
 )
 from marketing_agents.domain.enums import MisfirePolicy, OccurrenceState, RunState, TriggerKind
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import initial_received_transition
 from marketing_agents.domain.schedule_misfire import (
     ScheduleDisposition,
@@ -231,7 +232,7 @@ class ScheduleClaimProcessingService:
                     "persisted recurrence advancement does not match its exact claim plan",
                 )
 
-            audit_factory = AuditEventFactory(
+            audit_factory = self._dependencies.audit_factory(
                 AuditContext.worker(
                     claim.lease_owner,
                     correlation_id=occurrence.id,
@@ -565,10 +566,11 @@ class ScheduleClaimProcessingService:
             claim.lease_owner,
             correlation_id=occurrence.id,
         )
-        factory = AuditEventFactory(context)
         audit_occurrence = self._audit_occurrence_snapshot(occurrence)
         try:
-            expected_occurrence = factory.schedule_occurrence(
+            expected_occurrence = AuditEventFactory.for_recorded_event(
+                context, occurrence_event.draft
+            ).schedule_occurrence(
                 audit_occurrence,
                 plan,
                 claim,
@@ -583,7 +585,9 @@ class ScheduleClaimProcessingService:
                 last_scheduled_at_utc=None,
                 version=claim.version,
             )
-            expected_advancement = factory.schedule_next_occurrence_persisted(
+            expected_advancement = AuditEventFactory.for_recorded_event(
+                context, advancement_event.draft
+            ).schedule_next_occurrence_persisted(
                 prior_schedule,
                 schedule,
                 audit_occurrence,
@@ -620,6 +624,8 @@ class ScheduleClaimProcessingService:
                 "committed work-producing occurrence lacks its complete receipt links",
             )
         work_item = await unit_of_work.works.get(occurrence.work_item_id)
+        if isinstance(work_item, RetainedWorkItem):
+            raise DetailExpired("work", work_item.id)
         run = await unit_of_work.runs.get(occurrence.run_id)
         if work_item is None or run is None:
             raise ScheduleClaimProcessingError(
@@ -670,7 +676,14 @@ class ScheduleClaimProcessingService:
         history = await unit_of_work.runs.list_transitions(run.id)
         initial_event = await unit_of_work.audits.get_mutation_event("run", run.id, 1)
         context = AuditContext.worker(claim.lease_owner, correlation_id=occurrence.id)
-        expected_initial_event = AuditEventFactory(context).run_transition(
+        if initial_event is None:
+            raise ScheduleClaimProcessingError(
+                "committed_outcome_incomplete",
+                "committed primary Run lacks its initial receipt audit",
+            )
+        expected_initial_event = AuditEventFactory.for_recorded_event(
+            context, initial_event.draft
+        ).run_transition(
             initial_run,
             initial_transition,
         )

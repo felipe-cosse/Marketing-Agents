@@ -41,6 +41,7 @@ from marketing_agents.application.services.campaign_briefs import (
 )
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.security.redaction import SecretValue
 
 _HEADERS = {"Cache-Control": "no-store", "Vary": "Authorization"}
@@ -245,6 +246,8 @@ async def create_campaign_brief(
         )
     except CampaignBriefError as error:
         return _problem(error.code, request)
+    except DetailExpired:
+        raise
     except Exception:
         return _problem("campaign_brief_unavailable", request)
 
@@ -268,5 +271,7 @@ async def read_campaign_brief(
         )
     except CampaignBriefError as error:
         return _problem(error.code, request)
+    except DetailExpired:
+        raise
     except Exception:
         return _problem("campaign_brief_unavailable", request)

@@ -293,6 +293,7 @@ function runFixture(terminal: boolean): JsonObject {
     artifacts_truncated: false,
     external_actions: [actionFixture()],
     terminal_error: null,
+    details_expired: false,
   };
 }
 
@@ -383,7 +384,10 @@ function timelineFixture(cursor: string | null, terminal: boolean): JsonObject {
   };
 }
 
-async function installRuntimeBoundary(page: Page): Promise<Web06Observation> {
+async function installRuntimeBoundary(
+  page: Page,
+  detailsExpired = false,
+): Promise<Web06Observation> {
   const observation: Web06Observation = {
     externalRequests: [],
     timelineQueries: [],
@@ -440,23 +444,46 @@ async function installRuntimeBoundary(page: Page): Promise<Web06Observation> {
     }
     if (pathname === `/api/v1/runs/${RUN_ID}`) {
       observation.runRequests += 1;
+      const run = runFixture(detailsExpired || observation.runRequests >= 2);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         headers: { "Cache-Control": "no-store", Vary: "Authorization" },
-        body: JSON.stringify(runFixture(observation.runRequests >= 2)),
+        body: JSON.stringify(
+          detailsExpired
+            ? {
+                ...run,
+                details_expired: true,
+                external_actions: [],
+                artifact_summaries: [],
+              }
+            : run,
+        ),
       });
       return;
     }
     if (pathname === `/api/v1/runs/${RUN_ID}/timeline`) {
       observation.timelineQueries.push(url.search);
       const cursor = url.searchParams.get("cursor");
+      const timeline = timelineFixture(
+        cursor,
+        detailsExpired || observation.runRequests >= 2,
+      );
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         headers: { "Cache-Control": "no-store", Vary: "Authorization" },
         body: JSON.stringify(
-          timelineFixture(cursor, observation.runRequests >= 2),
+          detailsExpired
+            ? {
+                ...timeline,
+                items: (timeline.items as JsonObject[]).map((item) => ({
+                  ...item,
+                  metadata: {},
+                  metadata_expired: true,
+                })),
+              }
+            : timeline,
         ),
       });
       return;
@@ -469,7 +496,7 @@ async function installRuntimeBoundary(page: Page): Promise<Web06Observation> {
         headers: { "Cache-Control": "no-store", Vary: "Authorization" },
         body: JSON.stringify({
           run_id: RUN_ID,
-          items: [artifactSummary()],
+          items: detailsExpired ? [] : [artifactSummary()],
           next_cursor: null,
         }),
       });
@@ -623,3 +650,85 @@ test("WEB-06 run timeline reaches terminal state and opens one inert provenance-
   expect(observation.externalRequests).toEqual([]);
   await capture(page, testInfo, "web-06-run-artifact-1536x1024.png");
 });
+
+for (const viewport of [
+  { width: 1536, height: 1024 },
+  { width: 390, height: 844 },
+]) {
+  test(`WEB-06 retained run history survives expired detail at ${String(viewport.width)}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize(viewport);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    const observation = await installRuntimeBoundary(page, true);
+    await page.goto(`/runs/${RUN_ID}`);
+    await expect(page).toHaveURL(
+      new RegExp(`/runs/${RUN_ID.replaceAll(".", "\\.")}$`, "u"),
+    );
+    await expect(page).toHaveTitle("Run timeline | Marketing Agents");
+    await expect(
+      page.getByRole("heading", { name: "Run timeline", exact: true }),
+    ).toBeVisible();
+    const notice = page.getByRole("status", {
+      name: "Some run details have expired",
+    });
+    await expect(notice).toContainText("Some run details have expired");
+    await expect(notice).toContainText(
+      "Missing details do not mean an action never occurred.",
+    );
+    await expect(
+      page.getByText("Terminal snapshot — polling stopped", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Selected plan and policy",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("No external action has been proposed for this run.", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("No artifacts are available yet", { exact: true }),
+    ).toHaveCount(0);
+    const timeline = page.getByRole("list", {
+      name: "Run timeline in sequence order",
+    });
+    await expect(timeline.getByRole("listitem")).toHaveCount(2);
+    await expect(
+      timeline.getByRole("heading", {
+        name: "External action succeeded",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Load more events" }).click();
+    await expect(timeline.getByRole("listitem")).toHaveCount(4);
+    await expect(
+      timeline.getByRole("heading", { name: "Run completed", exact: true }),
+    ).toBeVisible();
+    await expect(
+      timeline.getByText(/Event metadata expired under its retention policy/u),
+    ).toHaveCount(4);
+    const priorRunRequests = observation.runRequests;
+    await page.getByRole("button", { name: "Refresh now" }).click();
+    await expect.poll(() => observation.runRequests).toBe(priorRunRequests + 1);
+    await expect(timeline.getByRole("listitem")).toHaveCount(4);
+    await expect(notice).toContainText("Some run details have expired");
+    await expect(page.locator("vite-error-overlay")).toHaveCount(0);
+    expect(errors).toEqual([]);
+    expect(observation.externalRequests).toEqual([]);
+    expect(observation.artifactDetailRequests).toBe(0);
+    await notice.scrollIntoViewIfNeeded();
+    await capture(
+      page,
+      testInfo,
+      `exec-06-expired-history-${String(viewport.width)}.png`,
+    );
+  });
+}

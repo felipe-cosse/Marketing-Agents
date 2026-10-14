@@ -1,4 +1,4 @@
-"""AC-15 offline gate failures are actionable without exposing runtime payloads."""
+"""AC-15/EXEC-06: offline gate failures are actionable without exposing runtime payloads."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -22,8 +23,12 @@ from scripts.del_05_offline_diagnostics import (
     AC16_DIAGNOSTIC_MAX_DELTA,
     AC16_DIAGNOSTIC_NODE,
     AC16_DIAGNOSTIC_PREFIX,
+    COUNT_FIELDS,
+    MAX_COUNT,
+    MAX_ELAPSED_MS,
     MAX_FAILURES,
     MAX_LINE_BYTES,
+    MAX_SLOW_TESTS,
     MAX_STREAM_BYTES,
     PREFIX,
     project_diagnostics,
@@ -110,6 +115,158 @@ def test_del_05_diagnostics_never_copy_payload_parameters_paths_or_unknown_field
     ]
     assert "pytest_summary" not in projected
     assert projected["stages"] == []
+
+
+def test_del_05_diagnostics_project_timings_progress_latest_and_distinct_slowest(source):
+    count = MAX_SLOW_TESTS + 20
+    (source / "tests/test_many.py").write_text(
+        "\n".join(
+            f"class TestGroup{index}:\n    def test_case(self): pass" for index in range(count)
+        )
+    )
+    nodes = [f"tests/test_many.py::TestGroup{index}::test_case" for index in range(count)]
+    output = event("stage_started", elapsed_ms=0)
+    output += b"".join(
+        event(
+            "test_finished",
+            node_id=f"{node}[{CANARY}]",
+            started_ms=0,
+            elapsed_ms=index,
+            session_elapsed_ms=index,
+            completed=index + 1,
+        )
+        for index, node in enumerate(nodes)
+    )
+    output += event(
+        "test_finished",
+        node_id=f"{nodes[-1]}[other]",
+        started_ms=100,
+        elapsed_ms=1,
+        session_elapsed_ms=101,
+        completed=count + 1,
+    )
+    output += event("test_started", node_id=NODE, session_elapsed_ms=102, completed=count + 1)
+    output += event("stage_finished", returncode=0, elapsed_ms=103)
+    projected = project_diagnostics(output, b"", source)
+    assert projected["stages"] == [
+        {"stage": "pytest", "status": "passed", "returncode": 0, "elapsed_ms": 103}
+    ]
+    assert projected["active_test"] == NODE
+    assert projected["active_test_started_ms"] == 102
+    assert projected["latest_test"] == {
+        "node_id": nodes[-1],
+        "started_ms": 100,
+        "elapsed_ms": 1,
+        "finished_ms": 101,
+    }
+    assert [item["elapsed_ms"] for item in projected["slowest_tests"]] == list(
+        range(count - 1, count - MAX_SLOW_TESTS - 1, -1)
+    )
+    assert projected["pytest_progress"] == {"completed": count + 1, "session_elapsed_ms": 102}
+    assert len(json.dumps(projected)) < 4_000
+    assert CANARY not in json.dumps(projected)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        True,
+        False,
+        -1,
+        1.5,
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        MAX_ELAPSED_MS + 1,
+        "12",
+        None,
+        [],
+        {},
+    ],
+)
+def test_del_05_diagnostics_reject_invalid_timing_fields(source, invalid):
+    output = b"".join(
+        (
+            event("stage_started", elapsed_ms=invalid),
+            event("stage_finished", returncode=0, elapsed_ms=invalid),
+            event("test_started", node_id=NODE, session_elapsed_ms=invalid),
+            event(
+                "test_finished",
+                node_id=NODE,
+                started_ms=invalid,
+                elapsed_ms=invalid,
+                session_elapsed_ms=invalid,
+            ),
+            event("pytest_progress", session_elapsed_ms=invalid, completed=invalid),
+        )
+    )
+    projected = project_diagnostics(output, b"", source)
+    # Nonfinite JSON is rejected in full by the existing strict decoder.
+    assert all("elapsed_ms" not in stage for stage in projected["stages"])
+    for field in ("active_test_started_ms", "latest_test", "slowest_tests", "pytest_progress"):
+        assert field not in projected
+
+
+@pytest.mark.parametrize("invalid", [True, -1, MAX_COUNT + 1, 0.1, float("inf"), "1"])
+def test_del_05_diagnostics_reject_invalid_counts_at_progress_and_completion(source, invalid):
+    fields = dict.fromkeys(COUNT_FIELDS, invalid)
+    projected = project_diagnostics(
+        event("pytest_progress", **fields) + event("pytest_finished", **fields),
+        b"",
+        source,
+    )
+    assert "pytest_progress" not in projected
+    assert "pytest_summary" not in projected
+
+
+@pytest.mark.parametrize("started,elapsed,finished", [(20, 0, 19), (10, 12, 20)])
+def test_del_05_diagnostics_reject_inconsistent_test_timing(source, started, elapsed, finished):
+    projected = project_diagnostics(
+        event(
+            "test_finished",
+            node_id=NODE,
+            started_ms=started,
+            elapsed_ms=elapsed,
+            session_elapsed_ms=finished,
+        ),
+        b"",
+        source,
+    )
+    assert "latest_test" not in projected
+    assert "slowest_tests" not in projected
+
+
+def test_del_05_diagnostics_active_timing_omits_ambiguous_and_legacy_starts(source):
+    output = event("test_started", node_id=NODE, session_elapsed_ms=MAX_ELAPSED_MS)
+    projected = project_diagnostics(output, b"", source)
+    assert projected["active_test_started_ms"] == MAX_ELAPSED_MS
+    output += event("test_started", node_id=NODE)
+    projected = project_diagnostics(output, b"", source)
+    assert projected["active_tests"] == [{"node_id": NODE, "count": 2}]
+    assert "active_test_started_ms" not in projected
+    output += event("test_finished", node_id=NODE)
+    projected = project_diagnostics(output, b"", source)
+    assert projected["active_tests"] == [{"node_id": NODE, "count": 1}]
+    assert "active_test_started_ms" not in projected
+
+
+def test_del_05_diagnostics_unknown_source_cannot_introduce_timing_or_progress(source):
+    projected = project_diagnostics(
+        event(
+            "test_finished",
+            node_id=f"tests/test_example.py::test_{CANARY}",
+            started_ms=0,
+            elapsed_ms=10,
+            session_elapsed_ms=10,
+            completed=1,
+        ),
+        b"",
+        source,
+    )
+    assert "latest_test" not in projected
+    assert "slowest_tests" not in projected
+    assert "pytest_progress" not in projected
+    assert CANARY not in json.dumps(projected)
 
 
 def test_del_05_diagnostics_reject_untrusted_protocol_shapes(source):
@@ -212,6 +369,7 @@ def test_del_05_diagnostics_timeout_keeps_active_test_partial_hashes_and_no_payl
         verifier.command("offline-backend", ["docker"], timeout=1)
     record = verifier.report["commands"][-1]
     assert record["status"] == "timeout"
+    assert type(record["seconds"]) is float and record["seconds"] >= 0
     assert record["stdout_sha256"] == hashlib.sha256(partial).hexdigest()
     assert record["stderr_sha256"] == hashlib.sha256(CANARY.encode()).hexdigest()
     assert record["offline_diagnostics"]["active_test"] == NODE
@@ -240,6 +398,7 @@ def test_del_05_diagnostics_real_command_timeout_retains_only_safe_partial_evide
         verifier.command("offline-backend", [sys.executable, "-c", code], timeout=1)
     record = verifier.report["commands"][-1]
     assert record["stdout_sha256"] == hashlib.sha256(partial).hexdigest()
+    assert type(record["seconds"]) is float and record["seconds"] >= 1
     assert record["offline_diagnostics"]["active_test"] == NODE
     assert record["offline_diagnostics"]["stages"] == [{"stage": "pytest", "status": "running"}]
     assert CANARY not in json.dumps(verifier.report)
@@ -258,6 +417,7 @@ def test_del_05_diagnostics_aggregate_deadline_keeps_active_test_without_changin
         verifier.command("offline-backend", [sys.executable, "-c", code], timeout=10)
     record = verifier.report["commands"][-1]
     assert record["status"] == "interrupted"
+    assert type(record["seconds"]) is float and record["seconds"] >= 0
     assert record["stdout_sha256"] == hashlib.sha256(partial).hexdigest()
     assert record["offline_diagnostics"]["active_test"] == NODE
     assert CANARY not in json.dumps(verifier.report)
@@ -301,7 +461,16 @@ def test_del_05_diagnostics_actual_pytest_plugin_identifies_failure_without_secr
     ]
     assert projected["pytest_summary"]["passed"] == 1
     assert projected["pytest_summary"]["failed"] == 1
-    assert projected["stages"] == [{"stage": "pytest", "status": "failed", "returncode": 1}]
+    stage = projected["stages"][0]
+    assert stage == {
+        "stage": "pytest",
+        "status": "failed",
+        "returncode": 1,
+        "elapsed_ms": stage["elapsed_ms"],
+    }
+    assert type(stage["elapsed_ms"]) is int and 0 <= stage["elapsed_ms"] <= MAX_ELAPSED_MS
+    assert projected["pytest_summary"]["completed"] == 2
+    assert len(projected["slowest_tests"]) == 2
     assert CANARY not in json.dumps(projected)
 
 
@@ -323,9 +492,88 @@ def test_del_05_diagnostics_wrapper_preserves_command_exit_status_and_failure_st
         check=False,
     )
     assert process.returncode == 7
-    assert project_diagnostics(process.stdout, process.stderr, source)["stages"] == [
-        {"stage": "architecture", "status": "failed", "returncode": 7}
+    stage = project_diagnostics(process.stdout, process.stderr, source)["stages"][0]
+    assert stage == {
+        "stage": "architecture",
+        "status": "failed",
+        "returncode": 7,
+        "elapsed_ms": stage["elapsed_ms"],
+    }
+    assert type(stage["elapsed_ms"]) is int and 0 <= stage["elapsed_ms"] <= MAX_ELAPSED_MS
+
+
+@pytest.mark.parametrize("code,expected", [(0, 0), (7, 7), (-15, 143), (None, 127)])
+def test_del_05_diagnostics_wrapper_timing_never_changes_argv_or_exit_status(
+    source, monkeypatch, code, expected
+):
+    module = _isolated_diagnostics_module()
+    emitted = []
+    clock = iter((1_000_000, 252_000_000))
+    monkeypatch.setattr(module.time, "monotonic_ns", lambda: next(clock))
+    monkeypatch.setattr(
+        module,
+        "_emit",
+        lambda kind, stage, **fields: emitted.append(event(kind, stage=stage, **fields)),
+    )
+    command = ["existing-command", "--unchanged", CANARY]
+    with patch.object(module.subprocess, "run") as run:
+        if code is None:
+            run.side_effect = OSError(CANARY)
+        else:
+            run.return_value = subprocess.CompletedProcess(command, code)
+        assert module.main(["architecture", "--", *command]) == expected
+        run.assert_called_once_with(command, check=False)
+    projected = project_diagnostics(b"".join(emitted), b"", source)
+    assert projected["stages"] == [
+        {
+            "stage": "architecture",
+            "status": "passed" if code == 0 else "failed",
+            "returncode": 127 if code is None else code,
+            "elapsed_ms": 251,
+        }
     ]
+    assert CANARY not in json.dumps(projected)
+
+
+def test_del_05_diagnostics_interrupted_real_plugin_keeps_progress_and_active_start(source):
+    (source / "pytest.ini").write_text("[pytest]\n")
+    entered = source / "entered-active-test"
+    (source / "tests/test_example.py").write_text(
+        "import time, pytest\nfrom pathlib import Path\n"
+        "def test_success():\n    pass\n"
+        f"@pytest.mark.parametrize('value', ['{CANARY}'], ids=['{CANARY}'])\n"
+        "def test_failure(value):\n"
+        f"    Path({str(entered)!r}).touch()\n"
+        "    time.sleep(30)\n"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-m", "pytest", "-q", "-p", "scripts.del_05_offline_diagnostics"],
+        cwd=source,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        # Handshake so import time cannot masquerade as missing test progress.
+        deadline = time.monotonic() + 20
+        while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert entered.exists()
+        with pytest.raises(subprocess.TimeoutExpired) as failure:
+            process.communicate(timeout=0.1)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+    projected = project_diagnostics(failure.value.stdout, failure.value.stderr, source)
+    assert projected["active_test"] == NODE
+    assert projected["pytest_progress"]["completed"] == 1
+    assert projected["pytest_progress"]["passed"] == 1
+    assert 0 <= projected["active_test_started_ms"] <= MAX_ELAPSED_MS
+    assert projected["active_test_started_ms"] >= projected["latest_test"]["finished_ms"]
+    assert projected["latest_test"]["node_id"] == "tests/test_example.py::test_success"
+    assert "pytest_summary" not in projected
+    assert CANARY not in json.dumps(projected)
 
 
 def test_del_05_diagnostics_actual_collection_error_retains_source_file_not_message(source):
@@ -392,7 +640,8 @@ def test_del_05_diagnostics_worker_hooks_never_emit_or_aggregate(source, monkeyp
         module.pytest_runtest_logreport(report)
         module.pytest_collectreport(report)
     module.pytest_sessionfinish(None, 1)
-    assert module._counts == {"passed": 0, "failed": 0, "skipped": 0, "collection_errors": 0}
+    assert module._counts == dict.fromkeys(COUNT_FIELDS, 0)
+    assert module._active_timings == {}
 
 
 def test_del_05_diagnostics_worker_emitter_has_independent_safety_backstop(source, capsys):
@@ -429,14 +678,68 @@ def test_del_05_diagnostics_controller_counts_parameters_without_emitting_ids(so
     assert emitted[-1] == {
         "event": "pytest_finished",
         "stage": "pytest",
+        "completed": 4,
         "passed": 2,
         "failed": 1,
         "skipped": 1,
         "collection_errors": 1,
+        "session_elapsed_ms": emitted[-1]["session_elapsed_ms"],
     }
     assert sum(item["event"] == "test_started" for item in emitted) == 4
     assert sum(item["event"] == "test_finished" for item in emitted) == 4
     assert CANARY not in json.dumps(emitted)
+
+
+def test_del_05_diagnostics_controller_times_overlapping_cases_independently(source, monkeypatch):
+    module = _isolated_diagnostics_module()
+    clock = iter(value * 1_000_000 for value in (0, 0, 10, 20, 100, 150))
+    monkeypatch.setattr(module.time, "monotonic_ns", lambda: next(clock))
+    emitted = []
+    monkeypatch.setattr(
+        module,
+        "_emit",
+        lambda kind, stage, **fields: emitted.append(event(kind, stage=stage, **fields)),
+    )
+    module.pytest_configure(SimpleNamespace(rootpath=source))
+    first, second = f"{NODE}[{CANARY}-1]", f"{NODE}[{CANARY}-2]"
+    module.pytest_runtest_logstart(first, None)
+    module.pytest_runtest_logstart(second, None)
+    assert len(module._active_timings) == 2
+    assert CANARY not in repr(module._active_timings)
+    module.pytest_runtest_logfinish(first, None)
+    module.pytest_runtest_logfinish(second, None)
+    assert module._active_timings == {}
+    projected = project_diagnostics(b"".join(emitted), b"", source)
+    assert projected["latest_test"] == {
+        "node_id": NODE,
+        "started_ms": 20,
+        "elapsed_ms": 130,
+        "finished_ms": 150,
+    }
+    assert projected["slowest_tests"] == [projected["latest_test"]]
+    assert projected["pytest_progress"]["completed"] == 2
+    assert "active_tests" not in projected
+    assert CANARY not in json.dumps(projected)
+
+
+def test_del_05_diagnostics_controller_timing_inventory_and_values_remain_bounded(
+    source, monkeypatch
+):
+    module = _isolated_diagnostics_module()
+    monkeypatch.setattr(module, "_emit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "MAX_ACTIVE_NODES", 2)
+    module.pytest_configure(SimpleNamespace(rootpath=source))
+    for index in range(3):
+        module.pytest_runtest_logstart(f"{NODE}[{CANARY}-{index}]", None)
+    assert len(module._active_timings) == 2
+    for index in range(3):
+        module.pytest_runtest_logfinish(f"{NODE}[{CANARY}-{index}]", None)
+    assert module._active_timings == {}
+    assert module._counts["completed"] == 3
+    assert module._elapsed_ms(100, 99) == 0
+    assert module._elapsed_ms(0, (MAX_ELAPSED_MS + 1) * 1_000_000) == MAX_ELAPSED_MS
+    module._counts["completed"] = MAX_COUNT + 1
+    assert module._current_progress()["completed"] == MAX_COUNT
 
 
 def test_del_05_diagnostics_overlapping_parameter_instances_keep_the_remaining_count(source):
@@ -573,6 +876,7 @@ def test_del_05_diagnostics_actual_two_workers_emit_one_redacted_aggregate(sourc
     assert sum(item["event"] == "pytest_finished" for item in emitted) == 1
     projected = project_diagnostics(process.stdout, process.stderr, source)
     assert projected["pytest_summary"] == {
+        "completed": 6,
         "passed": 4,
         "failed": 1,
         "skipped": 1,
@@ -582,7 +886,16 @@ def test_del_05_diagnostics_actual_two_workers_emit_one_redacted_aggregate(sourc
         {"node_id": "tests/test_a.py::test_shared", "phase": "call", "exception": "ValueError"}
     ]
     assert "active_test" not in projected and "active_tests" not in projected
-    assert projected["stages"] == [{"stage": "pytest", "status": "failed", "returncode": 1}]
+    stage = projected["stages"][0]
+    assert stage == {
+        "stage": "pytest",
+        "status": "failed",
+        "returncode": 1,
+        "elapsed_ms": stage["elapsed_ms"],
+    }
+    assert len(projected["slowest_tests"]) == 2
+    assert all(item["elapsed_ms"] >= 0 for item in projected["slowest_tests"])
+    assert projected["pytest_progress"]["completed"] == 6
     assert CANARY not in json.dumps(projected)
     partial = b""
     maximum_active = 0
@@ -603,6 +916,7 @@ def test_del_05_diagnostics_actual_two_worker_collection_error_is_not_duplicated
     assert CANARY not in json.dumps(emitted)
     projected = project_diagnostics(process.stdout, process.stderr, source)
     assert projected["pytest_summary"] == {
+        "completed": 0,
         "passed": 0,
         "failed": 0,
         "skipped": 0,
@@ -888,6 +1202,7 @@ def test_del_05_ac16_fixture_note_survives_real_xdist_unittest_without_secrets(
     # Pytest reports the containing method plus its subtest; diagnostics must
     # preserve those hook counts instead of inventing a different aggregate.
     assert projected["pytest_summary"] == {
+        "completed": 1,
         "passed": 1 if should_fail else 2,
         "failed": int(should_fail),
         "skipped": 0,
@@ -898,6 +1213,9 @@ def test_del_05_ac16_fixture_note_survives_real_xdist_unittest_without_secrets(
             "stage": "pytest",
             "status": "failed" if should_fail else "passed",
             "returncode": int(should_fail),
+            "elapsed_ms": projected["stages"][0]["elapsed_ms"],
         }
     ]
+    assert projected["latest_test"]["node_id"] == AC16_DIAGNOSTIC_NODE
+    assert projected["slowest_tests"] == [projected["latest_test"]]
     assert CANARY not in json.dumps(projected)

@@ -61,7 +61,29 @@ endpoint is not a semantic replanning implementation. See
 
 **Implemented but not live-tested by this documentation change.** [Artifact rendering](../apps/web/src/features/artifacts/ArtifactPayloadView.tsx) uses React text and a restricted Markdown renderer, not executable raw HTML or remote embeds. Links are separately validated HTTP(S) navigation with `noopener noreferrer` and no referrer; they are not provider requests authorized by the application. [Web CSP](../docker/web.conf) restricts scripts/assets/connections to the local origin, denies framing and permits inline styles—not arbitrary inline scripts. [Renderer tests](../apps/web/src/features/artifacts/ArtifactPayloadView.test.tsx) cover hostile markup and links. Clicking an allowed external link still leaves the local application; it is not a content-safety endorsement.
 
-**Residual risks.** SQLite and paired backup bundles are not application-encrypted. A host/database administrator can read restricted content or alter records; append-only application audit is not tamper-proof storage. Redaction is schema/field based, not universal PII discovery in arbitrary text. Configured TTLs are not automatic deletion: no physical retention sweeper is wired into the shipped workers. Use synthetic data, protect the database/key/backup pair and do not attach it to issues. Production authentication, encryption/key management, retention enforcement, provider privacy and operational reliability remain separate work.
+**Residual risks.** SQLite and paired backup bundles are not application-encrypted. A host/database administrator can read restricted content or alter records; append-only application audit is not tamper-proof storage. Redaction is schema/field based, not universal PII discovery in arbitrary text. The bounded local retention worker erases eligible fields, not SQLite pages/WAL or backups; recovery exclusions and backlog prevent a deletion SLA. Use synthetic data, protect the database/key/backup pair and do not attach it to issues. Production authentication, encryption/key management, legal retention policy, provider privacy and operational reliability remain separate work.
+
+## EXEC-06 implemented-flow threat review
+
+This source review extends the existing trust-boundary baseline; it is not a
+production penetration test. Qualification is recorded separately in
+[EXEC-06](verification/requirements/EXEC-06.md). The changed flows are:
+
+| Flow and threat | Implemented boundary | Verification and residual limit |
+|---|---|---|
+| Scheduler maintenance erases recovery material or races another owner | Durable minute occurrence, frozen cutoff and batch size, lease/version fencing, terminal/recovery eligibility and one transaction for erasure plus count-only audit | Dedicated retention concurrency, rollback and recovery tests must pass; the host/database administrator is trusted |
+| Purged payload is reconstructed to bypass admission or approval | Distinct authenticated non-executable retained identities; unchanged live validators; exact retired work retries return expiry, different content remains a collision | Retained reads and replay tests; internal replay digests remain pseudonymous data, not anonymization |
+| Changed TTL breaks old approvals or scheduler replay | New facts use configured policy; old facts are reconstructed with their recorded expiry and unchanged integrity checks | Real Email and scheduler restart tests with different settings; no retroactive shortening of persisted TTLs |
+| Expiry hides evidence of prior transitions or decisions | Event rows, sequence/state/time/decision facts survive; terminal run projection explicitly marks expired detail while preserving timeline | Retained run/API/browser regressions; optional detail may be unavailable and audit is not tamper-proof against administrators |
+| Diagnostics export secrets or grow without bound | Event-specific allowlists, bounded metric labels, process-local storage, no exporter, safe server diagnostics, no body/header/raw-exception logging | Actual API/worker/scheduler redaction canaries; arbitrary free-text DLP and external log-sink retention are not provided |
+| Rolled-back work appears successful in operational metrics | Audit observations buffer until outer commit and are dropped on rollback/savepoint rollback; observer failure cannot change committed business success | Transaction fault-injection tests; metrics are best-effort diagnostics and never authority |
+| Demo CLI grants writes or turns supplied text into instructions | Only five fixed committed scenarios; mock/offline/local preflight, explicit retry key, no arbitrary payload or approval command | CLI controls and existing complete five-demo suites; mock receipts do not prove external delivery |
+
+No new inbound listener, public identity mode, provider, network permission or
+browser storage of sensitive input is introduced. Existing catalog, capability,
+exact-action approval, CSRF, webhook, URL, XSS and network gates remain mandatory.
+The retained-detail read endpoint uses the same human/runtime-reader authority as
+run inspection and returns no payload, digest, destination or free-text metadata.
 
 ## Reporting a problem
 

@@ -28,7 +28,6 @@ from marketing_agents.application.ports.webhooks import (
     require_webhook_source_id,
     require_webhook_trigger_id,
 )
-from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.application.services.idempotent_work_receipt import (
     IdempotentWorkRunReceiptService,
     WorkRunReceiptDisposition,
@@ -51,6 +50,7 @@ from marketing_agents.domain.identity import (
     AuthenticationMethod,
     PrincipalKind,
 )
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.domain.validation import require_id
 from marketing_agents.domain.webhook import WebhookReceipt, WebhookReceiptDelivery
 from marketing_agents.security.digest_key import DigestKey
@@ -330,6 +330,8 @@ class WebhookAdmissionService:
             )
         except WebhookAdmissionServiceError:
             raise
+        except DetailExpired:
+            raise
         except (WebhookReceiptRepositoryConflict, WorkRunReceiptError):
             raise _service_error(
                 "webhook_service_unavailable",
@@ -389,7 +391,7 @@ class WebhookAdmissionService:
                     )
                 except WebhookAdmissionResolutionError as error:
                     await unit_of_work.audits.append_global(
-                        AuditEventFactory(audit_context).webhook_signature_validated(
+                        self._dependencies.audit_factory(audit_context).webhook_signature_validated(
                             source=command.source,
                             trigger_id=command.trigger_id,
                             webhook_attempt_id=attempt_id,
@@ -423,7 +425,7 @@ class WebhookAdmissionService:
                         try:
                             validated = self._validate_all(bindings, mapped)
                         except IncomingWorkValidationError as error:
-                            factory = AuditEventFactory(audit_context)
+                            factory = self._dependencies.audit_factory(audit_context)
                             events = [
                                 factory.webhook_signature_validated(
                                     source=command.source,
@@ -507,7 +509,7 @@ class WebhookAdmissionService:
                                 if inserted.inserted
                                 else WebhookAdmissionDisposition.REPLAYED
                             )
-                            factory = AuditEventFactory(audit_context)
+                            factory = self._dependencies.audit_factory(audit_context)
                             events = [
                                 factory.webhook_signature_validated(
                                     source=command.source,
@@ -570,7 +572,7 @@ class WebhookAdmissionService:
             definition=definition,
             body_digest=body_digest,
         )
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         events = [
             factory.webhook_signature_validated(
                 source=command.source,
@@ -723,7 +725,7 @@ class WebhookAdmissionService:
         now: datetime,
     ) -> None:
         async with self._dependencies.unit_of_work() as unit_of_work:
-            event = AuditEventFactory(
+            event = self._dependencies.audit_factory(
                 AuditContext.system(
                     "webhook-authenticator",
                     correlation_id=command.correlation_id,
@@ -749,7 +751,7 @@ class WebhookAdmissionService:
         """Persist authentication and bounded throttle evidence before returning 429."""
 
         async with self._dependencies.unit_of_work() as unit_of_work:
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             await unit_of_work.audits.append_global_many(
                 (
                     factory.webhook_signature_validated(
@@ -778,7 +780,7 @@ class WebhookAdmissionService:
         now: datetime,
     ) -> None:
         async with self._dependencies.unit_of_work() as unit_of_work:
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             await unit_of_work.audits.append_global_many(
                 (
                     factory.webhook_signature_validated(

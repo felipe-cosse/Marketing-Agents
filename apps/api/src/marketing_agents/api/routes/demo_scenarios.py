@@ -58,6 +58,7 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import RunState, WorkMode
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.security.redaction import SecretValue
 
 _SCENARIO_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$"
@@ -623,6 +624,8 @@ async def create_demo_scenario_run(
         )
     except ManualDryRunServiceError as error:
         return _service_problem(request, error)
+    except DetailExpired:
+        raise
     except Exception:
         return problem_response(
             request,

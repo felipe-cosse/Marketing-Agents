@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from marketing_agents.application.policies.approval_authorization import (
@@ -62,7 +62,8 @@ from marketing_agents.domain.planner_output import (
 )
 from marketing_agents.domain.provenance import ArtifactEnvelope, ProviderVersion
 from marketing_agents.domain.recurrence_audit import recurrence_audit_summary
-from marketing_agents.domain.retention import RetentionPolicy
+from marketing_agents.domain.retained_details import RetainedWorkItem
+from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand, RunStateTransition
 from marketing_agents.domain.runtime_policy import AttemptKind
 from marketing_agents.domain.schedule_misfire import (
@@ -304,6 +305,21 @@ class AuditEventFactory:
         ):
             raise ValueError("configuration audit pseudonym key must use the exact key type")
         self._configuration_pseudonym_key = configuration_pseudonym_key
+
+    @classmethod
+    def for_recorded_event(cls, context: AuditContext, draft: AuditEventDraft) -> AuditEventFactory:
+        """Reconstruct historical facts under their recorded, not today's, TTL.
+
+        All ordinary event/context/integrity validation remains mandatory. This
+        only recovers the immutable retention interval for exact replay checks.
+        """
+        if type(draft) is not AuditEventDraft:
+            raise ValueError("recorded audit retention requires an exact event draft")
+        draft.verify_integrity()
+        interval = draft.safe_metadata.expires_at - draft.occurred_at
+        if interval != timedelta(days=interval.days):
+            raise ValueError("recorded audit retention must use whole days")
+        return cls(context, retention_policy=RetentionPolicy(audit_metadata_days=interval.days))
 
     def webhook_signature_validated(
         self,
@@ -716,6 +732,62 @@ class AuditEventFactory:
             mutation_version=None,
             reason_code="idempotency_conflict",
         )
+
+    def retained_work_collision(
+        self,
+        work_item: RetainedWorkItem,
+        run: Run,
+        *,
+        attempted_envelope: AdmissionEnvelope,
+        manual_attempt_id: str,
+        occurred_at: datetime,
+    ) -> tuple[AuditEventDraft, AuditEventDraft]:
+        """A retired identity may witness denial, never a new receipt or execution."""
+        if (
+            type(work_item) is not RetainedWorkItem
+            or type(run) is not Run
+            or run.state
+            not in {RunState.COMPLETED, RunState.FAILED, RunState.REJECTED, RunState.CANCELLED}
+            or work_item.source_idempotency_key != attempted_envelope.source_key
+            or run.work_item_id != work_item.id
+            or run.configuration_revision != work_item.configuration_revision
+            or work_item.retention.record_kind != "work"
+            or work_item.retention.record_id != work_item.id
+            or work_item.retention.run_id != run.id
+        ):
+            raise ValueError("retained collision requires authoritative terminal linkage")
+        metadata = _manual_envelope_metadata(
+            attempted_envelope,
+            manual_attempt_id=manual_attempt_id,
+            disposition="collision",
+            work_item_id=work_item.id,
+        )
+        received = self._build(
+            run_id=run.id,
+            event_type="ingress.manual_received",
+            aggregate_type="manual_ingress",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id, event_type="ingress.manual_received"
+            ),
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=1,
+        )
+        collision = self._build(
+            run_id=run.id,
+            event_type="work.idempotency_collision",
+            aggregate_type="manual_ingress",
+            aggregate_id=_manual_audit_aggregate_id(
+                manual_attempt_id=manual_attempt_id, event_type="work.idempotency_collision"
+            ),
+            outcome=AuditOutcome.REJECTED,
+            occurred_at=occurred_at,
+            metadata=metadata,
+            mutation_version=None,
+            reason_code="idempotency_conflict",
+        )
+        return received, collision
 
     def campaign_brief_created(self, *, brief_id: str, occurred_at: datetime) -> AuditEventDraft:
         """Record identity/revision only, never brief content or body/retry digests."""
@@ -2607,6 +2679,28 @@ class AuditEventFactory:
             + hashlib.sha256(
                 _AUDIT_ATTEMPT_ID_DOMAIN + canonical_json_bytes(attempt_identity)
             ).hexdigest()
+        )
+
+    def retention_completed(
+        self, job_id: str, counts: Mapping[str, int], occurred_at: datetime
+    ) -> AuditEventDraft:
+        """Record only bounded category totals for an atomic maintenance batch."""
+        if self._context.actor_source is not AuditActorSource.WORKER:
+            raise ValueError("retention completion requires a worker audit context")
+        require_id(job_id, "retention job ID")
+        if set(counts) != {category.value for category in RetentionCategory} or any(
+            type(value) is not int or not 0 <= value <= 100 for value in counts.values()
+        ):
+            raise ValueError("retention completion requires six bounded category counts")
+        return self._build(
+            run_id=None,
+            event_type="retention.completed",
+            aggregate_type="maintenance_run",
+            aggregate_id=job_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata=counts,
+            mutation_version=1,
         )
 
     def _build(

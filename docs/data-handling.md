@@ -1,6 +1,6 @@
 # Data handling, retention and local recovery
 
-Use synthetic data for the local demo. Claim labels follow [plan 15](implementation-plan/15-local-operations-documentation-and-release.md#documentation-claim-taxonomy); the accepted policy is [ADR-0010](adr/0010-data-retention.md). This document distinguishes current protection and projection behavior from a future retention maintenance service. It is not a production privacy, deletion or backup guarantee.
+Use synthetic data for the local demo. Claim labels follow [plan 15](implementation-plan/15-local-operations-documentation-and-release.md#documentation-claim-taxonomy); the accepted policy is [ADR-0010](adr/0010-data-retention.md). This document distinguishes logical field erasure from projection expiry and physical media sanitization. It is not a production privacy, deletion or backup guarantee.
 
 ## Classification and representations
 
@@ -27,11 +27,11 @@ The application separates validated data needed for execution/recovery from the 
 
 Do not include full prompts, admitted input, executable action bodies, raw webhook bytes/signatures, credentials, the session/CSRF response, or secret-bearing backups in ordinary logs, issue attachments or verification evidence. Prefer source revision, safe error code, bounded status/count/duration and the minimal required correlation reference. An action hash provides integrity, not confidentiality; low-entropy values can be guessed. Even pseudonymous material remains access-controlled operational data.
 
-**Residual risk.** Application append-only semantics are not tamper-proof storage. A local database administrator can alter rows. This release does not claim cryptographic audit-chain verification or a deployed production logging/metrics/retention service.
+**Residual risk.** Application append-only semantics are not tamper-proof storage. A local database administrator can alter rows. This release does not claim cryptographic audit-chain verification or a deployed production logging/metrics/retention service. Local structured diagnostics and process-local metrics are described in [observability](observability.md); they never replace transactional audit facts.
 
-## Configured retention is not automatic deletion
+## Recorded expiry and bounded retention maintenance
 
-**Implemented and verified — policy and projection only.** The six independent settings below accept whole days from 1 through 3,650. [RetentionPolicy](../apps/api/src/marketing_agents/domain/retention.py) calculates UTC expiry and rejects secret retention; [settings](../apps/api/src/marketing_agents/config.py) and [.env.example](../.env.example) define the defaults.
+The six independent settings below accept whole days from 1 through 3,650. [RetentionPolicy](../apps/api/src/marketing_agents/domain/retention.py) calculates UTC expiry and rejects secret retention; [settings](../apps/api/src/marketing_agents/config.py) and [.env.example](../.env.example) define the defaults.
 
 | Setting | Default | Intended detail category |
 |---|---:|---|
@@ -42,11 +42,15 @@ Do not include full prompts, admitted input, executable action bodies, raw webho
 | `RETENTION_CONNECTOR_RECEIPT_DETAIL_DAYS` | 30 | Connector/mock receipt detail |
 | `RETENTION_AUDIT_METADATA_DAYS` | 90 | Optional audit metadata |
 
-These are configured policy values, not promises that every corresponding row is physically removed after that interval. Stored metadata carries its recorded expiry; changing a setting is not a retroactive purge. Audit projections hide expired metadata while preserving event type, transition/decision fact, sequence/time and the safe correlation skeleton. Hiding an API field is not disk erasure.
+The real runtime records each new detail's expiry transactionally. Existing work, audit and standalone brief expiries remain authoritative. Migration `0011` is frozen schema-only DDL; maintenance separately registers a bounded batch of legacy details with their original explicit expiry or the approved historical default. New settings never retroactively change those legacy defaults. Changing settings affects new records, not old expiry values; historical approval/scheduler witness reconstruction uses the original event's TTL. Approval validity expiry remains a separate authorization rule.
 
-**Acceptance target not yet verified / unimplemented maintenance.** There is no physical retention sweeper wired into the shipped API, run worker or scheduler worker. The plan's leased, concurrent/idempotent maintenance job, active-work exclusions, count-only summary and physical deletion/pseudonymization across eligible payload classes remain work to implement and verify. Do not infer that the 7/30/90-day settings establish a complete deletion SLA or legal retention policy. Approval validity expiry is a separate authorization rule; it is not evidence that expired approval detail was purged.
+**Implemented; candidate verification required.** The scheduler process invokes a [bounded maintenance service](../apps/api/src/marketing_agents/application/services/retention_maintenance.py) with an injected clock. One durable UTC-minute occurrence processes at most 50 details (the service's hard maximum is 100), with a lease and frozen cutoff/scope. A restarted/concurrent process must respect that occurrence's claim and completion. Field erasure, authenticated retained skeletons, completion and one count-only audit summary commit together; a failed audit or lost lease rolls back the batch.
 
-**Residual risk.** Until maintenance exists, stored detail and backups can outlive configured TTLs. Use synthetic inputs and control access/lifetime of the entire scoped installation. Do not manually delete live rows needed for approval binding, idempotency, audit or crash recovery; follow reviewed local lifecycle/recovery procedures instead.
+Only expired, eligible detail is erased. Active runs, unresolved actions, incomplete/retry-needed attempts and live worker claims protect recovery material. Approval and receipt detail is removed from its duplicate storage locations too. Required transition/decision audit facts, ordering and timestamps remain; only optional metadata expires. Eligibility is rechecked in the maintenance transaction. Never manually delete rows needed for recovery.
+
+Deleted detail is explicitly non-executable. Existing run indexes and transition timelines retain their safe history; detail reads may return `410 detail_expired`, and `/api/v1/retained-details/{record_kind}/{record_id}` provides an authenticated identity-only skeleton. Exact expired work retries still match keyed input/admission and projection witnesses before returning expiry; a different payload still conflicts. No retry creates replacement work or revives deleted content. Binding digests are retained internally for replay fencing, not returned by this endpoint or used as metric labels.
+
+**Residual risk.** This is logical field erasure, not a secure overwrite of SQLite pages, WAL, filesystem snapshots or backups. Bounded throughput and recovery exclusions mean TTL is an eligibility threshold, not a deletion SLA. A stopped scheduler does not purge. Preserved operational identities/digests can remain pseudonymous data; no automatic lifecycle for the entire installation is claimed. Use synthetic inputs and control host and backup lifetimes. Full qualification and scope are recorded in [EXEC-06](verification/requirements/EXEC-06.md), not inferred from these configuration values.
 
 ## Local digest key and storage
 

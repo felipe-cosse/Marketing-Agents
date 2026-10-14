@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from marketing_agents.infrastructure.db.base import Base
@@ -40,4 +40,7 @@ class MaintenanceRunRecord(Base):
     lease_claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     counts_json: Mapped[str] = mapped_column(Text)
+    scope_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="{}", server_default=text("'{}'")
+    )
     version: Mapped[int] = mapped_column(Integer)

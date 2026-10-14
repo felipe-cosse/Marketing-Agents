@@ -26,6 +26,7 @@ _STATUS_DEFAULTS: dict[int, tuple[str, str, str]] = {
     404: ("Not Found", "resource_not_found", "The requested resource was not found."),
     405: ("Method Not Allowed", "method_not_allowed", "The method is not allowed."),
     409: ("Conflict", "resource_conflict", "The request conflicts with current state."),
+    410: ("Gone", "detail_expired", "The retained detail has expired."),
     413: ("Content Too Large", "payload_too_large", "The request payload is too large."),
     415: (
         "Unsupported Media Type",
@@ -201,6 +202,12 @@ async def safe_unhandled_exception(
 
     del error
     return problem_response(request, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+async def safe_detail_expired(request: Request, error: Exception) -> JSONResponse:
+    """Expose neither deleted content nor caller-supplied identifiers."""
+    del error
+    return problem_response(request, status_code=410, headers={"Vary": "Authorization"})
 
 
 __all__ = [

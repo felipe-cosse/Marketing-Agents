@@ -300,6 +300,7 @@ class RunResourceView(RunSummaryView):
     artifacts_truncated: bool
     external_actions: tuple[ExternalActionView, ...] = Field(max_length=100)
     terminal_error: RunTerminalErrorView | None = None
+    details_expired: bool = False
 
 
 class RunListResponse(RunApiModel):

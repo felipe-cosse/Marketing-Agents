@@ -24,8 +24,6 @@ from marketing_agents.domain.run_lifecycle import (
     transition_run,
 )
 
-from .audit_events import AuditEventFactory
-
 _REJECTION_RETRY_DELAYS_SECONDS = (0.01, 0.02)
 
 
@@ -127,7 +125,7 @@ class RunLifecycleService:
         )
         initial = initial_received_transition(candidate)
         stored = await unit_of_work.runs.add_received_or_get(candidate, initial)
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         initial_snapshot = _initial_run_snapshot(stored.run)
         expected_event = factory.run_transition(
             initial_snapshot,
@@ -349,7 +347,7 @@ class RunLifecycleService:
                 rejection_reason_code=error.code,
             )
         await unit_of_work.audits.append(
-            AuditEventFactory(audit_context).run_transition(
+            self._dependencies.audit_factory(audit_context).run_transition(
                 result.run,
                 result.transition,
             )
@@ -463,7 +461,7 @@ class RunLifecycleService:
         occurred_at: datetime,
         audit_context: AuditContext,
     ) -> None:
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         attempt_id = factory.run_attempt_id(current.id, command)
         existing = await unit_of_work.audits.get_attempt_event(current.id, attempt_id)
         if existing is not None:

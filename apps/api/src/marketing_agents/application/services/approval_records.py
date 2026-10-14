@@ -437,17 +437,6 @@ async def _require_decision_audits(
         authentication_method=decision.authentication_method,
         correlation_id=decision.correlation_id,
     )
-    factory = AuditEventFactory(context)
-    expected_action = factory.action_decided(
-        pending_action,
-        decided_action,
-        decided_request,
-    )
-    expected_approval = factory.approval_decided(
-        StoredActionApprovalRequest.created(request),
-        decided_request,
-        decided_action,
-    )
     action_draft = await _mutation_draft(
         unit_of_work,
         aggregate_type="external_action",
@@ -459,6 +448,18 @@ async def _require_decision_audits(
         aggregate_type="approval_request",
         aggregate_id=request.id,
         mutation_version=2,
+    )
+    expected_action = AuditEventFactory.for_recorded_event(context, action_draft).action_decided(
+        pending_action,
+        decided_action,
+        decided_request,
+    )
+    expected_approval = AuditEventFactory.for_recorded_event(
+        context, approval_draft
+    ).approval_decided(
+        StoredActionApprovalRequest.created(request),
+        decided_request,
+        decided_action,
     )
     if action_draft != expected_action or approval_draft != expected_approval:
         raise ApprovalRecordServiceError(
@@ -680,7 +681,7 @@ class ApprovalRecordService:
                 "approval request set does not exactly cover registered actions",
             )
         ordered_requests = tuple(stored_by_action[item.action.id] for item in registered.actions)
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         if registered.disposition is ExternalActionRegistrationDisposition.CREATED:
             proposed_by_step = {action.envelope.step_key: action for action in proposed_actions}
             events: list[AuditEventDraft] = []
@@ -795,7 +796,7 @@ class ApprovalRecordService:
             raise ApprovalRecordServiceError(
                 "approval_action_missing", "expired approval action disappeared"
             )
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         events: list[AuditEventDraft] = []
         if current.status is ApprovalStatus.APPROVED:
             events.append(
@@ -937,7 +938,7 @@ class ApprovalRecordService:
                 raise ApprovalRecordServiceError(
                     "approval_action_missing", "renewed approval action disappeared"
                 )
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             events: list[AuditEventDraft] = []
             if current.status is ApprovalStatus.APPROVED:
                 events.append(

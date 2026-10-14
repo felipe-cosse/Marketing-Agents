@@ -3369,6 +3369,75 @@
         "title": "ReadyHealth",
         "type": "object"
       },
+      "RetainedIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "category": { "$ref": "#/components/schemas/RetentionCategory" },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail_expired": {
+            "const": true,
+            "default": true,
+            "title": "Detail Expired",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "purged_at": {
+            "format": "date-time",
+            "title": "Purged At",
+            "type": "string"
+          },
+          "record_id": { "title": "Record Id", "type": "string" },
+          "record_kind": {
+            "enum": [
+              "work",
+              "action",
+              "approval",
+              "artifact",
+              "receipt",
+              "attempt",
+              "audit",
+              "brief"
+            ],
+            "title": "Record Kind",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "record_kind",
+          "record_id",
+          "category",
+          "run_id",
+          "created_at",
+          "expires_at",
+          "purged_at"
+        ],
+        "title": "RetainedIdentity",
+        "type": "object"
+      },
+      "RetentionCategory": {
+        "enum": [
+          "admitted_payload",
+          "external_action_payload",
+          "approval_detail",
+          "artifact_detail",
+          "connector_receipt_detail",
+          "audit_metadata"
+        ],
+        "title": "RetentionCategory",
+        "type": "string"
+      },
       "RetryPolicyView": {
         "additionalProperties": false,
         "properties": {
@@ -3750,6 +3819,11 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "details_expired": {
+            "default": false,
+            "title": "Details Expired",
+            "type": "boolean"
           },
           "execution_control": {
             "anyOf": [
@@ -9022,6 +9096,62 @@
         },
         "summary": "Create Approval Request",
         "tags": ["approvals"]
+      }
+    },
+    "/api/v1/retained-details/{record_kind}/{record_id}": {
+      "get": {
+        "operationId": "read_retained_identity_api_v1_retained_details__record_kind___record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "work",
+                "action",
+                "approval",
+                "artifact",
+                "receipt",
+                "attempt",
+                "audit",
+                "brief"
+              ],
+              "title": "Record Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$",
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RetainedIdentity" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Read Retained Identity",
+        "tags": ["retention"]
       }
     },
     "/api/v1/runs": {

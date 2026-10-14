@@ -19,8 +19,6 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 
-from .audit_events import AuditEventFactory
-
 
 class ExecutionActivationError(RuntimeError):
     def __init__(self, code: str, message: str, *, run_id: str) -> None:
@@ -162,7 +160,7 @@ class ExecutionActivationService:
                     "Run deadline could not start with direct activation",
                     run_id=run_id,
                 ) from exc
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             await unit_of_work.audits.append_many(
                 (
                     factory.run_transition(run_result.run, run_result.transition),

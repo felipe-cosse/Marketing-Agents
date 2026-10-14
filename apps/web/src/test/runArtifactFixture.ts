@@ -332,6 +332,7 @@ export function makeRunResource(
       }),
     ]),
     terminalError: null,
+    detailsExpired: false,
     ...overrides,
   });
 }
