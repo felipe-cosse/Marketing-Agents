@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import { ApiRequestError, getJson } from "./client";
 
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$/u;
@@ -142,351 +143,72 @@ export interface NormalizedPageQuery {
   readonly limit: number;
 }
 
-export interface RunSummary {
-  readonly id: string;
-  readonly workItemId: string;
-  readonly instanceId: string;
-  readonly workflowId: string;
-  readonly triggerId: string;
-  readonly source: string;
-  readonly mode: "dry_run" | "mock_execution";
-  readonly state: RunState;
-  readonly catalogHash: string;
-  readonly configurationRevision: number;
-  readonly approvalRequired: boolean | null;
-  readonly terminalReasonCode: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly version: number;
-  readonly runUrl: string;
-  readonly timelineUrl: string;
-  readonly artifactsUrl: string;
-  readonly instanceUrl: string;
-}
+export type RunSummary = ApiView<"RunSummaryView">;
 
-export interface RunPage {
-  readonly items: readonly RunSummary[];
-  readonly nextCursor: string | null;
-}
+export type RunPage = ApiView<"RunListResponse">;
 
-export interface RunTransition {
-  readonly sequence: number;
-  readonly command: string;
-  readonly previousState: RunState | null;
-  readonly newState: RunState;
-  readonly reasonCode: string;
-  readonly occurredAt: string;
-  readonly expectedVersion: number;
-  readonly resultingVersion: number;
-  readonly completedEffectCount: number;
-  readonly outcomeUnknownEffectCount: number;
-}
+export type RunTransition = ApiView<"RunTransitionView">;
 
-export interface RunRuntimePolicy {
-  readonly maxSteps: number;
-  readonly maxModelCalls: number;
-  readonly maxToolCalls: number;
-  readonly runTimeoutSeconds: number;
-}
+export type RunRuntimePolicy = ApiView<"RunRuntimePolicyView">;
 
-export interface StepRuntimePolicy {
-  readonly operationKey: string;
-  readonly attemptKind: "model" | "tool" | "no_call";
-  readonly maxAttempts: number;
-  readonly backoff: "none" | "bounded_exponential";
-  readonly stepTimeoutSeconds: number;
-  readonly templateRunTimeoutSeconds: number;
-  readonly maxSteps: number;
-  readonly maxModelCalls: number;
-  readonly maxToolCalls: number;
-  readonly maxInputBytes: number;
-  readonly maxInputFieldBytes: number;
-  readonly maxOutputBytes: number;
-  readonly maxModelOutputTokens: number;
-  readonly rateLimitScope: string;
-  readonly rateLimitKey: string;
-  readonly rateLimitMaxCalls: number;
-  readonly rateLimitWindowSeconds: number;
-}
+export type StepRuntimePolicy = ApiView<"StepRuntimePolicyView">;
 
-export interface RunStepTransition {
-  readonly sequence: number;
-  readonly command: string;
-  readonly previousState: StepState | null;
-  readonly newState: StepState;
-  readonly reasonCode: string;
-  readonly occurredAt: string;
-  readonly expectedVersion: number;
-  readonly resultingVersion: number;
-}
+export type RunStepTransition = ApiView<"RunStepTransitionView">;
 
-export interface RunStep {
-  readonly id: string;
-  readonly runId: string;
-  readonly key: string;
-  readonly kind: string;
-  readonly selectedInstanceId: string;
-  readonly templateId: string;
-  readonly dependencyKeys: readonly string[];
-  readonly capabilityId: string;
-  readonly effect: "read" | "write";
-  readonly state: StepState;
-  readonly ordinal: number;
-  readonly sourceOrder: number;
-  readonly configurationRevision: number;
-  readonly connectorFamily: string;
-  readonly routingSlotKey: string | null;
-  readonly bindingId: string | null;
-  readonly bindingConfigurationRevision: number | null;
-  readonly requestSchemaId: string | null;
-  readonly resultSchemaId: string | null;
-  readonly resultSchemaHash: string | null;
-  readonly dataClassification: Classification;
-  readonly idempotencySupport:
-    "not_applicable" | "required" | "supported" | "unavailable";
-  readonly timeoutSeconds: number | null;
-  readonly runtimePolicy: StepRuntimePolicy;
-  readonly approvalPolicyId: string;
-  readonly approvalRequiredRoles: readonly string[];
-  readonly approvalRequiredScopes: readonly string[];
-  readonly approvalExpiresAfterSeconds: number | null;
-  readonly approvalAllowSelfApproval: boolean | null;
-  readonly terminalResult: boolean;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly version: number;
-  readonly terminalReasonCode: string | null;
-  readonly transitions: readonly RunStepTransition[];
-  readonly stepUrl: string;
-  readonly runUrl: string;
-  readonly instanceUrl: string;
-  readonly templateUrl: string;
-}
+export type RunStep = ApiView<"RunStepView">;
 
-export interface RunSelectedInstance {
-  readonly instanceId: string;
-  readonly templateId: string;
-  readonly configurationRevision: number;
-  readonly displayOrder: number;
-  readonly sourceOrdinal: number | null;
-  readonly selectionOrder: number;
-  readonly target: boolean;
-  readonly instanceUrl: string;
-  readonly templateUrl: string;
-}
+export type RunSelectedInstance = ApiView<"RunSelectedInstanceView">;
 
-export interface RunRoutingAssignment {
-  readonly slotKey: string;
-  readonly instanceId: string;
-  readonly templateId: string;
-  readonly requiredCapabilityIds: readonly string[];
-  readonly assignmentOrder: number;
-  readonly instanceUrl: string;
-  readonly templateUrl: string;
-}
+export type RunRoutingAssignment = ApiView<"RunRoutingAssignmentView">;
 
-export interface RunPlan {
-  readonly planHash: string;
-  readonly workflowId: string;
-  readonly workflowVersion: number;
-  readonly workflowDefinitionHash: string;
-  readonly catalogContentHash: string;
-  readonly graphHash: string;
-  readonly routingHash: string;
-  readonly approvalRequired: boolean;
-  readonly stepCount: number;
-  readonly runtimePolicy: RunRuntimePolicy;
-  readonly createdAt: string;
-  readonly selectedInstances: readonly RunSelectedInstance[];
-  readonly routingAssignments: readonly RunRoutingAssignment[];
-  readonly steps: readonly RunStep[];
-}
+export type RunPlan = ApiView<"RunPlanView">;
 
-export interface RunExecutionControl {
-  readonly runTimeoutSeconds: number;
-  readonly maxModelCalls: number;
-  readonly maxToolCalls: number;
-  readonly modelCalls: number;
-  readonly toolCalls: number;
-  readonly remainingModelCalls: number;
-  readonly remainingToolCalls: number;
-  readonly startedAt: string | null;
-  readonly deadlineAt: string | null;
-  readonly cancelRequestedAt: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly version: number;
-}
+export type RunExecutionControl = ApiView<"RunExecutionControlView">;
 
-export interface PendingApprovalSummary {
-  readonly id: string;
-  readonly actionId: string;
-  readonly stepId: string;
-  readonly status: "pending";
-  readonly destinationSummary: string;
-  readonly requestedAt: string;
-  readonly expiresAt: string;
-  readonly isExpired: boolean;
-  readonly approvalUrl: string;
-  readonly actionUrl: string;
-  readonly stepUrl: string;
-}
+export type PendingApprovalSummary = ApiView<"PendingApprovalSummaryView">;
 
-export interface ArtifactSummary {
-  readonly id: string;
-  readonly workItemId: string;
-  readonly runId: string;
-  readonly stepId: string;
-  readonly workflowId: string;
-  readonly workflowVersion: string;
-  readonly templateId: string;
-  readonly instanceId: string;
-  readonly outputSchemaId: string;
-  readonly outputSchemaVersion: string;
-  readonly classification: Classification;
-  readonly createdAt: string;
-  readonly artifactUrl: string;
-  readonly runUrl: string;
-  readonly stepUrl: string;
-  readonly templateUrl: string;
-  readonly instanceUrl: string;
-}
+export type ArtifactSummary = ApiView<"ArtifactSummaryView">;
 
-export interface ArtifactSource {
-  readonly kind: "work_input" | "external_observation" | "parent_artifact";
-  readonly sourceId: string;
-  readonly classification: RetainableClassification;
-}
+export type ArtifactSource = ApiView<"ArtifactSourceView">;
 
-export interface ArtifactProvider {
-  readonly providerKind: "llm" | "connector" | "planner";
-  readonly mode: "mock" | "real" | "local";
-  readonly name: string;
-  readonly version: string;
-}
+export type ArtifactProvider = ApiView<"ArtifactProviderView">;
 
-export interface ArtifactResource extends ArtifactSummary {
-  readonly classification: RetainableClassification;
-  readonly catalogHash: string;
-  readonly instanceConfigRevision: number;
-  readonly sources: readonly ArtifactSource[];
-  readonly parentArtifactIds: readonly string[];
-  readonly providers: readonly ArtifactProvider[];
-  readonly outputSchemaHash: string;
+export type ArtifactResource = Omit<
+  ApiView<"ArtifactResourceView">,
+  "redactedPayload"
+> & {
   readonly redactedPayload: JsonObject;
-  readonly payloadDigest: string;
-}
+};
 
-export interface ArtifactPage {
-  readonly runId: string;
-  readonly items: readonly ArtifactSummary[];
-  readonly nextCursor: string | null;
-}
+export type ArtifactPage = ApiView<"ArtifactListResponse">;
 
-export interface ExternalAction {
-  readonly id: string;
-  readonly runId: string;
-  readonly stepId: string;
-  readonly stepKey: string;
-  readonly templateId: string;
-  readonly instanceId: string;
-  readonly proposalRevision: number;
-  readonly actionType: string;
-  readonly capabilityId: string;
-  readonly connectorFamily: string;
-  readonly bindingId: string;
-  readonly destinationSummary: string;
+export type ExternalAction = Omit<
+  ApiView<"ExternalActionView">,
+  "redactedPayload" | "resultSafeMetadata"
+> & {
   readonly redactedPayload: JsonObject;
-  readonly payloadSchemaId: string;
-  readonly state: ExternalActionState;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly version: number;
-  readonly deliveryAttemptCount: number;
-  readonly deliveryAttemptLimit: number;
-  readonly approvalPolicyId: string;
-  readonly approvalRequiredRoles: readonly string[];
-  readonly approvalRequiredScopes: readonly string[];
-  readonly approvalExpiresAfterSeconds: number;
-  readonly approvalAllowSelfApproval: boolean;
-  readonly terminalReasonCode: string | null;
-  readonly supersededByActionId: string | null;
-  readonly supersededAt: string | null;
-  readonly receiptId: string | null;
-  readonly resultStatus: string | null;
   readonly resultSafeMetadata: null;
-  readonly completedAt: string | null;
-  readonly actionUrl: string;
-  readonly runUrl: string;
-  readonly stepUrl: string;
-  readonly instanceUrl: string;
-  readonly templateUrl: string;
-}
+};
 
-export interface RunTerminalError {
-  readonly code: string;
-  readonly causeCode: string | null;
-  readonly source: "run" | "step" | "read_attempt" | "external_action";
-  readonly stepId: string | null;
-  readonly actionId: string | null;
-  readonly outcome: string | null;
-  readonly finalAttemptNumber: number | null;
-  readonly retryable: false;
-  readonly callDeadlineAt: string | null;
-  readonly runDeadlineAt: string | null;
-  readonly occurredAt: string;
-  readonly stepUrl: string | null;
-  readonly actionUrl: string | null;
-}
+export type RunTerminalError = ApiView<"RunTerminalErrorView">;
 
-export interface RunResource extends RunSummary {
-  readonly transitions: readonly RunTransition[];
-  readonly plan: RunPlan | null;
-  readonly executionControl: RunExecutionControl | null;
-  readonly pendingApprovals: readonly PendingApprovalSummary[];
-  readonly artifactSummaries: readonly ArtifactSummary[];
-  readonly artifactsTruncated: boolean;
+export type RunResource = Omit<
+  ApiView<"RunResourceView">,
+  "externalActions"
+> & {
   readonly externalActions: readonly ExternalAction[];
-  readonly terminalError: RunTerminalError | null;
-}
+};
 
-export interface RunTimelineEvent {
-  readonly id: string;
-  readonly sequence: number;
-  readonly schemaVersion: number;
-  readonly eventType: string;
-  readonly aggregateType: string;
-  readonly aggregateId: string;
-  readonly outcome: string;
-  readonly actorId: string;
-  readonly actorSource: string;
-  readonly authMethod: string;
-  readonly correlationId: string;
-  readonly occurredAt: string;
-  readonly stepId: string | null;
-  readonly actionId: string | null;
-  readonly approvalRequestId: string | null;
-  readonly artifactId: string | null;
-  readonly attemptedCommand: string | null;
-  readonly previousState: string | null;
-  readonly newState: string | null;
-  readonly reasonCode: string | null;
+export type RunTimelineEvent = Omit<
+  ApiView<"RunTimelineEventView">,
+  "metadata"
+> & {
   readonly metadata: JsonObject;
-  readonly metadataClassification: Classification;
-  readonly metadataExpiresAt: string;
-  readonly metadataExpired: boolean;
-  readonly runUrl: string;
-  readonly stepUrl: string | null;
-  readonly actionUrl: string | null;
-  readonly approvalUrl: string | null;
-  readonly artifactUrl: string | null;
-}
+};
 
-export interface RunTimelinePage {
-  readonly runId: string;
+export type RunTimelinePage = Omit<ApiView<"RunTimelineResponse">, "items"> & {
   readonly items: readonly RunTimelineEvent[];
-  readonly nextCursor: string | null;
-}
+};
 
 export class RunArtifactsContractError extends Error {
   constructor(message: string) {

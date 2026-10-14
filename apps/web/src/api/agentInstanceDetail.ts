@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import { ApiRequestError } from "./client";
 
 const DETAIL_ROOT_FIELDS = new Set([
@@ -152,110 +153,28 @@ export interface AgentInstanceDetailIdentity {
   readonly catalogHash: string;
 }
 
-export interface TriggerBinding {
-  readonly type: TriggerType;
-  readonly enabled: boolean;
-  readonly eventSource: string | null;
-  readonly cron: string | null;
-  readonly timezone: string | null;
-  readonly misfirePolicy: MisfirePolicy | null;
-  readonly misfireGraceSeconds: number | null;
-}
+export type TriggerBinding =
+  ApiView<"marketing_agents__api__schemas__catalog__TriggerBindingView">;
 
-export interface ConnectorBinding {
-  readonly connectorFamily: string;
-  readonly bindingId: string;
-  readonly enabled: boolean;
-}
+export type ConnectorBinding = ApiView<"ConnectorBindingView">;
 
-export interface ScheduleBinding {
-  readonly cron: string;
-  readonly timezone: string;
-  readonly misfirePolicy: MisfirePolicy;
-  readonly misfireGraceSeconds: number;
-}
+export type ScheduleBinding = ApiView<"ScheduleBindingView">;
 
-export interface AgentInstanceView {
-  readonly id: string;
-  readonly templateId: string;
-  readonly displayOrder: number;
-  readonly enabled: boolean;
-  readonly sourceOrdinal: number;
-  readonly variantLabel: string | null;
-  readonly triggerBindings: readonly TriggerBinding[];
-  readonly connectorBindings: Readonly<Record<string, ConnectorBinding>>;
-  readonly schedule: ScheduleBinding | null;
-  readonly configurationRevision: number;
-  readonly configurationEtag: string;
-}
+export type AgentInstanceView = ApiView<"AgentInstanceView">;
 
-export interface RetryPolicy {
-  readonly maxAttempts: number;
-  readonly backoff: "none" | "bounded_exponential";
-}
+export type RetryPolicy = ApiView<"RetryPolicyView">;
 
-export interface TimeoutPolicy {
-  readonly stepSeconds: number;
-  readonly runSeconds: number;
-}
+export type TimeoutPolicy = ApiView<"TimeoutPolicyView">;
 
-export interface BudgetPolicy {
-  readonly maxSteps: number;
-  readonly maxModelCalls: number;
-  readonly maxToolCalls: number;
-  readonly maxInputBytes: number;
-  readonly maxInputFieldBytes: number;
-  readonly maxOutputBytes: number;
-  readonly maxModelOutputTokens: number;
-}
+export type BudgetPolicy = ApiView<"BudgetPolicyView">;
 
-export interface RateLimitPolicy {
-  readonly maxCalls: number;
-  readonly windowSeconds: number;
-}
+export type RateLimitPolicy = ApiView<"RateLimitPolicyView">;
 
-export interface AgentTemplateView {
-  readonly id: string;
-  readonly displayName: string;
-  readonly departmentId: string;
-  readonly functionId: string;
-  readonly displayOrder: number;
-  readonly purpose: string;
-  readonly inputSchemaId: string;
-  readonly outputSchemaId: string;
-  readonly allowedToolCapabilityIds: readonly string[];
-  readonly supportedTriggerTypes: readonly TriggerType[];
-  readonly operationClassification: OperationClassification;
-  readonly outputHandling: "standard" | "advisory";
-  readonly approvalPolicyId: string;
-  readonly retryPolicy: RetryPolicy;
-  readonly timeoutPolicy: TimeoutPolicy;
-  readonly budgetPolicy: BudgetPolicy;
-  readonly rateLimitPolicy: RateLimitPolicy;
-  readonly sourceConfidence: "high" | "medium" | "low";
-  readonly sourceReferences: readonly string[];
-  readonly implementationNotes: string;
-}
+export type AgentTemplateView = ApiView<"AgentTemplateView">;
 
-export interface ToolCapability {
-  readonly id: string;
-  readonly displayName: string;
-  readonly description: string;
-  readonly effect: CapabilityEffect;
-  readonly connectorFamily: string;
-  readonly idempotencySupport:
-    "not_applicable" | "required" | "supported" | "unavailable";
-  readonly defaultTimeoutSeconds: number;
-  readonly dataClassification: "public" | "internal" | "personal" | "sensitive";
-}
+export type ToolCapability = ApiView<"ToolCapabilityView">;
 
-export interface ApprovalPolicy {
-  readonly id: string;
-  readonly kind: "none" | "human_external_write";
-  readonly requiredRoles: readonly string[];
-  readonly expirySeconds: number;
-  readonly allowSelfApproval: boolean;
-}
+export type ApprovalPolicy = ApiView<"ApprovalPolicyView">;
 
 export type JsonValue =
   | null
@@ -266,23 +185,10 @@ export type JsonValue =
   | { readonly [key: string]: JsonValue };
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
-export interface InstanceRuntimeStatus {
-  readonly status: InstanceRuntimeState;
-  readonly latestRunId: string | null;
-  readonly latestRunState: RunState | null;
-  readonly latestRunCreatedAt: string | null;
-  readonly latestRunUpdatedAt: string | null;
-  readonly latestRunUrl: string | null;
-}
+export type InstanceRuntimeStatus =
+  ApiView<"marketing_agents__api__schemas__catalog__InstanceRuntimeStatusView">;
 
-export interface InstanceRecentRun {
-  readonly id: string;
-  readonly state: RunState;
-  readonly workflowId: string;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly runUrl: string;
-}
+export type InstanceRecentRun = ApiView<"InstanceRecentRunView">;
 
 interface AgentInstanceDetailCommon {
   readonly etag: string;

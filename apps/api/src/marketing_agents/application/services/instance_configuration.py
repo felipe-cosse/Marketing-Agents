@@ -35,6 +35,7 @@ from marketing_agents.application.services.schedule_configuration import (
     ScheduleConfigurationError,
     ScheduleConfigurationService,
     bind_scheduled_input,
+    configured_schedule_id,
     verify_scheduled_input,
 )
 from marketing_agents.domain.audit import AuditContext
@@ -311,7 +312,19 @@ class InstanceConfigurationService:
                     raise self._unavailable()
                 if not replaced:
                     raise _CompareAndSwapLost
-                if current.scheduled_input is not None or replacement.scheduled_input is not None:
+                if (
+                    current.scheduled_input is not None
+                    or replacement.scheduled_input is not None
+                    or (
+                        TriggerKind.SCHEDULE in constraints.supported_trigger_kinds
+                        and await unit_of_work.schedules.get(
+                            configured_schedule_id(current.instance_id)
+                        )
+                        is not None
+                    )
+                ):
+                    # A retained inactive schedule remains configuration-owned after
+                    # input is cleared. Keep its revision/recurrence synchronized too.
                     await ScheduleConfigurationService(self._recurrence).synchronize_in_uow(
                         unit_of_work,
                         replacement,

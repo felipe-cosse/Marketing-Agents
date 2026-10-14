@@ -157,9 +157,12 @@ class AuditEventRecord(Base):
             "(aggregate_type = 'webhook_ingress' AND "
             "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NULL AND "
             "occurrence_id IS NULL) OR "
+            "(aggregate_type = 'campaign_brief' AND "
+            "run_id IS NULL AND run_sequence IS NULL AND schedule_id IS NULL AND "
+            "occurrence_id IS NULL) OR "
             "(aggregate_type NOT IN "
             "('schedule','schedule_occurrence','agent_instance_configuration',"
-            "'manual_ingress_rejection','webhook_ingress') AND "
+            "'manual_ingress_rejection','webhook_ingress','campaign_brief') AND "
             "run_id IS NOT NULL AND run_sequence IS NOT NULL AND schedule_id IS NULL AND "
             "occurrence_id IS NULL))",
             name="ck_audit_events_timeline_scope",
@@ -179,6 +182,17 @@ class AuditEventRecord(Base):
             name="ck_audit_events_outcome_mutation",
         ),
         CheckConstraint(
+            "(aggregate_type = 'campaign_brief' AND event_type = 'campaign_brief.created' AND "
+            "aggregate_id LIKE 'brief.%' AND length(aggregate_id) = 70 AND "
+            "actor_source = 'user' AND outcome = 'accepted' AND mutation_version = 1 AND "
+            "run_transition_sequence IS NULL AND step_transition_sequence IS NULL AND "
+            "step_id IS NULL AND action_id IS NULL AND action_attempt_number IS NULL AND "
+            "receipt_id IS NULL AND approval_request_id IS NULL AND "
+            "approval_decision_id IS NULL AND "
+            "artifact_id IS NULL AND attempt_id IS NULL AND attempted_command IS NULL AND "
+            "expected_version IS NULL AND observed_version IS NULL AND observed_state IS NULL AND "
+            "requested_state IS NULL AND previous_state IS NULL AND new_state IS NULL AND "
+            "reason_code IS NULL) OR "
             "(aggregate_type = 'schedule_occurrence' AND event_type IN "
             "('schedule.occurrence_created','schedule.misfire_skipped',"
             "'schedule.misfire_run_once') AND schedule_id IS NOT NULL AND "

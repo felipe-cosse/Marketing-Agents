@@ -259,6 +259,40 @@ export interface paths {
     readonly patch?: never;
     readonly trace?: never;
   };
+  readonly "/api/v1/campaign-briefs": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /** Create Campaign Brief */
+    readonly post: operations["create_campaign_brief_api_v1_campaign_briefs_post"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/v1/campaign-briefs/{brief_id}": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** Read Campaign Brief */
+    readonly get: operations["read_campaign_brief_api_v1_campaign_briefs__brief_id__get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
   readonly "/api/v1/catalog": {
     readonly parameters: {
       readonly query?: never;
@@ -458,6 +492,114 @@ export interface paths {
     };
     /** Get Run Timeline */
     readonly get: operations["getRunTimeline"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/v1/schedules": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /**
+     * List Schedules
+     * @description Configuration-owned schedules ordered by stable ID; default 20, maximum 100. Keyset cursors are endpoint scoped, not frozen snapshots.
+     */
+    readonly get: operations["listSchedules"];
+    readonly put?: never;
+    /**
+     * Create Schedule
+     * @description Create the single configuration-owned active schedule for an enabled instance. Supply the instance configuration If-Match. Existing schedules and disabled instances return 409; work is not executed inline.
+     */
+    readonly post: operations["createSchedule"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/v1/schedules/{schedule_id}": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /**
+     * Get Schedule
+     * @description Safe recurrence and current configuration revision. Previews start at persisted next due time; a disabled schedule does not enqueue these previews.
+     */
+    readonly get: operations["getSchedule"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    /**
+     * Update Schedule
+     * @description Replace recurrence and/or saved input under the current configuration If-Match. Disabled schedules return 409; explicitly enable before editing. Other instance fields and trigger kinds are preserved.
+     */
+    readonly patch: operations["updateSchedule"];
+    readonly trace?: never;
+  };
+  readonly "/api/v1/schedules/{schedule_id}/disable": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /**
+     * Disable Schedule
+     * @description Disable only the schedule binding. Preserve the instance, other triggers, saved input, durable schedule and occurrence history. Already admitted work is not cancelled.
+     */
+    readonly post: operations["disableSchedule"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/v1/schedules/{schedule_id}/enable": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /**
+     * Enable Schedule
+     * @description Restore retained recurrence with the saved sealed input. Disabled instances return 409; this never enables the whole agent instance.
+     */
+    readonly post: operations["enableSchedule"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/v1/schedules/{schedule_id}/occurrences": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /**
+     * List Occurrences
+     * @description Persisted historical occurrences ordered by (scheduled UTC instant, ID). Default 20, maximum 100; scoped keyset cursor, not a frozen snapshot. This never submits work or advances the schedule.
+     */
+    readonly get: operations["listScheduleOccurrences"];
     readonly put?: never;
     readonly post?: never;
     readonly delete?: never;
@@ -1365,6 +1507,69 @@ export interface components {
       readonly maxSteps: number;
       /** Maxtoolcalls */
       readonly maxToolCalls: number;
+    };
+    /** CampaignBriefCreated */
+    readonly CampaignBriefCreated: {
+      /**
+       * Disposition
+       * @enum {string}
+       */
+      readonly disposition: "created" | "replayed";
+      readonly resource: components["schemas"]["CampaignBriefResource"];
+    };
+    /** CampaignBriefDetails */
+    readonly CampaignBriefDetails: {
+      /** Constraints */
+      readonly constraints: {
+        readonly [key: string]: unknown;
+      };
+      /** Objective */
+      readonly objective: string;
+      /** Sourcerefs */
+      readonly sourceRefs: string | readonly string[];
+      /** Title */
+      readonly title: string;
+    };
+    /** CampaignBriefInput */
+    readonly CampaignBriefInput: {
+      /** Constraints */
+      readonly constraints: {
+        readonly [key: string]: unknown;
+      };
+      /** Objective */
+      readonly objective: string;
+      /** Sourcerefs */
+      readonly sourceRefs: readonly string[];
+      /** Title */
+      readonly title: string;
+    };
+    /** CampaignBriefResource */
+    readonly CampaignBriefResource: {
+      /**
+       * Classification
+       * @enum {string}
+       */
+      readonly classification: "public" | "internal" | "personal" | "sensitive";
+      /**
+       * Createdat
+       * Format: date-time
+       */
+      readonly createdAt: string;
+      readonly details: components["schemas"]["CampaignBriefDetails"] | null;
+      /** Expired */
+      readonly expired: boolean;
+      /**
+       * Expiresat
+       * Format: date-time
+       */
+      readonly expiresAt: string;
+      /** Id */
+      readonly id: string;
+      /**
+       * Revision
+       * @constant
+       */
+      readonly revision: 1;
     };
     /** CapabilitySummaryView */
     readonly CapabilitySummaryView: {
@@ -3017,6 +3222,13 @@ export interface components {
       /** Timezone */
       readonly timezone: string;
     };
+    /** ScheduleCreateInput */
+    readonly ScheduleCreateInput: {
+      /** Instanceid */
+      readonly instanceId: string;
+      readonly schedule: components["schemas"]["ScheduleBindingInput"];
+      readonly scheduledInput: components["schemas"]["ScheduledInputInput"];
+    };
     /** ScheduledInputInput */
     readonly ScheduledInputInput: {
       /**
@@ -3030,6 +3242,104 @@ export interface components {
         readonly [key: string]: unknown;
       };
     };
+    /** ScheduleListResponse */
+    readonly ScheduleListResponse: {
+      /** Items */
+      readonly items: readonly components["schemas"]["ScheduleResponse"][];
+      /** Nextcursor */
+      readonly nextCursor?: string | null;
+    };
+    /** ScheduleOccurrenceListResponse */
+    readonly ScheduleOccurrenceListResponse: {
+      /** Items */
+      readonly items: readonly components["schemas"]["ScheduleOccurrenceResponse"][];
+      /** Nextcursor */
+      readonly nextCursor?: string | null;
+    };
+    /** ScheduleOccurrenceResponse */
+    readonly ScheduleOccurrenceResponse: {
+      /** Firstmissedatutc */
+      readonly firstMissedAtUtc?: string | null;
+      /** Id */
+      readonly id: string;
+      /** Lastmissedatutc */
+      readonly lastMissedAtUtc?: string | null;
+      /** Misfirepolicyapplied */
+      readonly misfirePolicyApplied?: ("skip" | "run_once") | null;
+      /** Missedcount */
+      readonly missedCount?: number | null;
+      /** Recurrenceversion */
+      readonly recurrenceVersion: string;
+      /** Runid */
+      readonly runId?: string | null;
+      /**
+       * Scheduledforutc
+       * Format: date-time
+       */
+      readonly scheduledForUtc: string;
+      /** Scheduledlocal */
+      readonly scheduledLocal: string;
+      /** Scheduleid */
+      readonly scheduleId: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      readonly state: "due" | "claimed" | "enqueued" | "skipped" | "completed";
+      /** Timezone */
+      readonly timezone: string;
+      /** Timezonefold */
+      readonly timezoneFold: number;
+      /** Workitemid */
+      readonly workItemId?: string | null;
+    };
+    /** SchedulePatchInput */
+    readonly SchedulePatchInput: {
+      readonly schedule?: components["schemas"]["ScheduleBindingInput"] | null;
+      readonly scheduledInput?:
+        components["schemas"]["ScheduledInputInput"] | null;
+    };
+    /** ScheduleResponse */
+    readonly ScheduleResponse: {
+      /** Configurationrevision */
+      readonly configurationRevision: number;
+      /** Cron */
+      readonly cron: string;
+      /** Enabled */
+      readonly enabled: boolean;
+      /** Id */
+      readonly id: string;
+      /** Instanceid */
+      readonly instanceId: string;
+      /** Lastscheduledatutc */
+      readonly lastScheduledAtUtc: string | null;
+      /** Misfiregraceseconds */
+      readonly misfireGraceSeconds: number;
+      /**
+       * Misfirepolicy
+       * @enum {string}
+       */
+      readonly misfirePolicy: "skip" | "run_once";
+      /**
+       * Nextrunatutc
+       * Format: date-time
+       */
+      readonly nextRunAtUtc: string;
+      /** Previewutc */
+      readonly previewUtc: readonly string[];
+      /** Recurrenceversion */
+      readonly recurrenceVersion: string;
+      /** Timezone */
+      readonly timezone: string;
+      /** Triggerid */
+      readonly triggerId: string;
+      /** Version */
+      readonly version: number;
+      /** Workflowid */
+      readonly workflowId: string;
+    };
+    /** ScheduleToggleInput */
+    readonly ScheduleToggleInput: Record<string, never>;
     /** SessionResponse */
     readonly SessionResponse: {
       /** Actorid */
@@ -4829,6 +5139,243 @@ export interface operations {
       };
     };
   };
+  readonly create_campaign_brief_api_v1_campaign_briefs_post: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header: {
+        readonly "Idempotency-Key": string;
+      };
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["CampaignBriefInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Exact durable replay */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["CampaignBriefCreated"];
+        };
+      };
+      /** @description Successful Response */
+      readonly 201: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["CampaignBriefCreated"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly read_campaign_brief_api_v1_campaign_briefs__brief_id__get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path: {
+        readonly brief_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["CampaignBriefResource"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
   readonly getCatalog: {
     readonly parameters: {
       readonly query?: never;
@@ -6039,6 +6586,883 @@ export interface operations {
           readonly "Cache-Control"?: "no-store";
           readonly Vary?: string;
           readonly "X-Content-Type-Options"?: "nosniff";
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly listSchedules: {
+    readonly parameters: {
+      readonly query?: {
+        readonly cursor?: string | null;
+        readonly limit?: number;
+      };
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly createSchedule: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header: {
+        /** @description Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence. */
+        readonly "If-Match": string;
+      };
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["ScheduleCreateInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 201: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly getSchedule: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path: {
+        readonly schedule_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly updateSchedule: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header: {
+        /** @description Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence. */
+        readonly "If-Match": string;
+      };
+      readonly path: {
+        readonly schedule_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["SchedulePatchInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly disableSchedule: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header: {
+        /** @description Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence. */
+        readonly "If-Match": string;
+      };
+      readonly path: {
+        readonly schedule_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["ScheduleToggleInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly enableSchedule: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header: {
+        /** @description Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence. */
+        readonly "If-Match": string;
+      };
+      readonly path: {
+        readonly schedule_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["ScheduleToggleInput"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly listScheduleOccurrences: {
+    readonly parameters: {
+      readonly query?: {
+        readonly cursor?: string | null;
+        readonly limit?: number;
+      };
+      readonly header?: never;
+      readonly path: {
+        readonly schedule_id: string;
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["ScheduleOccurrenceListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      readonly 400: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unauthorized */
+      readonly 401: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Forbidden */
+      readonly 403: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Not Found */
+      readonly 404: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Conflict */
+      readonly 409: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      readonly 413: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      readonly 415: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Precondition Required */
+      readonly 428: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description Service Unavailable */
+      readonly 503: {
+        headers: {
           readonly [name: string]: unknown;
         };
         content: {

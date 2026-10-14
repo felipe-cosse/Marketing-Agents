@@ -717,6 +717,19 @@ class AuditEventFactory:
             reason_code="idempotency_conflict",
         )
 
+    def campaign_brief_created(self, *, brief_id: str, occurred_at: datetime) -> AuditEventDraft:
+        """Record identity/revision only, never brief content or body/retry digests."""
+        return self._build(
+            run_id=None,
+            event_type="campaign_brief.created",
+            aggregate_type="campaign_brief",
+            aggregate_id=brief_id,
+            outcome=AuditOutcome.ACCEPTED,
+            occurred_at=occurred_at,
+            metadata={"new_revision": 1},
+            mutation_version=1,
+        )
+
     def instance_configuration_changed(
         self,
         *,

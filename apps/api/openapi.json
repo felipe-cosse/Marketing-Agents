@@ -1745,6 +1745,113 @@
         "title": "BudgetPolicyView",
         "type": "object"
       },
+      "CampaignBriefCreated": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "enum": ["created", "replayed"],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "resource": { "$ref": "#/components/schemas/CampaignBriefResource" }
+        },
+        "required": ["disposition", "resource"],
+        "title": "CampaignBriefCreated",
+        "type": "object"
+      },
+      "CampaignBriefDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "constraints": {
+            "additionalProperties": true,
+            "title": "Constraints",
+            "type": "object"
+          },
+          "objective": { "title": "Objective", "type": "string" },
+          "sourceRefs": {
+            "anyOf": [
+              { "type": "string" },
+              { "items": { "type": "string" }, "type": "array" }
+            ],
+            "title": "Sourcerefs"
+          },
+          "title": { "title": "Title", "type": "string" }
+        },
+        "required": ["title", "objective", "constraints", "sourceRefs"],
+        "title": "CampaignBriefDetails",
+        "type": "object"
+      },
+      "CampaignBriefInput": {
+        "additionalProperties": false,
+        "properties": {
+          "constraints": {
+            "additionalProperties": true,
+            "title": "Constraints",
+            "type": "object"
+          },
+          "objective": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Objective",
+            "type": "string"
+          },
+          "sourceRefs": {
+            "items": { "type": "string" },
+            "maxItems": 64,
+            "title": "Sourcerefs",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": ["title", "objective", "constraints", "sourceRefs"],
+        "title": "CampaignBriefInput",
+        "type": "object"
+      },
+      "CampaignBriefResource": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "enum": ["public", "internal", "personal", "sensitive"],
+            "title": "Classification",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/CampaignBriefDetails" },
+              { "type": "null" }
+            ]
+          },
+          "expired": { "title": "Expired", "type": "boolean" },
+          "expiresAt": {
+            "format": "date-time",
+            "title": "Expiresat",
+            "type": "string"
+          },
+          "id": { "title": "Id", "type": "string" },
+          "revision": { "const": 1, "title": "Revision", "type": "integer" }
+        },
+        "required": [
+          "id",
+          "revision",
+          "createdAt",
+          "expiresAt",
+          "classification",
+          "expired",
+          "details"
+        ],
+        "title": "CampaignBriefResource",
+        "type": "object"
+      },
       "CapabilitySummaryView": {
         "additionalProperties": false,
         "properties": {
@@ -4612,6 +4719,300 @@
           "misfireGraceSeconds"
         ],
         "title": "ScheduleBindingView",
+        "type": "object"
+      },
+      "ScheduleCreateInput": {
+        "additionalProperties": false,
+        "properties": {
+          "instanceId": {
+            "pattern": "^inst\\.[a-z0-9-]+\\.[a-z0-9-]+\\.[a-z0-9-]+\\.[0-9]{2}$",
+            "title": "Instanceid",
+            "type": "string"
+          },
+          "schedule": { "$ref": "#/components/schemas/ScheduleBindingInput" },
+          "scheduledInput": {
+            "$ref": "#/components/schemas/ScheduledInputInput"
+          }
+        },
+        "required": ["instanceId", "schedule", "scheduledInput"],
+        "title": "ScheduleCreateInput",
+        "type": "object"
+      },
+      "ScheduleListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": { "$ref": "#/components/schemas/ScheduleResponse" },
+            "maxItems": 100,
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              { "maxLength": 2048, "minLength": 1, "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": ["items"],
+        "title": "ScheduleListResponse",
+        "type": "object"
+      },
+      "ScheduleOccurrenceListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleOccurrenceResponse"
+            },
+            "maxItems": 100,
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              { "maxLength": 2048, "minLength": 1, "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": ["items"],
+        "title": "ScheduleOccurrenceListResponse",
+        "type": "object"
+      },
+      "ScheduleOccurrenceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "firstMissedAtUtc": {
+            "anyOf": [
+              { "format": "date-time", "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Firstmissedatutc"
+          },
+          "id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "lastMissedAtUtc": {
+            "anyOf": [
+              { "format": "date-time", "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Lastmissedatutc"
+          },
+          "misfirePolicyApplied": {
+            "anyOf": [
+              { "enum": ["skip", "run_once"], "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Misfirepolicyapplied"
+          },
+          "missedCount": {
+            "anyOf": [
+              { "maximum": 10000.0, "minimum": 1.0, "type": "integer" },
+              { "type": "null" }
+            ],
+            "title": "Missedcount"
+          },
+          "recurrenceVersion": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Recurrenceversion",
+            "type": "string"
+          },
+          "runId": {
+            "anyOf": [
+              { "maxLength": 240, "minLength": 1, "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Runid"
+          },
+          "scheduleId": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Scheduleid",
+            "type": "string"
+          },
+          "scheduledForUtc": {
+            "format": "date-time",
+            "title": "Scheduledforutc",
+            "type": "string"
+          },
+          "scheduledLocal": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Scheduledlocal",
+            "type": "string"
+          },
+          "state": {
+            "enum": ["due", "claimed", "enqueued", "skipped", "completed"],
+            "title": "State",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "timezoneFold": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Timezonefold",
+            "type": "integer"
+          },
+          "workItemId": {
+            "anyOf": [
+              { "maxLength": 240, "minLength": 1, "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Workitemid"
+          }
+        },
+        "required": [
+          "id",
+          "scheduleId",
+          "scheduledForUtc",
+          "scheduledLocal",
+          "timezone",
+          "timezoneFold",
+          "recurrenceVersion",
+          "state"
+        ],
+        "title": "ScheduleOccurrenceResponse",
+        "type": "object"
+      },
+      "SchedulePatchInput": {
+        "additionalProperties": false,
+        "properties": {
+          "schedule": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ScheduleBindingInput" },
+              { "type": "null" }
+            ]
+          },
+          "scheduledInput": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ScheduledInputInput" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "title": "SchedulePatchInput",
+        "type": "object"
+      },
+      "ScheduleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "configurationRevision": {
+            "minimum": 1.0,
+            "title": "Configurationrevision",
+            "type": "integer"
+          },
+          "cron": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Cron",
+            "type": "string"
+          },
+          "enabled": { "title": "Enabled", "type": "boolean" },
+          "id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "instanceId": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Instanceid",
+            "type": "string"
+          },
+          "lastScheduledAtUtc": {
+            "anyOf": [
+              { "format": "date-time", "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Lastscheduledatutc"
+          },
+          "misfireGraceSeconds": {
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Misfiregraceseconds",
+            "type": "integer"
+          },
+          "misfirePolicy": {
+            "enum": ["skip", "run_once"],
+            "title": "Misfirepolicy",
+            "type": "string"
+          },
+          "nextRunAtUtc": {
+            "format": "date-time",
+            "title": "Nextrunatutc",
+            "type": "string"
+          },
+          "previewUtc": {
+            "items": { "format": "date-time", "type": "string" },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Previewutc",
+            "type": "array"
+          },
+          "recurrenceVersion": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Recurrenceversion",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "triggerId": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Triggerid",
+            "type": "string"
+          },
+          "version": { "minimum": 1.0, "title": "Version", "type": "integer" },
+          "workflowId": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Workflowid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "instanceId",
+          "triggerId",
+          "workflowId",
+          "cron",
+          "timezone",
+          "misfirePolicy",
+          "misfireGraceSeconds",
+          "enabled",
+          "configurationRevision",
+          "version",
+          "recurrenceVersion",
+          "nextRunAtUtc",
+          "lastScheduledAtUtc",
+          "previewUtc"
+        ],
+        "title": "ScheduleResponse",
+        "type": "object"
+      },
+      "ScheduleToggleInput": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "ScheduleToggleInput",
         "type": "object"
       },
       "ScheduledInputInput": {
@@ -7586,6 +7987,248 @@
         "tags": ["audit"]
       }
     },
+    "/api/v1/campaign-briefs": {
+      "post": {
+        "operationId": "create_campaign_brief_api_v1_campaign_briefs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 240,
+              "minLength": 8,
+              "pattern": "^[\\x21-\\x7e]{8,240}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CampaignBriefInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignBriefCreated"
+                }
+              }
+            },
+            "description": "Exact durable replay"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignBriefCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Create Campaign Brief",
+        "tags": ["campaign-briefs"]
+      }
+    },
+    "/api/v1/campaign-briefs/{brief_id}": {
+      "get": {
+        "operationId": "read_campaign_brief_api_v1_campaign_briefs__brief_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "brief_id",
+            "required": true,
+            "schema": {
+              "maxLength": 70,
+              "pattern": "^brief\\.[0-9a-f]{64}$",
+              "title": "Brief Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignBriefResource"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Read Campaign Brief",
+        "tags": ["campaign-briefs"]
+      }
+    },
     "/api/v1/catalog": {
       "get": {
         "operationId": "getCatalog",
@@ -9362,6 +10005,936 @@
         },
         "summary": "Get Run Timeline",
         "tags": ["runs"]
+      }
+    },
+    "/api/v1/schedules": {
+      "get": {
+        "description": "Configuration-owned schedules ordered by stable ID; default 20, maximum 100. Keyset cursors are endpoint scoped, not frozen snapshots.",
+        "operationId": "listSchedules",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "maxLength": 2048, "minLength": 1, "type": "string" },
+                { "type": "null" }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "List Schedules",
+        "tags": ["schedules"]
+      },
+      "post": {
+        "description": "Create the single configuration-owned active schedule for an enabled instance. Supply the instance configuration If-Match. Existing schedules and disabled instances return 409; work is not executed inline.",
+        "operationId": "createSchedule",
+        "parameters": [
+          {
+            "description": "Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^\"instance-configuration-v1-([1-9][0-9]{0,17})\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ScheduleCreateInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScheduleResponse" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Create Schedule",
+        "tags": ["schedules"]
+      }
+    },
+    "/api/v1/schedules/{schedule_id}": {
+      "get": {
+        "description": "Safe recurrence and current configuration revision. Previews start at persisted next due time; a disabled schedule does not enqueue these previews.",
+        "operationId": "getSchedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "pattern": "^schedule\\.configuration\\.[0-9a-f]{64}$",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScheduleResponse" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Get Schedule",
+        "tags": ["schedules"]
+      },
+      "patch": {
+        "description": "Replace recurrence and/or saved input under the current configuration If-Match. Disabled schedules return 409; explicitly enable before editing. Other instance fields and trigger kinds are preserved.",
+        "operationId": "updateSchedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "pattern": "^schedule\\.configuration\\.[0-9a-f]{64}$",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^\"instance-configuration-v1-([1-9][0-9]{0,17})\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SchedulePatchInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScheduleResponse" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Update Schedule",
+        "tags": ["schedules"]
+      }
+    },
+    "/api/v1/schedules/{schedule_id}/disable": {
+      "post": {
+        "description": "Disable only the schedule binding. Preserve the instance, other triggers, saved input, durable schedule and occurrence history. Already admitted work is not cancelled.",
+        "operationId": "disableSchedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "pattern": "^schedule\\.configuration\\.[0-9a-f]{64}$",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^\"instance-configuration-v1-([1-9][0-9]{0,17})\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ScheduleToggleInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScheduleResponse" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Disable Schedule",
+        "tags": ["schedules"]
+      }
+    },
+    "/api/v1/schedules/{schedule_id}/enable": {
+      "post": {
+        "description": "Restore retained recurrence with the saved sealed input. Disabled instances return 409; this never enables the whole agent instance.",
+        "operationId": "enableSchedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "pattern": "^schedule\\.configuration\\.[0-9a-f]{64}$",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current instance configuration ETag (also returned by schedule GET). Worker lease/version changes do not change this configuration fence.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "pattern": "^\"instance-configuration-v1-([1-9][0-9]{0,17})\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ScheduleToggleInput" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScheduleResponse" }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "Enable Schedule",
+        "tags": ["schedules"]
+      }
+    },
+    "/api/v1/schedules/{schedule_id}/occurrences": {
+      "get": {
+        "description": "Persisted historical occurrences ordered by (scheduled UTC instant, ID). Default 20, maximum 100; scoped keyset cursor, not a frozen snapshot. This never submits work or advances the schedule.",
+        "operationId": "listScheduleOccurrences",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "pattern": "^schedule\\.configuration\\.[0-9a-f]{64}$",
+              "title": "Schedule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "maxLength": 2048, "minLength": 1, "type": "string" },
+                { "type": "null" }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOccurrenceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": { "$ref": "#/components/schemas/ProblemDetails" }
+              }
+            },
+            "description": "A safe process-wide API problem occurrence."
+          }
+        },
+        "summary": "List Occurrences",
+        "tags": ["schedules"]
       }
     },
     "/api/v1/session": {

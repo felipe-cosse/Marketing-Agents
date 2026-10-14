@@ -598,6 +598,18 @@
   color: var(--color-muted);
 }
 
+.runs-list header > div {
+  min-width: 0;
+}
+
+.runs-list a {
+  overflow-wrap: anywhere;
+}
+
+.runs-list .run-status {
+  flex-shrink: 0;
+}
+
 .runs-page__workspace,
 .artifact-page__workspace {
   max-width: 1280px;
@@ -745,6 +757,12 @@
 }
 
 @media (max-width: 640px) {
+  .runs-list header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+  }
+
   .runs-page,
   .run-page,
   .artifact-page {

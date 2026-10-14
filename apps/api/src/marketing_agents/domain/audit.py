@@ -116,6 +116,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     }
 )
 _EVENT_AGGREGATES = {
+    "campaign_brief.created": "campaign_brief",
     "ingress.manual_received": "manual_ingress",
     "ingress.rate_limited": "webhook_ingress",
     "ingress.schema_rejected": "manual_ingress_rejection",
@@ -180,6 +181,7 @@ _EVENT_OUTCOMES = {
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
+    "campaign_brief.created": frozenset({"new_revision"}),
     "ingress.manual_received": frozenset(
         {
             "configuration_revision",
@@ -1135,6 +1137,7 @@ class AuditEventDraft:
             require_id(required_identifier, name)
         scheduler_aggregate = self.aggregate_type in {"schedule", "schedule_occurrence"}
         runless_aggregate = scheduler_aggregate or self.aggregate_type in {
+            "campaign_brief",
             "agent_instance_configuration",
             "manual_ingress_rejection",
             "webhook_ingress",
@@ -1240,6 +1243,33 @@ class AuditEventDraft:
                 or self.transition_sequence is None
             ):
                 raise ValueError("run audit event has invalid subject links")
+        elif self.aggregate_type == "campaign_brief":
+            if (
+                re.fullmatch(r"brief\.[0-9a-f]{64}", self.aggregate_id) is None
+                or self.actor_source is not AuditActorSource.USER
+                or self.mutation_version != 1
+                or self.safe_metadata.values.get("new_revision") != 1
+                or any(
+                    value is not None
+                    for value in (
+                        self.schedule_id,
+                        self.occurrence_id,
+                        self.step_id,
+                        self.action_id,
+                        self.action_attempt_number,
+                        self.receipt_id,
+                        self.approval_request_id,
+                        self.approval_decision_id,
+                        self.artifact_id,
+                        self.attempt_id,
+                        self.transition_sequence,
+                        self.previous_state,
+                        self.new_state,
+                        self.reason_code,
+                    )
+                )
+            ):
+                raise ValueError("campaign brief audit has invalid creation shape")
         elif self.aggregate_type == "schedule_occurrence":
             if (
                 self.schedule_id is None

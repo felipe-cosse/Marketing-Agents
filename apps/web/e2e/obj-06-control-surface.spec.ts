@@ -1,5 +1,6 @@
 // Real fresh SQLite/API/worker journeys. All mutations use rendered controls;
 // native same-origin GETs only observe the authoritative persisted outcome.
+import type { components } from "../src/api/generated/schema";
 import { expect, test, type Page, type TestInfo } from "./obj-06-fixtures";
 
 const WRITE_INSTANCE = "inst.email.newsletter.newsletter-subscriber.01";
@@ -7,8 +8,10 @@ const READ_INSTANCE = "inst.social-media.new-content.linkedin-post-drafter.01";
 
 interface RunSnapshot {
   readonly id: string;
+  readonly instance_id: string;
   readonly state: string;
   readonly configuration_revision: number;
+  readonly transitions: components["schemas"]["RunResourceView"]["transitions"];
   readonly execution_control: {
     readonly model_calls: number;
     readonly tool_calls: number;
@@ -22,6 +25,9 @@ interface RunSnapshot {
     readonly delivery_attempt_count: number;
   }[];
 }
+
+type TimelinePage = components["schemas"]["RunTimelineResponse"];
+type AuditPage = components["schemas"]["AuditEventListResponse"];
 
 async function readJson<T>(page: Page, path: string): Promise<T> {
   return page.evaluate(async (resource) => {
@@ -127,15 +133,223 @@ async function acceptedRunId(page: Page) {
   return id;
 }
 
-async function assertSequenceOrderedTimeline(page: Page, runId: string) {
-  const timeline = await readJson<{
-    items: readonly { sequence: number }[];
-    next_cursor: string | null;
-  }>(page, `/api/v1/runs/${encodeURIComponent(runId)}/timeline?limit=100`);
-  expect(timeline.next_cursor).toBeNull();
-  const sequence = timeline.items.map((item) => item.sequence);
+// EXEC-05: actual public pagination, never route fixtures or a client-derived
+// event count. These tiny journeys must finish within 20 bounded server pages.
+async function readPages<T extends TimelinePage | AuditPage>(
+  page: Page,
+  path: string,
+): Promise<readonly T[]> {
+  const resource = new URL(path, "http://127.0.0.1:4173");
+  resource.searchParams.set("limit", "7");
+  const pages: T[] = [];
+  const cursors = new Set<string>();
+  for (let index = 0; index < 20; index += 1) {
+    const result = await readJson<T>(page, resource.pathname + resource.search);
+    expect(result.items.length).toBeLessThanOrEqual(7);
+    pages.push(result);
+    if (result.next_cursor === null) {
+      expect(pages.length).toBeGreaterThan(1);
+      return pages;
+    }
+    if (
+      typeof result.next_cursor !== "string" ||
+      result.next_cursor.length === 0 ||
+      result.next_cursor.length > 1_024
+    )
+      throw new Error("EXEC-05 public history has an invalid continuation");
+    expect(cursors.has(result.next_cursor)).toBe(false);
+    cursors.add(result.next_cursor);
+    resource.searchParams.set("cursor", result.next_cursor);
+  }
+  throw new Error("EXEC-05 public history exceeded its bounded page inventory");
+}
+
+async function openPersistedRunFromIndex(
+  page: Page,
+  run: RunSnapshot,
+  info: TestInfo,
+  viewport: "desktop" | "mobile",
+) {
+  // Discover through the rendered index, not the Run-ID lookup or direct goto.
+  await page.getByRole("link", { name: "Runs & audit", exact: true }).click();
+  await expect(page).toHaveURL("http://127.0.0.1:4173/runs");
+  await checkPage(
+    page,
+    /^Runs and audit \| Marketing Agents$/u,
+    "Runs & audit",
+  );
+  const row = page.locator(".runs-list > li").filter({
+    has: page.getByRole("link", { name: run.id, exact: true }),
+  });
+  const link = row.getByRole("link", { name: run.id, exact: true });
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute(
+    "href",
+    `/runs/${encodeURIComponent(run.id)}`,
+  );
+  await expect(row).toContainText(run.instance_id);
+  await expect(row.locator(".run-status")).toHaveText("Completed");
+  // EXEC-05: exact persisted IDs and status must remain readable at mobile width.
+  // Visible DOM alone does not catch a flex item's intrinsic-width overflow.
+  const bounds = await page.locator(".runs-page").evaluate((element) => {
+    const viewport = element.getBoundingClientRect();
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      clipped: Array.from(
+        element.querySelectorAll(".runs-list li, .run-status"),
+      ).some((item) => {
+        const rectangle = item.getBoundingClientRect();
+        return (
+          rectangle.left < viewport.left || rectangle.right > viewport.right
+        );
+      }),
+    };
+  });
+  expect(bounds).toEqual({ overflow: 0, clipped: false });
+  await capture(page, info, `${viewport}-runs-index`);
+  await link.click();
+  expect(await acceptedRunId(page)).toBe(run.id);
+  await checkPage(page, /^Run timeline \| Marketing Agents$/u, "Run timeline");
+  await page.getByRole("button", { name: "Refresh now", exact: true }).click();
+  await expect(
+    page.getByText("Terminal snapshot — polling stopped", { exact: true }),
+  ).toBeVisible();
+}
+
+async function assertCompletePublicTimeline(
+  page: Page,
+  run: RunSnapshot,
+  approvalId?: string,
+) {
+  const timelinePages = await readPages<TimelinePage>(
+    page,
+    `/api/v1/runs/${encodeURIComponent(run.id)}/timeline`,
+  );
+  expect(timelinePages.every((item) => item.run_id === run.id)).toBe(true);
+  const timeline = timelinePages.flatMap((item) => item.items);
+  const sequence = timeline.map((item) => item.sequence);
   expect(sequence.length).toBeGreaterThan(3);
-  expect(sequence).toEqual([...new Set(sequence)].sort((a, b) => a - b));
+  expect(sequence).toEqual(sequence.map((_, index) => index + 1));
+  expect(new Set(timeline.map((item) => item.id)).size).toBe(timeline.length);
+
+  const feedPages = await readPages<AuditPage>(
+    page,
+    `/api/v1/audit-events?run_id=${encodeURIComponent(run.id)}`,
+  );
+  expect(new Set(feedPages.map((item) => item.high_watermark)).size).toBe(1);
+  const feed = feedPages.flatMap((item) => item.items);
+  const feedSequence = feed.map((item) => item.sequence);
+  expect(feedSequence).toEqual(
+    [...new Set(feedSequence)].sort((left, right) => right - left),
+  );
+  expect(feed.map((item) => item.id)).toEqual(
+    timeline.map((item) => item.id).reverse(),
+  );
+  for (const event of timeline) {
+    const { sequence: runSequence, ...projection } = event;
+    const witness = feed.find((item) => item.id === event.id);
+    expect(witness).toMatchObject({
+      ...projection,
+      run_sequence: runSequence,
+      run_id: run.id,
+      run_url: `/api/v1/runs/${run.id}`,
+    });
+  }
+
+  // Expected cardinality and authority come from the separate persisted Run
+  // projection. AC-14 owns independent database-fact completeness; this checks
+  // public projection consistency and that the rendered history loses no item.
+  const transitions = feed.filter(
+    (item) =>
+      item.aggregate_type === "run" && item.transition_sequence !== null,
+  );
+  expect(transitions).toHaveLength(run.transitions.length);
+  for (const transition of run.transitions) {
+    expect(
+      transitions.filter(
+        (item) => item.transition_sequence === transition.sequence,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        aggregate_id: run.id,
+        mutation_version: transition.resulting_version,
+        previous_state: transition.previous_state,
+        new_state: transition.new_state,
+        reason_code: transition.reason_code,
+        occurred_at: transition.occurred_at,
+        outcome: "accepted",
+      }),
+    ]);
+  }
+  expect(
+    feed
+      .filter((item) => item.event_type === "artifact.persisted")
+      .map((item) => item.artifact_id)
+      .sort(),
+  ).toEqual(run.artifact_summaries.map((item) => item.id).sort());
+  const succeededActions = feed.filter(
+    (item) => item.event_type === "action.succeeded",
+  );
+  expect(succeededActions).toHaveLength(run.external_actions.length);
+  for (const action of run.external_actions) {
+    expect(
+      succeededActions.filter((item) => item.action_id === action.id),
+    ).toEqual([
+      expect.objectContaining({
+        receipt_id: action.receipt_id,
+        action_attempt_number: action.delivery_attempt_count,
+        new_state: action.state,
+        outcome: "accepted",
+      }),
+    ]);
+  }
+  const approvalEvents = feed.filter(
+    (item) => item.aggregate_type === "approval_request",
+  );
+  expect(approvalEvents.map((item) => item.event_type).sort()).toEqual(
+    approvalId === undefined
+      ? []
+      : ["approval.approved", "approval.consumed", "approval.requested"],
+  );
+  expect(
+    approvalEvents.every((item) => item.approval_request_id === approvalId),
+  ).toBe(true);
+
+  const rendered = page.locator(".run-timeline > .run-event");
+  await expect(rendered).toHaveCount(Math.min(100, timeline.length));
+  for (let loaded = 100; loaded < timeline.length; loaded += 100) {
+    await page
+      .getByRole("button", { name: "Load more events", exact: true })
+      .click();
+    await expect(rendered).toHaveCount(Math.min(loaded + 100, timeline.length));
+  }
+  await expect(
+    page.getByRole("button", { name: "Load more events", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    await rendered.evaluateAll((items) =>
+      items.map((item) => Number(item.getAttribute("data-sequence"))),
+    ),
+  ).toEqual(sequence);
+  for (const event of timeline) {
+    const card = page.locator(
+      `.run-event[data-sequence="${String(event.sequence)}"]`,
+    );
+    await expect(card.locator(".run-event__facts code")).toHaveText(
+      event.event_type,
+    );
+    if (event.artifact_id !== null) {
+      await expect(
+        card.getByRole("link", {
+          name: `Artifact ${event.artifact_id}`,
+          exact: true,
+        }),
+      ).toHaveAttribute(
+        "href",
+        `/artifacts/${encodeURIComponent(event.artifact_id)}`,
+      );
+    }
+  }
 }
 
 test("desktop chart controls persist configuration and authorize exactly one mock write", async ({
@@ -252,6 +466,10 @@ test("desktop chart controls persist configuration and authorize exactly one moc
   expect(completed.external_actions[0]?.receipt_id).toBeTruthy();
   expect(completed.external_actions[0]?.delivery_attempt_count).toBe(1);
   expect(completed.artifact_summaries).toHaveLength(0);
+  expect(completed.id).toBe(runId);
+  await openPersistedRunFromIndex(page, completed, info, "desktop");
+  await assertCompletePublicTimeline(page, completed, approvalId);
+  await capture(page, info, "desktop-complete-timeline");
   await expect(
     page
       .getByText("No real external delivery occurred", { exact: true })
@@ -260,7 +478,6 @@ test("desktop chart controls persist configuration and authorize exactly one moc
   await expect(page.locator(".run-snapshot__action-list")).toContainText(
     completed.external_actions[0]?.receipt_id ?? "missing-receipt",
   );
-  await assertSequenceOrderedTimeline(page, runId);
   await page.locator(".run-snapshot__action-list").scrollIntoViewIfNeeded();
   await capture(page, info, "desktop-completed-receipt");
   await page.getByRole("link", { name: "Org chart", exact: true }).click();
@@ -344,14 +561,18 @@ test("mobile chart preserves dirty configuration while a real read run produces 
   expect(completed.external_actions).toHaveLength(0);
   expect(completed.pending_approvals).toHaveLength(0);
   expect(completed.artifact_summaries).toHaveLength(1);
-  await assertSequenceOrderedTimeline(page, runId);
-  await page
-    .locator('.run-artifacts__list a[href^="/artifacts/"]')
-    .first()
-    .click();
-  await checkPage(page, /^Artifact viewer/u, "Artifact viewer");
+  expect(completed.id).toBe(runId);
+  await openPersistedRunFromIndex(page, completed, info, "mobile");
+  await assertCompletePublicTimeline(page, completed);
+  await capture(page, info, "mobile-complete-timeline");
   const artifactId = completed.artifact_summaries[0]?.id;
   if (artifactId === undefined) throw new Error("Missing artifact identity");
+  await page
+    .locator(
+      `.run-artifacts__list a[href="/artifacts/${encodeURIComponent(artifactId)}"]`,
+    )
+    .click();
+  await checkPage(page, /^Artifact viewer/u, "Artifact viewer");
   expect(new URL(page.url()).pathname).toBe(`/artifacts/${artifactId}`);
   await expect(
     page.getByRole("heading", {

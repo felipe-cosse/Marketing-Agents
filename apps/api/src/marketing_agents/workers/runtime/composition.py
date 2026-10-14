@@ -20,6 +20,7 @@ from marketing_agents.application.services.approval_decisions import ApprovalDec
 from marketing_agents.application.services.approval_resources import ApprovalResourceService
 from marketing_agents.application.services.artifact_resources import ArtifactResourceService
 from marketing_agents.application.services.audit_resources import AuditResourceService
+from marketing_agents.application.services.campaign_briefs import CampaignBriefService
 from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationService,
 )
@@ -28,6 +29,7 @@ from marketing_agents.application.services.run_cancellation_command import (
     RunCancellationCommandService,
 )
 from marketing_agents.application.services.run_resources import RunResourceService
+from marketing_agents.application.services.schedule_control import ScheduleControlService
 from marketing_agents.application.services.webhook_intake import WebhookAdmissionService
 from marketing_agents.config import Settings
 from marketing_agents.demos import DEMO_SCENARIOS, DemoRunService, build_demo_read_adapter
@@ -58,6 +60,9 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyWorkRepository,
     create_database_runtime,
 )
+from marketing_agents.infrastructure.db.repositories.campaign_briefs import (
+    SQLAlchemyCampaignBriefRepository,
+)
 from marketing_agents.infrastructure.executable_workflows import build_executable_workflow_registry
 from marketing_agents.infrastructure.instance_configuration_constraints import (
     CompiledCatalogInstanceConfigurationConstraintProvider,
@@ -70,6 +75,7 @@ from marketing_agents.infrastructure.runtime.catalog_workflows import CatalogRea
 from marketing_agents.infrastructure.runtime.catalog_write_workflows import (
     CatalogWriteWorkflowService,
 )
+from marketing_agents.infrastructure.schedule_control import SQLAlchemyScheduleControlReader
 from marketing_agents.infrastructure.scheduling import CroniterRecurrenceCalculator
 from marketing_agents.infrastructure.webhook_ingress import CompiledCatalogWebhookAdmissionResolver
 from marketing_agents.infrastructure.webhook_signatures import (
@@ -121,6 +127,16 @@ class LocalRuntime:
             manual_dry_run_service=self.manual,
             run_cancellation_service=RunCancellationCommandService(dependencies),
             instance_configuration_service=self.configurations,
+            campaign_brief_service=CampaignBriefService(
+                dependencies,
+                self.digest_key,
+                retention_policy=self.settings.retention_policy,
+            ),
+            schedule_control_service=ScheduleControlService(
+                reader=SQLAlchemyScheduleControlReader(self.database.session_factory),
+                configurations=self.configurations,
+                recurrence=CroniterRecurrenceCalculator(),
+            ),
             approval_decision_service=ApprovalDecisionService(dependencies),
             approval_resource_service=ApprovalResourceService(dependencies),
             run_resource_service=RunResourceService(
@@ -175,6 +191,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             artifacts=SQLAlchemyArtifactRepository,
             schedules=SQLAlchemyScheduleRepository,
             webhook_receipts=SQLAlchemyWebhookReceiptRepository,
+            campaign_briefs=SQLAlchemyCampaignBriefRepository,
         )
         dependencies = OrchestrationDependencies(
             clock or SystemClock(),

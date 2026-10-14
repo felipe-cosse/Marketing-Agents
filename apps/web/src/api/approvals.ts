@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import { ApiRequestError, getJson } from "./client";
 import {
   assertLocalJsonResponse,
@@ -145,61 +146,16 @@ export interface NormalizedApprovalListQuery {
   readonly limit: number;
 }
 
-export interface ApprovalSummary {
-  readonly id: string;
-  readonly status: ApprovalStatus;
-  readonly resourceVersion: number;
-  readonly generation: number;
-  readonly actionId: string;
-  readonly actionType: string;
-  readonly destinationSummary: string;
-  readonly runId: string;
-  readonly templateId: string;
-  readonly instanceId: string;
-  readonly requestedAt: string;
-  readonly expiresAt: string;
-  readonly isExpired: boolean;
-  readonly isActionable: boolean;
-  readonly approvalUrl: string;
-  readonly actionUrl: string;
-  readonly runUrl: string;
-}
+export type ApprovalSummary = ApiView<"ApprovalSummaryView">;
 
-export interface ApprovalPage {
-  readonly items: readonly ApprovalSummary[];
-  readonly nextCursor: string | null;
-}
+export type ApprovalPage = ApiView<"ApprovalListResponse">;
 
-export interface ApprovalDetail extends ApprovalSummary {
-  readonly oneTimeUseState: "unused" | "consumed";
-  readonly capabilityId: string;
-  readonly connectorFamily: string;
-  readonly bindingId: string;
+export type ApprovalDetail = Omit<
+  ApiView<"ApprovalResourceView">,
+  "redactedPayload"
+> & {
   readonly redactedPayload: JsonObject;
-  readonly payloadHash: string;
-  readonly stepId: string;
-  readonly policyId: string;
-  readonly requiredRoles: readonly string[];
-  readonly requiredScopes: readonly string[];
-  readonly allowSelfApproval: boolean;
-  readonly requestedBy: string;
-  readonly updatedAt: string;
-  readonly decisionId: string | null;
-  readonly decisionKind: ApprovalDecisionKind | null;
-  readonly decisionActorId: string | null;
-  readonly decisionReasonCode: "approval_granted" | "approval_rejected" | null;
-  readonly decisionReason: string | null;
-  readonly decidedAt: string | null;
-  readonly expiredAt: string | null;
-  readonly replacementApprovalId: string | null;
-  readonly renewedAt: string | null;
-  readonly supersededAt: string | null;
-  readonly supersededReasonCode: string | null;
-  readonly consumedAt: string | null;
-  readonly stepUrl: string;
-  readonly templateUrl: string;
-  readonly instanceUrl: string;
-}
+};
 
 export interface DecideApprovalInput {
   readonly approvalId: string;
@@ -211,14 +167,9 @@ export interface DecideApprovalInput {
   readonly signal?: AbortSignal;
 }
 
-export interface ApprovalDecisionResult {
-  readonly approvalId: string;
-  readonly decisionId: string;
-  readonly actionId: string;
-  readonly runId: string;
-  readonly status: "approved" | "rejected";
+export type ApprovalDecisionResult = ApiView<"ApprovalDecisionResponse"> & {
   readonly approval: ApprovalDetail | null;
-}
+};
 
 export interface ApprovalDecisionExpectation {
   readonly approvalId: string;

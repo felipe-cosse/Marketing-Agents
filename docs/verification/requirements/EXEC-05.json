@@ -1,0 +1,236 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-05",
+  "matrix_statement_sha256": "b2580f443329e155d6859f23ef9e5fc94c1b13d4c5460b44cc1ff094695b61ec",
+  "evidence_class": "process_gate",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "apps/api/openapi.json",
+      "apps/api/src/marketing_agents/api/app.py",
+      "apps/api/src/marketing_agents/api/middleware/transport_security.py",
+      "apps/api/src/marketing_agents/api/routes/campaign_briefs.py",
+      "apps/api/src/marketing_agents/api/routes/schedules.py",
+      "apps/api/src/marketing_agents/api/schemas/campaign_briefs.py",
+      "apps/api/src/marketing_agents/api/schemas/schedules.py",
+      "apps/api/src/marketing_agents/application/ports/campaign_briefs.py",
+      "apps/api/src/marketing_agents/application/ports/schedule_control.py",
+      "apps/api/src/marketing_agents/application/ports/unit_of_work.py",
+      "apps/api/src/marketing_agents/application/services/audit_events.py",
+      "apps/api/src/marketing_agents/application/services/campaign_briefs.py",
+      "apps/api/src/marketing_agents/application/services/instance_configuration.py",
+      "apps/api/src/marketing_agents/application/services/schedule_control.py",
+      "apps/api/src/marketing_agents/domain/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0010_campaign_brief_creation_audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
+      "apps/api/src/marketing_agents/infrastructure/db/models/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/audit.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/campaign_briefs.py",
+      "apps/api/src/marketing_agents/infrastructure/db/repositories/schedule.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/infrastructure/schedule_control.py",
+      "apps/api/src/marketing_agents/security/audit_metadata.py",
+      "apps/api/src/marketing_agents/workers/runtime/composition.py",
+      "apps/web/e2e/obj-06-control-surface.spec.ts",
+      "apps/web/src/api/agentInstanceDetail.ts",
+      "apps/web/src/api/apiContract.test.ts",
+      "apps/web/src/api/apiContract.ts",
+      "apps/web/src/api/approvals.ts",
+      "apps/web/src/api/demoScenarios.ts",
+      "apps/web/src/api/generated/schema.ts",
+      "apps/web/src/api/instanceConfiguration.ts",
+      "apps/web/src/api/instanceStatusSummary.ts",
+      "apps/web/src/api/manualDryRun.ts",
+      "apps/web/src/api/runArtifacts.ts",
+      "apps/web/src/features/runs/run-timeline.css",
+      "docs/architecture.md",
+      "docs/campaign-briefs.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/schedules.md",
+      "docs/verification/requirements/EXEC-05.json",
+      "docs/verification/requirements/EXEC-05.md",
+      "tests/integration/api/test_exec_05_schedule_control.py",
+      "tests/integration/db/test_ac_12_recurrence_persistence.py",
+      "tests/integration/db/test_del_04_migrations.py",
+      "tests/integration/db/test_exec_05_campaign_briefs.py",
+      "tests/tooling/test_ac_17_claim_taxonomy.py",
+      "tests/tooling/test_exec_05_product_gate.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "control",
+        "one_of": [
+          "Makefile"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_exec_05_product_gate.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/application/services/schedule_control.py",
+          "apps/api/src/marketing_agents/application/services/campaign_briefs.py"
+        ]
+      },
+      {
+        "kind": "journey",
+        "one_of": [
+          "apps/web/e2e/obj-06-control-surface.spec.ts"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-product-qualification",
+      "type": "contract",
+      "statement": "The EXEC-05 command reuses the complete source-bound AC-16 quality wrapper: all 20 gates, full backend and frontend inventories, 17-module safety coverage and 16 registered browser runners, with existing deadlines and no selectors. Qualification requires independently observed successful execution and its matching tree-keyed record; control tests and record consistency alone are not execution proof.",
+      "test_refs": [
+        "tests/tooling/test_exec_05_product_gate.py",
+        "tests/tooling/test_ac_17_claim_taxonomy.py"
+      ]
+    },
+    {
+      "id": "configuration-owned-schedules",
+      "type": "journey",
+      "statement": "Seven dedicated schedule routes use existing configuration authorization, CAS, input binding and atomic schedule/audit synchronization. Real HTTP/SQLite/runtime tests cover restart, retained disable/enable history, concurrent revision conflicts, actual worker occurrence identity, bounded pagination, privacy and malformed transport. These routes do not create a second scheduler or bypass admission.",
+      "test_refs": [
+        "tests/integration/api/test_exec_05_schedule_control.py"
+      ]
+    },
+    {
+      "id": "standalone-immutable-briefs",
+      "type": "journey",
+      "statement": "Standalone brief create/read routes provide immutable installation-keyed retries, restricted input with separate redacted expiring projection, human authorization and atomic creation audit. Tests cover replay/collision, concurrent retries, expiry, tampering, rollback and populated migration preservation. No shipped workflow is allowed to consume a brief.",
+      "test_refs": [
+        "tests/integration/db/test_exec_05_campaign_briefs.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/db/test_ac_12_recurrence_persistence.py"
+      ]
+    },
+    {
+      "id": "generated-contract-control-surface",
+      "type": "journey",
+      "statement": "Generated OpenAPI types own client response models without replacing runtime validation or reversing pure-contract dependency direction. The real desktop/mobile browser journey joins a persisted run through Runs & audit to its paginated timeline and artifact, comparing rendered events with public API projections. Existing complete browser/demo gates remain required.",
+      "test_refs": [
+        "apps/web/src/api/apiContract.test.ts",
+        "apps/web/e2e/obj-06-control-surface.spec.ts"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-05-control-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/tooling/test_exec_05_product_gate.py",
+        "tests/tooling/test_ac_17_claim_taxonomy.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "complete-product-qualification"
+      ]
+    },
+    {
+      "id": "exec-05-durable-api-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-socket",
+        "--allow-unix-socket",
+        "tests/integration/api/test_exec_05_schedule_control.py",
+        "tests/integration/db/test_exec_05_campaign_briefs.py",
+        "tests/integration/db/test_del_04_migrations.py",
+        "tests/integration/db/test_ac_12_recurrence_persistence.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "deny",
+      "covers": [
+        "configuration-owned-schedules",
+        "standalone-immutable-briefs"
+      ]
+    },
+    {
+      "id": "exec-05-generated-contract",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "tools/api-contract/generate.mjs",
+        "--check"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "deny",
+      "covers": [
+        "generated-contract-control-surface"
+      ]
+    },
+    {
+      "id": "exec-05-frontend-regressions",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "web-test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "generated-contract-control-surface"
+      ]
+    },
+    {
+      "id": "exec-05-source-bound-quality-audit",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "scripts.ac_16_quality",
+        "audit"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-product-qualification",
+        "configuration-owned-schedules",
+        "standalone-immutable-briefs",
+        "generated-contract-control-surface"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "Makefile"
+    ],
+    "gate_id": "exec-05-control-regressions"
+  },
+  "limitations": [
+    "The full 20-gate quality run is separately observed via make verify-exec-05. The short manifest audit checks the actual matching external record, not authenticated execution, and cannot replace that run.",
+    "Local API journeys use real SQLite and runtime services; PostgreSQL fixtures do not constitute a live PostgreSQL installation. All provider and connector effects remain deterministic mocks.",
+    "Brief resources are standalone. All executable workflows retain their existing forbidden-brief policy. Projection expiry is not physical erasure, and structured redaction is not arbitrary free-text DLP.",
+    "Schedule disable does not cancel admitted work. Keyset pages are not frozen snapshots, and UTC previews are recurrence metadata, not promises of execution. Unconfirmed mutation outcomes require inspection before retry.",
+    "Browser timeline checks establish rendered/public-projection consistency. Independent persisted-fact completeness remains covered by the unchanged complete AC-14 suite, not inferred solely from two API projections.",
+    "This qualifies the present M7-M8 product surface after EXEC-04, not historical implementation order. It does not complete DEL-01, EXEC-07 clean-state acceptance, new kernel-level AC-15 verification, production identity or real external delivery.",
+    "CI remains disabled. No Docker setting, network check, coverage threshold, complete-suite inventory or existing deadline is weakened; no existing application database is migrated by verification."
+  ]
+}

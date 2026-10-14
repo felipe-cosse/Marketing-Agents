@@ -33,6 +33,10 @@ _CANCELLATION_UNAVAILABLE_DETAIL = (
     "Cancellation outcome is unconfirmed. Inspect the run and timeline before retrying; "
     "cancellation may already have committed."
 )
+_SCHEDULE_UNAVAILABLE_DETAIL = (
+    "Schedule outcome is unconfirmed. Inspect the schedule and configuration before "
+    "retrying; a mutation may already have committed."
+)
 _PROBLEM_PRESERVED_HEADERS = frozenset(
     {b"allow", b"etag", b"retry-after", b"vary", b"www-authenticate"}
 )
@@ -340,6 +344,8 @@ async def _send_problem(
 ) -> None:
     if status_code == 503 and code == "cancellation_unavailable":
         detail = _CANCELLATION_UNAVAILABLE_DETAIL
+    if status_code == 503 and code == "schedule_unavailable":
+        detail = _SCHEDULE_UNAVAILABLE_DETAIL
     problem = problem_details(
         status_code=status_code,
         correlation_id=correlation_id,
