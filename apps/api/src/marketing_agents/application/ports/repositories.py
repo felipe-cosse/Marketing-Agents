@@ -55,6 +55,7 @@ from marketing_agents.domain.execution_control import (
 )
 from marketing_agents.domain.provenance import ArtifactEnvelope
 from marketing_agents.domain.recurrence_resolution import RecurrenceResult
+from marketing_agents.domain.retained_details import RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import RunStateTransition, RunTransitionResult
 from marketing_agents.domain.runtime_policy import RateLimitScope
 from marketing_agents.domain.step_lifecycle import (
@@ -70,16 +71,16 @@ from marketing_agents.domain.webhook import WebhookReceipt
 class WorkInsertResult:
     """Outcome of one atomic source-key insert-or-read operation."""
 
-    work_item: WorkItem
+    work_item: WorkItem | RetainedWorkItem
     inserted: bool
 
 
 class WorkRepository(Protocol):
-    async def get(self, work_item_id: str) -> WorkItem | None: ...
+    async def get(self, work_item_id: str) -> WorkItem | RetainedWorkItem | None: ...
 
     async def get_by_source_key(
         self, source: str, event_id: str, instance_id: str
-    ) -> WorkItem | None: ...
+    ) -> WorkItem | RetainedWorkItem | None: ...
 
     async def add(self, work_item: WorkItem) -> None: ...
 
@@ -292,13 +293,13 @@ class InspectableRun:
     """Run aggregate whose complete persisted lifecycle history was verified."""
 
     run: Run
-    work_item: WorkItem
+    work_item: WorkItem | RetainedWorkItem
     transitions: tuple[RunStateTransition, ...]
 
     def __post_init__(self) -> None:
         if (
             type(self.run) is not Run
-            or type(self.work_item) is not WorkItem
+            or type(self.work_item) not in {WorkItem, RetainedWorkItem}
             or type(self.transitions) is not tuple
         ):
             raise ValueError("inspectable Run requires exact persisted contracts")

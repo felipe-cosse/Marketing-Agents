@@ -107,6 +107,25 @@ review is not a fresh health check of the running installation.
 
 ## Backup and recovery
 
+The scheduler process also performs bounded, leased retention maintenance, using
+the six [configured detail TTLs](data-handling.md#recorded-expiry-and-bounded-retention-maintenance).
+It runs at most one 50-detail batch per UTC minute and never treats TTL as a
+reason to erase active or recovery-needed work. Restart the same paired
+installation to resume; do not delete maintenance claims manually. A stopped
+scheduler does not purge, and a backlog may outlive the TTL. Logical erasure
+does not remove data from backups or securely overwrite filesystem pages.
+
+Expired historical runs retain their state and audit timeline with an expiry
+notice. Detail endpoints can return `410 detail_expired`; authenticated
+`/api/v1/retained-details/{record_kind}/{record_id}` reads expose safe retained
+identities, never erased content. An expired retry key remains reserved and
+must not be repurposed for new work.
+
+[Local observability](observability.md) documents bounded JSON diagnostics and
+process-local metrics. Metrics reset on process restart and are not audit facts;
+there is no analytics exporter or public metrics endpoint. Never add raw request,
+exception or provider objects to diagnostics to troubleshoot a failure.
+
 Follow the existing [paired backup and restore procedure](local-operations.md#paired-backup-and-restore)
 for complete commands and prerequisites. It uses SQLite's online snapshot API,
 stages a checksummed database/key pair privately, and restores only into new,

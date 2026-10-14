@@ -35,17 +35,19 @@
       "<root>": ["domain", "infrastructure", "security"],
       "domain": ["domain"],
       "application": ["application", "domain", "security"],
-      "security": ["domain", "security"],
-      "infrastructure": ["application", "config", "domain", "infrastructure", "security"],
-      "api": ["api", "application", "config", "demos", "domain", "security"],
+      "security": ["domain", "security", "observability"],
+      "observability": ["domain", "observability"],
+      "infrastructure": ["application", "config", "domain", "infrastructure", "security", "observability"],
+      "api": ["api", "application", "config", "demos", "domain", "security", "observability"],
       "demos": ["application", "demos", "domain", "infrastructure", "security"],
-      "workers": ["application", "config", "demos", "domain", "infrastructure", "security", "workers"]
+      "workers": ["application", "config", "demos", "domain", "infrastructure", "security", "workers", "observability"]
     },
     "approved_external_roots": {
       "<root>": ["pydantic", "pydantic_settings"],
       "domain": ["pydantic"],
       "application": ["jsonschema", "pydantic", "referencing"],
       "security": ["pydantic"],
+      "observability": [],
       "infrastructure": ["alembic", "croniter", "jsonschema", "pydantic", "sqlalchemy", "yaml"],
       "api": ["fastapi", "pydantic", "starlette"],
       "demos": ["pydantic"],

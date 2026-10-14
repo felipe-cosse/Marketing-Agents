@@ -116,6 +116,7 @@ TERMINAL_RUNTIME_CONTROL_DENIAL_CODES = frozenset(
     }
 )
 _EVENT_AGGREGATES = {
+    "retention.completed": "maintenance_run",
     "campaign_brief.created": "campaign_brief",
     "ingress.manual_received": "manual_ingress",
     "ingress.rate_limited": "webhook_ingress",
@@ -181,6 +182,16 @@ _EVENT_OUTCOMES = {
     "connector.receipt_committed": "observed",
 }
 _EVENT_REQUIRED_METADATA: Mapping[str, frozenset[str]] = {
+    "retention.completed": frozenset(
+        {
+            "admitted_payload",
+            "external_action_payload",
+            "approval_detail",
+            "artifact_detail",
+            "connector_receipt_detail",
+            "audit_metadata",
+        }
+    ),
     "campaign_brief.created": frozenset({"new_revision"}),
     "ingress.manual_received": frozenset(
         {
@@ -1137,6 +1148,7 @@ class AuditEventDraft:
             require_id(required_identifier, name)
         scheduler_aggregate = self.aggregate_type in {"schedule", "schedule_occurrence"}
         runless_aggregate = scheduler_aggregate or self.aggregate_type in {
+            "maintenance_run",
             "campaign_brief",
             "agent_instance_configuration",
             "manual_ingress_rejection",
@@ -1243,6 +1255,37 @@ class AuditEventDraft:
                 or self.transition_sequence is None
             ):
                 raise ValueError("run audit event has invalid subject links")
+        elif self.aggregate_type == "maintenance_run":
+            if (
+                not self.aggregate_id.startswith("maintenance.")
+                or self.actor_source is not AuditActorSource.WORKER
+                or self.auth_method != "internal"
+                or self.mutation_version != 1
+                or any(
+                    value is not None
+                    for value in (
+                        self.schedule_id,
+                        self.occurrence_id,
+                        self.step_id,
+                        self.action_id,
+                        self.action_attempt_number,
+                        self.receipt_id,
+                        self.approval_request_id,
+                        self.approval_decision_id,
+                        self.artifact_id,
+                        self.attempt_id,
+                        self.transition_sequence,
+                        self.previous_state,
+                        self.new_state,
+                        self.reason_code,
+                    )
+                )
+                or any(
+                    type(value) is not int or not 0 <= value <= 100
+                    for value in self.safe_metadata.values.values()
+                )
+            ):
+                raise ValueError("retention audit requires exact count-only worker shape")
         elif self.aggregate_type == "campaign_brief":
             if (
                 re.fullmatch(r"brief\.[0-9a-f]{64}", self.aggregate_id) is None

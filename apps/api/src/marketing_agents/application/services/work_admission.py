@@ -15,6 +15,7 @@ from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import WorkItem
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
 from marketing_agents.security.admission_digest import derive_admission_digests
 from marketing_agents.security.digest_key import DigestKey
@@ -100,7 +101,7 @@ class WorkAdmissionService:
     ) -> None:
         self._dependencies = dependencies
         self._digest_key = digest_key
-        self._retention_policy = retention_policy or RetentionPolicy()
+        self._retention_policy = retention_policy or dependencies.retention_policy
 
     async def admit(self, incoming: ValidatedIncomingWork) -> WorkAdmissionResult:
         envelope, snapshot, redacted_projection, classification = _validated_parts(incoming)
@@ -181,6 +182,8 @@ class WorkAdmissionService:
         )
         stored = await unit_of_work.works.add_or_get(candidate)
         if stored.inserted:
+            if type(stored.work_item) is not WorkItem:
+                raise ValueError("newly admitted work must have live detail")
             return WorkAdmissionResult(stored.work_item, AdmissionDisposition.CREATED)
 
         existing = stored.work_item
@@ -190,19 +193,20 @@ class WorkAdmissionService:
                 "existing work was admitted under a different digest key version",
                 existing_work_item_id=existing.id,
             )
-        expected_projection_digest = _input_projection_integrity_digest(
-            existing,
-            self._digest_key,
-        )
-        if not hmac.compare_digest(
-            existing.input_projection_integrity_digest,
-            expected_projection_digest,
-        ):
-            raise WorkIdempotencyError(
-                "input_projection_integrity_mismatch",
-                "existing work has an invalid admitted-input projection integrity binding",
-                existing_work_item_id=existing.id,
+        if not isinstance(existing, RetainedWorkItem):
+            expected_projection_digest = _input_projection_integrity_digest(
+                existing,
+                self._digest_key,
             )
+            if not hmac.compare_digest(
+                existing.input_projection_integrity_digest,
+                expected_projection_digest,
+            ):
+                raise WorkIdempotencyError(
+                    "input_projection_integrity_mismatch",
+                    "existing work has an invalid admitted-input projection integrity binding",
+                    existing_work_item_id=existing.id,
+                )
         if hmac.compare_digest(existing.input_digest, digests.input_digest) and hmac.compare_digest(
             existing.admission_digest, digests.admission_digest
         ):
@@ -215,18 +219,31 @@ class WorkAdmissionService:
                     "existing work is bound to a different input schema identity",
                     existing_work_item_id=existing.id,
                 )
+            same_projection = (
+                hmac.compare_digest(
+                    existing.projection_digest,
+                    hashlib.sha256(
+                        canonical_json_bytes(candidate.redacted_input_projection)
+                    ).hexdigest(),
+                )
+                if isinstance(existing, RetainedWorkItem)
+                else _same_json(
+                    existing.redacted_input_projection, candidate.redacted_input_projection
+                )
+            )
             if (
                 existing.input_classification is not candidate.input_classification
-                or not _same_json(
-                    existing.redacted_input_projection,
-                    candidate.redacted_input_projection,
-                )
+                or not same_projection
             ):
                 raise WorkIdempotencyError(
                     "input_projection_mismatch",
                     "existing work has a different redacted admitted-input projection",
                     existing_work_item_id=existing.id,
                 )
+            if isinstance(existing, RetainedWorkItem):
+                # The authenticated retained witness still fences duplicates, but
+                # it cannot authorize a new run or reconstruct deleted input.
+                raise DetailExpired("work", existing.id)
             return WorkAdmissionResult(existing, AdmissionDisposition.REPLAYED)
         raise WorkIdempotencyError(
             "idempotency_conflict",

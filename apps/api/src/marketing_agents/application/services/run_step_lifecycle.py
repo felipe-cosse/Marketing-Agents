@@ -13,8 +13,6 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 
-from .audit_events import AuditEventFactory
-
 
 class RunStepLifecycleServiceError(RuntimeError):
     def __init__(
@@ -196,7 +194,7 @@ class RunStepLifecycleService:
                 step_id=step_id,
             )
         await unit_of_work.audits.append(
-            AuditEventFactory(audit_context).step_transition(
+            self._dependencies.audit_factory(audit_context).step_transition(
                 result.step,
                 result.transition,
             )

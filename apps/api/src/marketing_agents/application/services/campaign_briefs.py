@@ -35,6 +35,7 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import CampaignBrief
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.domain.retention import RetentionCategory, RetentionPolicy
 from marketing_agents.domain.validation import frozen_json_mapping, require_id, require_utc
 from marketing_agents.security.digest_key import DigestKey, digest_key_fingerprint
@@ -176,7 +177,7 @@ class CampaignBriefService:
     ) -> None:
         self._dependencies = dependencies
         self._key = digest_key
-        self._retention = retention_policy or RetentionPolicy()
+        self._retention = retention_policy or dependencies.retention_policy
         self._key_version = digest_key_fingerprint(digest_key)
 
     def _digest(self, purpose: str, value: object) -> str:
@@ -290,6 +291,8 @@ class CampaignBriefService:
                 return CampaignBriefResult(
                     "created" if stored.inserted else "replayed", self._view(stored.snapshot)
                 )
+        except DetailExpired:
+            raise
         except CampaignBriefError:
             raise
         except Exception:
@@ -309,6 +312,8 @@ class CampaignBriefService:
                     raise CampaignBriefError("campaign_brief_not_found")
                 self._verify(snapshot, brief_id)
                 return self._view(snapshot)
+        except DetailExpired:
+            raise
         except CampaignBriefError:
             raise
         except Exception:

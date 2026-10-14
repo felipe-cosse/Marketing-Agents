@@ -583,7 +583,7 @@ class ApprovalBoundaryService:
                 "released Run changed before cancellation committed",
                 run_id=snapshot.run.id,
             )
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         await unit_of_work.audits.append_many(
             (
                 *(
@@ -1597,9 +1597,19 @@ class ApprovalBoundaryService:
             authentication_method=decision.authentication_method,
             correlation_id=decision.correlation_id,
         )
-        factory = AuditEventFactory(decision_context)
-        expected_action = factory.action_decided(pending_action, action, stored)
-        expected_approval = factory.approval_decided(pending_request, stored, action)
+        try:
+            expected_action = AuditEventFactory.for_recorded_event(
+                decision_context, action_event.draft
+            ).action_decided(pending_action, action, stored)
+            expected_approval = AuditEventFactory.for_recorded_event(
+                decision_context, approval_event.draft
+            ).approval_decided(pending_request, stored, action)
+        except ValueError:
+            raise ApprovalBoundaryServiceError(
+                "approval_decision_audit_mismatch",
+                "approved leaf decision audit is not authoritative",
+                run_id=request.run_id,
+            ) from None
         if action_event.draft != expected_action or approval_event.draft != expected_approval:
             raise ApprovalBoundaryServiceError(
                 "approval_decision_audit_mismatch",
@@ -1737,8 +1747,8 @@ class ApprovalBoundaryService:
             plan_steps=tuple(plan_steps),
         )
 
-    @staticmethod
     async def _append_release_audits(
+        self,
         unit_of_work: UnitOfWork,
         snapshot: _BoundarySnapshot,
         released: AuthorizationSetReleaseResult,
@@ -1747,7 +1757,7 @@ class ApprovalBoundaryService:
         *,
         audit_context: AuditContext,
     ) -> None:
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         source_request_by_action = {
             stored.request.action_id: stored for stored in snapshot.requests
         }
@@ -1787,8 +1797,8 @@ class ApprovalBoundaryService:
             )
         )
 
-    @staticmethod
     async def _append_closure_audits(
+        self,
         unit_of_work: UnitOfWork,
         snapshot: _BoundarySnapshot,
         closed: AuthorizationSetCloseResult,
@@ -1797,7 +1807,7 @@ class ApprovalBoundaryService:
         *,
         audit_context: AuditContext,
     ) -> None:
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         target_request_by_action = {stored.request.action_id: stored for stored in closed.requests}
         target_action_by_id = {action.id: action for action in closed.actions}
         member_events: list[AuditEventDraft] = []

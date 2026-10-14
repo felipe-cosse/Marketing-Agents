@@ -100,6 +100,7 @@ function runResourceBody(
     artifacts_truncated: false,
     external_actions: [],
     terminal_error: null,
+    details_expired: false,
     ...overrides,
   };
 }
@@ -827,6 +828,7 @@ describe("WEB-06 strict run and artifact read boundary", () => {
       state: "received",
       version: 1,
       artifactsTruncated: false,
+      detailsExpired: false,
     });
     expect(Object.isFrozen(run)).toBe(true);
     expect(Object.isFrozen(run.transitions)).toBe(true);
@@ -860,6 +862,28 @@ describe("WEB-06 strict run and artifact read boundary", () => {
     ).toThrow(/transitions are incoherent/u);
     expect(() => normalizeRunResource(runResourceBody(), OTHER_RUN_ID)).toThrow(
       /does not match its request/u,
+    );
+  });
+
+  it("WEB-06 retains the run skeleton with a strictly boolean expiry flag", () => {
+    const run = normalizeRunResource(
+      runResourceBody({ details_expired: true }),
+      RUN_ID,
+    );
+
+    expect(run.detailsExpired).toBe(true);
+    expect(run.id).toBe(RUN_ID);
+    expect(run.transitions).toHaveLength(1);
+    expect(run.timelineUrl).toBe(`/api/v1/runs/${RUN_ID}/timeline`);
+    for (const value of [null, "true", 1, {}]) {
+      expect(() =>
+        normalizeRunResource(runResourceBody({ details_expired: value })),
+      ).toThrow(/details_expired/u);
+    }
+    const missingFlag = runResourceBody();
+    delete missingFlag.details_expired;
+    expect(() => normalizeRunResource(missingFlag)).toThrow(
+      /fields are unsupported/u,
     );
   });
 

@@ -106,6 +106,78 @@ beforeEach(() => {
 });
 
 describe("WEB-06 RunTimelinePage", () => {
+  it("preserves terminal history and refresh when optional details have expired", async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRunResource({
+        detailsExpired: true,
+        externalActions: [],
+        artifactSummaries: [],
+        pendingApprovals: [],
+      }),
+    );
+    fetchArtifactsMock.mockResolvedValue(makeArtifactPage({ items: [] }));
+    fetchTimelineMock.mockResolvedValue(
+      makeTimelinePage([
+        makeTimelineEvent({
+          sequence: 1,
+          eventType: "action.succeeded",
+          actionId: WEB_06_ACTION_ID,
+          stepId: WEB_06_STEP_ID,
+          newState: "succeeded",
+          metadataExpired: true,
+          metadata: {},
+        }),
+        makeTimelineEvent({
+          sequence: 2,
+          eventType: "run.completed",
+          previousState: "executing",
+          newState: "completed",
+          metadataExpired: true,
+          metadata: {},
+        }),
+      ]),
+    );
+    const user = userEvent.setup();
+    renderRunPage();
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Some run details have expired",
+    );
+    expect(
+      screen.getByText("Terminal snapshot — polling stopped"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Selected plan and policy" }),
+    ).toBeVisible();
+    const timeline = await screen.findByRole("list", {
+      name: "Run timeline in sequence order",
+    });
+    expect(within(timeline).getAllByRole("listitem")).toHaveLength(2);
+    expect(
+      within(timeline).getByText("External action succeeded", { exact: true }),
+    ).toBeVisible();
+    expect(
+      within(timeline).getByText("Run completed", { exact: true }),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("No external action has been proposed for this run."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No artifacts are available yet"),
+    ).not.toBeInTheDocument();
+    const priorRequests = fetchRunMock.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Refresh now" }));
+    await waitFor(() =>
+      expect(fetchRunMock.mock.calls.length).toBe(priorRequests + 1),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Some run details have expired",
+    );
+    expect(
+      within(timeline).getByText("Run completed", { exact: true }),
+    ).toBeVisible();
+  });
+
   it("presents persisted sequence order, all event families, sealed policy facts, and truthful mock receipt labels", async () => {
     fetchTimelineMock.mockResolvedValue(
       makeTimelinePage([

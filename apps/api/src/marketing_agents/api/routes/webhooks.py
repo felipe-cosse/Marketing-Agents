@@ -31,6 +31,7 @@ from marketing_agents.application.services.webhook_intake import (
     WebhookAdmissionResult,
     WebhookAdmissionServiceError,
 )
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.domain.webhook import WebhookReceipt
 
 _SOURCE_PATTERN = WEBHOOK_SOURCE_ID_PATTERN
@@ -333,6 +334,8 @@ async def admit_webhook_event(
         )
     except WebhookAdmissionServiceError as error:
         return _service_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         return _problem_response(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -343,6 +346,8 @@ async def admit_webhook_event(
         result = await asyncio.wait_for(executor.submit(command), timeout=_SUBMIT_TIMEOUT_SECONDS)
     except WebhookAdmissionServiceError as error:
         return _service_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         return _problem_response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

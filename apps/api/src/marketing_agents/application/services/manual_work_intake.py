@@ -22,7 +22,6 @@ from marketing_agents.application.ports.manual_work import (
     ManualAdmissionResolver,
 )
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
-from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.application.services.idempotent_work_receipt import (
     IdempotentWorkRunReceiptService,
     WorkRunReceiptDisposition,
@@ -38,6 +37,7 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import WorkMode
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
 from marketing_agents.security.digest_key import DigestKey
 from marketing_agents.security.redaction import SecretValue
@@ -278,7 +278,7 @@ class ManualDryRunService:
                     incoming = binding.validator.validate(envelope)
                 except IncomingWorkValidationError:
                     await unit_of_work.audits.append_global(
-                        AuditEventFactory(audit_context).manual_schema_rejected(
+                        self._dependencies.audit_factory(audit_context).manual_schema_rejected(
                             envelope,
                             manual_attempt_id=manual_attempt_id,
                             occurred_at=self._dependencies.utc_now(),
@@ -318,6 +318,8 @@ class ManualDryRunService:
                 raise collision_error
             return result
         except ManualDryRunServiceError:
+            raise
+        except DetailExpired:
             raise
         except ManualAdmissionResolutionError as exc:
             safe_message = _SAFE_RESOLUTION_MESSAGES.get(exc.code)
@@ -380,7 +382,7 @@ class ManualDryRunService:
         manual_attempt_id: str,
     ) -> None:
         occurred_at = self._dependencies.utc_now()
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         disposition = receipt.disposition.value
         received = factory.manual_received(
             receipt.work_item,
@@ -424,7 +426,8 @@ class ManualDryRunService:
         work_item = await unit_of_work.works.get(existing_work_item_id)
         run = await unit_of_work.runs.get_by_work_item_id(existing_work_item_id)
         if (
-            type(work_item) is not WorkItem
+            work_item is None
+            or type(work_item) not in {WorkItem, RetainedWorkItem}
             or type(run) is not Run
             or work_item.source_idempotency_key != envelope.source_key
             or run.work_item_id != work_item.id
@@ -435,7 +438,18 @@ class ManualDryRunService:
                 "manual work intake is temporarily unavailable",
             )
         occurred_at = self._dependencies.utc_now()
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
+        if isinstance(work_item, RetainedWorkItem):
+            await unit_of_work.audits.append_many(
+                factory.retained_work_collision(
+                    work_item,
+                    run,
+                    attempted_envelope=envelope,
+                    manual_attempt_id=manual_attempt_id,
+                    occurred_at=occurred_at,
+                )
+            )
+            return
         await unit_of_work.audits.append_many(
             (
                 factory.manual_received(

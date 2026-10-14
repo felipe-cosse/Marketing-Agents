@@ -1017,6 +1017,9 @@ class SQLAlchemyApprovalRepository:
     async def _hydrate_unchecked(
         self, record: ApprovalRequestRecord
     ) -> StoredActionApprovalRequest:
+        from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
+
+        await require_live_detail(self._session, "approval", record.id)
         _verify_request_record(record, self._integrity_key)
         action, step, envelope, policy = await self._authority(record.action_id, record.step_id)
         record_policy = ApprovalPolicySnapshot(

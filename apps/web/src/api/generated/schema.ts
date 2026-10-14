@@ -395,6 +395,23 @@ export interface paths {
     readonly patch?: never;
     readonly trace?: never;
   };
+  readonly "/api/v1/retained-details/{record_kind}/{record_id}": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** Read Retained Identity */
+    readonly get: operations["read_retained_identity_api_v1_retained_details__record_kind___record_id__get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
   readonly "/api/v1/runs": {
     readonly parameters: {
       readonly query?: never;
@@ -2519,6 +2536,59 @@ export interface components {
        */
       readonly status: "ready" | "not_ready";
     };
+    /** RetainedIdentity */
+    readonly RetainedIdentity: {
+      readonly category: components["schemas"]["RetentionCategory"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      readonly created_at: string;
+      /**
+       * Detail Expired
+       * @default true
+       * @constant
+       */
+      readonly detail_expired: true;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      readonly expires_at: string;
+      /**
+       * Purged At
+       * Format: date-time
+       */
+      readonly purged_at: string;
+      /** Record Id */
+      readonly record_id: string;
+      /**
+       * Record Kind
+       * @enum {string}
+       */
+      readonly record_kind:
+        | "work"
+        | "action"
+        | "approval"
+        | "artifact"
+        | "receipt"
+        | "attempt"
+        | "audit"
+        | "brief";
+      /** Run Id */
+      readonly run_id: string | null;
+    };
+    /**
+     * RetentionCategory
+     * @enum {string}
+     */
+    readonly RetentionCategory:
+      | "admitted_payload"
+      | "external_action_payload"
+      | "approval_detail"
+      | "artifact_detail"
+      | "connector_receipt_detail"
+      | "audit_metadata";
     /** RetryPolicyView */
     readonly RetryPolicyView: {
       /**
@@ -2686,6 +2756,11 @@ export interface components {
        * Format: date-time
        */
       readonly created_at: string;
+      /**
+       * Details Expired
+       * @default false
+       */
+      readonly details_expired: boolean;
       readonly execution_control:
         components["schemas"]["RunExecutionControlView"] | null;
       /** External Actions */
@@ -5943,6 +6018,46 @@ export interface operations {
         };
         content: {
           readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+      /** @description A safe process-wide API problem occurrence. */
+      readonly default: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+        };
+      };
+    };
+  };
+  readonly read_retained_identity_api_v1_retained_details__record_kind___record_id__get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path: {
+        readonly record_id: string;
+        readonly record_kind:
+          | "work"
+          | "action"
+          | "approval"
+          | "artifact"
+          | "receipt"
+          | "attempt"
+          | "audit"
+          | "brief";
+      };
+      readonly cookie?: never;
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["RetainedIdentity"];
         };
       };
       /** @description A safe process-wide API problem occurrence. */

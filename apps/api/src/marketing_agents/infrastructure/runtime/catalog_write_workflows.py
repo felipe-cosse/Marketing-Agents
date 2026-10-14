@@ -62,6 +62,7 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import ExternalAction, Run, WorkItem
 from marketing_agents.domain.enums import ExternalActionState, RunState, StepState, WorkMode
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import (
     CompletionContext,
     NoRunTransitionContext,
@@ -247,6 +248,8 @@ class CatalogWriteWorkflowService:
         async with self._dependencies.unit_of_work() as uow:
             run = await uow.runs.get(run_id)
             work = None if run is None else await uow.works.get(run.work_item_id)
+            if isinstance(work, RetainedWorkItem):
+                raise DetailExpired("work", work.id)
         if run is None or work is None:
             raise CatalogWriteWorkflowError("catalog_write_run_missing")
         definition = self._require_admitted_contract(work, run)

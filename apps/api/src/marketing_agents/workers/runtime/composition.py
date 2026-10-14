@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -25,6 +25,7 @@ from marketing_agents.application.services.instance_configuration import (
     InstanceConfigurationService,
 )
 from marketing_agents.application.services.manual_work_intake import ManualDryRunService
+from marketing_agents.application.services.retained_resources import RetainedResourceService
 from marketing_agents.application.services.run_cancellation_command import (
     RunCancellationCommandService,
 )
@@ -46,7 +47,6 @@ from marketing_agents.infrastructure.db import (
     InstanceConfigurationSQLAlchemyUnitOfWorkFactory,
     SQLAlchemyApprovalRepository,
     SQLAlchemyArtifactRepository,
-    SQLAlchemyAuditRepository,
     SQLAlchemyConnectorReceiptRepository,
     SQLAlchemyExecutionControlRepository,
     SQLAlchemyExternalActionRepository,
@@ -63,6 +63,8 @@ from marketing_agents.infrastructure.db import (
 from marketing_agents.infrastructure.db.repositories.campaign_briefs import (
     SQLAlchemyCampaignBriefRepository,
 )
+from marketing_agents.infrastructure.db.repositories.retention import SQLAlchemyRetentionRepository
+from marketing_agents.infrastructure.db.telemetry import TelemetryAuditRepository
 from marketing_agents.infrastructure.executable_workflows import build_executable_workflow_registry
 from marketing_agents.infrastructure.instance_configuration_constraints import (
     CompiledCatalogInstanceConfigurationConstraintProvider,
@@ -86,6 +88,7 @@ from marketing_agents.infrastructure.webhook_sources import (
     StaticWebhookSourceRegistry,
     StrictJsonWebhookEnvelopeMapper,
 )
+from marketing_agents.observability import LocalTelemetry
 from marketing_agents.security.digest_key import DigestKey, load_or_create_digest_key
 
 
@@ -119,6 +122,7 @@ class LocalRuntime:
     catalog_reads: CatalogReadWorkflowService
     catalog_proposals: CatalogProposalWorkflowService
     catalog_writes: CatalogWriteWorkflowService
+    telemetry: LocalTelemetry = field(default_factory=LocalTelemetry)
 
     def create_app(self) -> FastAPI:
         dependencies = self.dependencies
@@ -152,6 +156,15 @@ class LocalRuntime:
             ),
             webhook_admission_service=self.webhook,
             readiness_probe=LocalReadinessProbe(self.settings),
+            telemetry=self.telemetry,
+            retained_resource_service=RetainedResourceService(
+                SQLAlchemyRetentionRepository(
+                    self.database.session_factory,
+                    self.digest_key,
+                    retention_policy=self.settings.retention_policy,
+                    audit_factory=lambda session: TelemetryAuditRepository(session, self.telemetry),
+                )
+            ),
         )
 
     async def close(self) -> None:
@@ -176,12 +189,22 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
         settings.marketing_agents_digest_key_path, persistent_state_exists=True
     )
     catalog = compile_catalog(settings.catalog_root)
-    database = create_database_runtime(settings.database_url)
+    workflows = build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    telemetry = LocalTelemetry(
+        workflow_ids=tuple(item.id for item in workflows.list()),
+        template_ids=tuple(item.id for item in catalog.templates),
+        instance_templates={item.id: item.template_id for item in catalog.instances},
+    )
+    database = create_database_runtime(
+        settings.database_url,
+        retention_policy=settings.retention_policy,
+        retention_key=key,
+    )
     try:
         factories = SQLAlchemyRepositoryFactories(
             works=SQLAlchemyWorkRepository,
             runs=SQLAlchemyRunRepository,
-            audits=SQLAlchemyAuditRepository,
+            audits=lambda session: TelemetryAuditRepository(session, telemetry),
             configurations=SQLAlchemyInstanceConfigurationRepository,
             approvals=lambda session: SQLAlchemyApprovalRepository(session, key),
             run_steps=SQLAlchemyRunStepRepository,
@@ -197,9 +220,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             clock or SystemClock(),
             RandomIds(),
             SQLAlchemyManualAdmissionUnitOfWorkFactory(database.session_factory, factories),
-        )
-        workflows = build_executable_workflow_registry(
-            catalog, demo_scenarios=DEMO_SCENARIOS.list()
+            retention_policy=settings.retention_policy,
         )
         role_renderer = CatalogRoleRenderer(catalog)
         role_adapter = build_catalog_role_read_adapter(catalog, workflows, role_renderer)
@@ -225,6 +246,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             clock=dependencies.clock,
             audit_pseudonym_key=key,
             workflows=workflows,
+            retention_policy=settings.retention_policy,
         )
         definitions: list[WebhookSourceDefinition] = []
         if settings.webhook_hmac_secret is not None:
@@ -292,6 +314,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             ),
             CatalogProposalWorkflowService(dependencies, catalog, workflows),
             CatalogWriteWorkflowService(dependencies, catalog, workflows),
+            telemetry,
         )
     except BaseException:
         await database.dispose()

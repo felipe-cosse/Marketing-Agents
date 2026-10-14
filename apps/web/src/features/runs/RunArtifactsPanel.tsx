@@ -91,8 +91,16 @@ export function RunArtifactsPanel({
 
       {merged.error !== null ? null : artifacts.length === 0 ? (
         <section className="run-workspace__state">
-          <strong>No artifacts are available yet</strong>
-          <p>This run has not exposed an authorized artifact projection.</p>
+          <strong>
+            {run.detailsExpired
+              ? "Artifact details may have expired"
+              : "No artifacts are available yet"}
+          </strong>
+          <p>
+            {run.detailsExpired
+              ? "The retained audit history records artifact creation even when optional details are no longer available."
+              : "This run has not exposed an authorized artifact projection."}
+          </p>
         </section>
       ) : (
         <ol className="run-artifacts__list">

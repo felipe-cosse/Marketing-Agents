@@ -305,6 +305,9 @@ class SQLAlchemyExternalActionRepository:
         self._session = session
 
     async def _validated_action(self, record: ExternalActionRecord) -> ExternalAction:
+        from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
+
+        await require_live_detail(self._session, "action", record.id)
         action = _to_domain(record)
         if action.state is not ExternalActionState.DISPATCHING:
             return action
@@ -1357,6 +1360,10 @@ class SQLAlchemyConnectorReceiptRepository:
             ConnectorActionReceiptRecord,
             (connector_binding_id, idempotency_key),
         )
+        if record is not None:
+            from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
+
+            await require_live_detail(self._session, "receipt", record.receipt_id)
         return None if record is None else _receipt_to_domain(record)
 
     async def add_or_get(self, receipt: ConnectorActionReceipt) -> ConnectorReceiptInsertResult:
