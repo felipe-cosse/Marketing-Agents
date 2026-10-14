@@ -39,6 +39,11 @@ from marketing_agents.api.routes.approvals import router as approvals_router
 from marketing_agents.api.routes.artifacts import router as artifacts_router
 from marketing_agents.api.routes.artifacts import run_router as run_artifacts_router
 from marketing_agents.api.routes.audit_events import router as audit_events_router
+from marketing_agents.api.routes.campaign_briefs import (
+    CampaignBriefExecutor,
+    CampaignBriefRequestBoundsMiddleware,
+)
+from marketing_agents.api.routes.campaign_briefs import router as campaign_briefs_router
 from marketing_agents.api.routes.catalog import router as catalog_router
 from marketing_agents.api.routes.demo_scenarios import (
     DemoScenarioRequestBoundsMiddleware,
@@ -61,6 +66,11 @@ from marketing_agents.api.routes.runs import (
 )
 from marketing_agents.api.routes.runs import external_action_router as runtime_actions_router
 from marketing_agents.api.routes.runs import router as runs_router
+from marketing_agents.api.routes.schedules import (
+    ScheduleControlExecutor,
+    ScheduleControlRequestBoundsMiddleware,
+)
+from marketing_agents.api.routes.schedules import router as schedules_router
 from marketing_agents.api.routes.session import router as session_router
 from marketing_agents.api.routes.webhooks import WebhookRequestBoundsMiddleware
 from marketing_agents.api.routes.webhooks import router as webhooks_router
@@ -88,6 +98,8 @@ def create_app(
     audit_resource_service: AuditResourceExecutor | None = None,
     demo_scenario_registry: DemoScenarioRegistryExecutor | None = None,
     run_cancellation_service: RunCancellationExecutor | None = None,
+    schedule_control_service: ScheduleControlExecutor | None = None,
+    campaign_brief_service: CampaignBriefExecutor | None = None,
 ) -> FastAPI:
     active_settings = settings or get_settings()
     application = FastAPI(
@@ -124,6 +136,8 @@ def create_app(
     application.state.run_cancellation_service = run_cancellation_service
     application.state.artifact_resource_service = artifact_resource_service
     application.state.audit_resource_service = audit_resource_service
+    application.state.schedule_control_service = schedule_control_service
+    application.state.campaign_brief_service = campaign_brief_service
     application.state.catalog_query_service = (
         catalog_query_service
         if catalog_query_service is not None
@@ -145,6 +159,8 @@ def create_app(
     application.add_middleware(RunCancellationRequestBoundsMiddleware)
     application.add_middleware(DemoScenarioRequestBoundsMiddleware)
     application.add_middleware(InstanceConfigurationRequestBoundsMiddleware)
+    application.add_middleware(ScheduleControlRequestBoundsMiddleware)
+    application.add_middleware(CampaignBriefRequestBoundsMiddleware)
     application.add_middleware(WebhookRequestBoundsMiddleware)
     application.add_middleware(ApprovalPrivateResponseMiddleware)
     application.add_middleware(Api07PrivateResponseMiddleware)
@@ -156,6 +172,8 @@ def create_app(
     application.include_router(health_router)
     application.include_router(session_router)
     application.include_router(instance_configuration_router)
+    application.include_router(schedules_router)
+    application.include_router(campaign_briefs_router)
     application.include_router(manual_work_router)
     application.include_router(demo_scenarios_router)
     application.include_router(webhooks_router)

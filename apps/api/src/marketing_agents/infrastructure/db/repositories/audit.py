@@ -363,6 +363,14 @@ class SQLAlchemyAuditRepository:
             and event.aggregate_type == "agent_instance_configuration"
             for event in events
         )
+        campaign_brief_event = len(events) == 1 and all(
+            event.run_id is None
+            and event.schedule_id is None
+            and event.occurrence_id is None
+            and event.event_type == "campaign_brief.created"
+            and event.aggregate_type == "campaign_brief"
+            for event in events
+        )
         ingress_rejection_event = len(events) == 1 and all(
             event.run_id is None
             and event.schedule_id is None
@@ -406,6 +414,7 @@ class SQLAlchemyAuditRepository:
         if not (
             scheduler_batch
             or instance_configuration_event
+            or campaign_brief_event
             or ingress_rejection_event
             or webhook_batch
         ):

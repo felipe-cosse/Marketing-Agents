@@ -448,12 +448,10 @@ async def test_ac_12_populated_0008_upgrade_adds_only_null_evidence_and_preserve
     try:
         await seed_legacy(database)
         before = await legacy_state(database)
-        assert await upgrade_database(database) == HEAD_REVISION == "0009"
+        assert await upgrade_database(database, "0009") == "0009"
         for table, added in NEW_COLUMNS.items():
             after = await rows(database, table)
             assert after == tuple({**row, **dict.fromkeys(added)} for row in before[table])
-        async with database.engine.connect() as connection:
-            assert await connection.run_sync(schema_matches_metadata)
         async with database.session_factory() as session:
             repository = SQLAlchemyScheduleRepository(session)
             assert await repository.get(schedule().id) == schedule(recorded=False)
@@ -463,10 +461,15 @@ async def test_ac_12_populated_0008_upgrade_adds_only_null_evidence_and_preserve
             await session.commit()
         # Hydration and exact replay must not invent snapshots or rewrite old hashes.
         after = await legacy_state(database)
-        assert await upgrade_database(database) == HEAD_REVISION
+        assert await upgrade_database(database, "0009") == "0009"
         assert await legacy_state(database) == after
         for table, added in NEW_COLUMNS.items():
             assert after[table] == tuple({**row, **dict.fromkeys(added)} for row in before[table])
+        # EXEC-05: keep the exact historical 0008→0009 assertions above; later audit
+        # constraints belong to current head, not recurrence migration evidence.
+        assert await upgrade_database(database) == HEAD_REVISION
+        async with database.engine.connect() as connection:
+            assert await connection.run_sync(schema_matches_metadata)
     finally:
         await database.dispose()
 

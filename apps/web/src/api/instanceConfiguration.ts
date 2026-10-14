@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import {
   clearLocalSession as clearSharedLocalSession,
   fetchLocalSession as fetchSharedLocalSession,
@@ -183,28 +184,12 @@ export interface ScheduledInput {
   readonly executionMode: "dry_run";
 }
 
-export interface InstanceTriggerBinding {
-  readonly type: SupportedTriggerType;
-  readonly enabled: boolean;
-  readonly eventSource: string | null;
-  readonly cron: string | null;
-  readonly timezone: string | null;
-  readonly misfirePolicy: MisfirePolicy | null;
-  readonly misfireGraceSeconds: number | null;
-}
+export type InstanceTriggerBinding =
+  ApiView<"marketing_agents__api__schemas__instance_configuration__TriggerBindingView">;
 
-export interface InstanceConnectorBinding {
-  readonly connectorFamily: string;
-  readonly bindingId: string;
-  readonly enabled: boolean;
-}
+export type InstanceConnectorBinding = ApiView<"ConnectorBindingView">;
 
-export interface InstanceSchedule {
-  readonly cron: string;
-  readonly timezone: string;
-  readonly misfirePolicy: MisfirePolicy;
-  readonly misfireGraceSeconds: number;
-}
+export type InstanceSchedule = ApiView<"ScheduleBindingView">;
 
 export interface InstanceConfigurationResult {
   readonly projectionVersion: "instance-configuration-v1";

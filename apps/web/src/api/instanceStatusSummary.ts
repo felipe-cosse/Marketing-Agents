@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import { ApiRequestError } from "./client";
 
 const STATUS_SUMMARY_PATH = "/api/v1/agent-instances/status-summary";
@@ -43,22 +44,10 @@ export type RunState =
 
 export type InstanceRuntimeState = "never_run" | RunState;
 
-export interface InstanceRuntimeStatus {
-  readonly instanceId: string;
-  readonly status: InstanceRuntimeState;
-  readonly latestRunId: string | null;
-  readonly latestRunState: RunState | null;
-  readonly latestRunCreatedAt: string | null;
-  readonly latestRunUpdatedAt: string | null;
-  readonly instanceUrl: string;
-  readonly latestRunUrl: string | null;
-}
+export type InstanceRuntimeStatus =
+  ApiView<"marketing_agents__api__schemas__runs__InstanceRuntimeStatusView">;
 
-export interface InstanceStatusSummary {
-  readonly scope: "single-local-installation";
-  readonly runtimeWatermark: string;
-  readonly items: readonly InstanceRuntimeStatus[];
-}
+export type InstanceStatusSummary = ApiView<"InstanceStatusSummaryResponse">;
 
 export interface FetchInstanceStatusSummaryOptions {
   readonly previous?: InstanceStatusSummary;

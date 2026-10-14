@@ -1,6 +1,6 @@
 """DEL-04: frozen schema-only upgrades and failure-safe SQLite migration ownership."""
 
-# AC-12 extends the frozen migration inventory and successor checks through revision 0009.
+# EXEC-05 extends the frozen migration inventory through audit revision 0010.
 
 from __future__ import annotations
 
@@ -88,6 +88,7 @@ REVISION_TABLES = {
     "0007": set(),
     "0008": set(),
     "0009": set(),
+    "0010": set(),
 }
 ALL_TABLES = set().union(*REVISION_TABLES.values())
 SENTINEL_HASH = "catalog-sha256-v1:" + "b" * 64
@@ -151,7 +152,7 @@ async def test_del_04_fresh_upgrade_is_schema_only_and_matches_all_metadata(
     monkeypatch.setattr(Base.metadata, "create_all", forbidden_create_all)
     runtime = _runtime(tmp_path / "fresh.db")
     try:
-        assert await upgrade_database(runtime) == HEAD_REVISION == "0009"
+        assert await upgrade_database(runtime) == HEAD_REVISION == "0010"
         async with runtime.engine.connect() as connection:
             tables = set(await connection.run_sync(lambda sync: inspect(sync).get_table_names()))
             assert len(ALL_TABLES) == 46
@@ -184,6 +185,7 @@ async def test_del_04_fresh_upgrade_is_schema_only_and_matches_all_metadata(
         ("0006", "0007"),
         ("0007", "0008"),
         ("0008", "0009"),
+        ("0009", "0010"),
     ],
 )
 @pytest.mark.asyncio

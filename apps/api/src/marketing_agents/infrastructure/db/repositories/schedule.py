@@ -558,6 +558,58 @@ class SQLAlchemyScheduleRepository:
         record = await self._session.get(ScheduleRecord, schedule_id)
         return None if record is None else _to_domain(record)
 
+    async def list_configuration_owned(
+        self, *, after_id: str | None, limit: int
+    ) -> tuple[Schedule, ...]:
+        """Bounded stable control-plane page; hydrate through existing integrity checks."""
+        if type(limit) is not int or not 1 <= limit <= 101:
+            raise ValueError("schedule page limit must be from 1 through 101")
+        if after_id is not None:
+            require_id(after_id, "schedule page boundary")
+        statement = select(ScheduleRecord).where(ScheduleRecord.configuration_revision.is_not(None))
+        if after_id is not None:
+            statement = statement.where(ScheduleRecord.id > after_id)
+        records = (
+            await self._session.execute(statement.order_by(ScheduleRecord.id).limit(limit))
+        ).scalars()
+        return tuple(_to_domain(record) for record in records)
+
+    async def list_occurrences(
+        self,
+        schedule_id: str,
+        *,
+        after: tuple[datetime, str] | None,
+        limit: int,
+    ) -> tuple[ScheduleOccurrence, ...]:
+        """Historical keyset page; reads never claim, advance or admit an occurrence."""
+        require_id(schedule_id, "occurrence page schedule")
+        if type(limit) is not int or not 1 <= limit <= 101:
+            raise ValueError("occurrence page limit must be from 1 through 101")
+        statement = select(ScheduleOccurrenceRecord).where(
+            ScheduleOccurrenceRecord.schedule_id == schedule_id
+        )
+        if after is not None:
+            due, identifier = after
+            require_utc(due, "occurrence page boundary time")
+            require_id(identifier, "occurrence page boundary ID")
+            statement = statement.where(
+                or_(
+                    ScheduleOccurrenceRecord.scheduled_for_utc > due,
+                    and_(
+                        ScheduleOccurrenceRecord.scheduled_for_utc == due,
+                        ScheduleOccurrenceRecord.id > identifier,
+                    ),
+                )
+            )
+        records = (
+            await self._session.execute(
+                statement.order_by(
+                    ScheduleOccurrenceRecord.scheduled_for_utc, ScheduleOccurrenceRecord.id
+                ).limit(limit)
+            )
+        ).scalars()
+        return tuple(_occurrence_to_domain(record) for record in records)
+
     async def compare_and_swap_configuration(
         self,
         previous: Schedule,
