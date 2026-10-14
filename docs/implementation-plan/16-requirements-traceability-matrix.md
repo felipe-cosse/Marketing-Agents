@@ -177,7 +177,7 @@ Allowed status values:
 | EXEC-04 | State machine/approval/mocks next. | Live ordered M3–M5 qualification; restart/artifact/audit witness; `docs/verification/requirements/EXEC-04.md` | verified |
 | EXEC-05 | APIs and org-chart control surface. | M7–M8 API/control-surface qualification; `docs/verification/requirements/EXEC-05.md` | implemented |
 | EXEC-06 | Demos/tooling/docs. | M8–M9 demo/retention/telemetry controls; complete source-bound qualification required; `docs/verification/requirements/EXEC-06.md` | implemented |
-| EXEC-07 | Complete clean-state verification. | `make verify-clean` | planned |
+| EXEC-07 | Complete clean-state verification. | Exact HEAD clean-state/demo controls; complete quality, fresh Compose and paired-backup execution required; `docs/verification/requirements/EXEC-07.md` | implemented |
 | EXEC-08 | Report files/commands/results/assumptions without overclaim. | `docs/verification.md` + handoff | planned |
 
 ## Maintenance rule
