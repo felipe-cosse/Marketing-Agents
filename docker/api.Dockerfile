@@ -1,4 +1,5 @@
 # DEL-05: immutable acquisition, then a non-root, mock-only local runtime.
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS verification-node
 FROM ghcr.io/astral-sh/uv:0.10.7@sha256:edd1fd89f3e5b005814cc8f777610445d7b7e3ed05361f9ddfae67bebfe8456a AS uv
 FROM python:3.12.14-slim-bookworm@sha256:782412e85d0f0984994c290652577d4018aff08145c85b262bb63dc0c7522254 AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
@@ -18,9 +19,12 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python3
 
 FROM dependencies AS verification
+# EXEC-07: backend inventory contracts execute the real dependency-free Node module.
+COPY --from=verification-node /usr/local/bin/node /usr/local/bin/node
 RUN apt-get update && apt-get install --yes --no-install-recommends make git && apt-get clean
 RUN uv sync --frozen --no-install-project --python /usr/local/bin/python3
 COPY --chown=10001:10001 . /app
+RUN node --input-type=module -e 'import { readFileSync } from "node:fs"; import { readBrowserInventory } from "./apps/web/scripts/browser-evidence-inventory.mjs"; if (process.versions.node !== readFileSync(".nvmrc", "utf8").trim()) throw new Error("verification_node_version_mismatch"); readBrowserInventory("./apps/web");'
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/apps/api/src:/app \
     UV_OFFLINE=1 UV_NO_SYNC=1
 USER 10001:10001
