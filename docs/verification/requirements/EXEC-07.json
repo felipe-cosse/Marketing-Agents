@@ -1,0 +1,108 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-07",
+  "matrix_statement_sha256": "e3e98113af8cab47433556b0cc74763e568e146e631e9397f8a561234f1de575",
+  "evidence_class": "process_gate",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "scripts/del_05_runtime_smoke.py",
+      "tests/tooling/test_exec_07_product_gate.py",
+      "tests/tooling/test_exec_07_runtime_smoke.py",
+      "docs/testing.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/EXEC-07.*"
+    ],
+    "required_path_groups": [
+      {"kind": "control", "one_of": ["Makefile"]},
+      {"kind": "control", "one_of": ["scripts/del_05_runtime_smoke.py"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_exec_07_product_gate.py"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_exec_07_runtime_smoke.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "complete-head-clean-state-entrypoint",
+      "type": "contract",
+      "statement": "The EXEC-07 entrypoint invokes the existing complete clean-state journey serially for committed HEAD, overrides an older caller REF and propagates failure. It preserves fresh owned storage, public startup, frozen builds, reseed, replay/restart, offline suites, browser smoke, source reconciliation and scoped cleanup with existing deadlines.",
+      "test_refs": ["tests/tooling/test_exec_07_product_gate.py"]
+    },
+    {
+      "id": "nonvacuous-email-approval-evidence",
+      "type": "negative_control",
+      "statement": "The smoke checks the exact five unique scenario IDs and reviewed write counts before admitting runs. Email evidence requires two zero-attempt actions before approval and after the first approval, followed by one successful delivery per action after both. Read-only substitutes, duplicates and malformed classifications cannot establish success. Replay preserves original evidence and identities without claiming a new preapproval observation.",
+      "test_refs": ["tests/tooling/test_exec_07_runtime_smoke.py"]
+    },
+    {
+      "id": "actual-clean-and-paired-backup-journeys",
+      "type": "journey",
+      "statement": "The actual clean-state command and separate scoped Compose paired-backup round-trip must both succeed against the committed candidate. Focused controls, prior reports or a host-only pass are not replacements. The clean journey retains all nine phases and its 1620-second execution plus 120-second cleanup budgets; backup retains its own unchanged bounds.",
+      "test_refs": ["tests/tooling/test_exec_07_product_gate.py", "tests/tooling/test_exec_07_runtime_smoke.py"]
+    },
+    {
+      "id": "fresh-complete-source-bound-quality",
+      "type": "contract",
+      "statement": "A separately observed successful unchanged AC-16 complete 20-gate run must qualify the same committed tree before merge, including full backend/frontend inventories, 17 safety-coverage modules and 16 browser runners. The short audit requires the matching external source-bound record; consistency alone does not authenticate execution.",
+      "test_refs": ["tests/tooling/test_exec_07_product_gate.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-07-control-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_exec_07_product_gate.py"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["complete-head-clean-state-entrypoint"]
+    },
+    {
+      "id": "exec-07-runtime-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_exec_07_runtime_smoke.py", "tests/tooling/test_del_05_clean_state_http.py", "tests/tooling/test_del_05_clean_state.py", "tests/tooling/test_ac_01_public_startup.py", "tests/tooling/test_ac_01_environment.py", "tests/tooling/test_ac_01_browser_evidence.py"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": ["nonvacuous-email-approval-evidence", "complete-head-clean-state-entrypoint"]
+    },
+    {
+      "id": "exec-07-source-bound-quality-audit",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.ac_16_quality", "audit"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["fresh-complete-source-bound-quality"]
+    },
+    {
+      "id": "exec-07-complete-clean-state",
+      "runner": "argv",
+      "argv": ["make", "-j1", "verify-exec-07"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["complete-head-clean-state-entrypoint", "nonvacuous-email-approval-evidence", "actual-clean-and-paired-backup-journeys"]
+    },
+    {
+      "id": "exec-07-paired-compose-backup",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-05-compose-backup"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["actual-clean-and-paired-backup-journeys"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["Makefile"],
+    "gate_id": "exec-07-control-regressions"
+  },
+  "limitations": [
+    "Focused controls and a same-tree local record are not independently authenticated execution. The complete committed candidate requires observed successful full quality, actual clean-state and paired-backup executions before requesting merge; reports remain outside Git.",
+    "Image/dependency acquisition may contact registries. Backend and prebuilt test containers use network-none, but static web ingress retains a disclosed operating-system outbound route. Browser requests are limited to the exact local origin; this is not an all-container firewall claim.",
+    "Qualification targets SQLite, local identity and deterministic mock adapters. Optional PostgreSQL skips do not qualify PostgreSQL, live providers, real external delivery, production authentication, cloud deployment or production RPO/RTO.",
+    "Restart replay carries the earlier observed Email preapproval proof and checks durable identities; it does not newly observe preapproval after completed actions. Backup uses only owned synthetic fixture data and test key material.",
+    "This is not a literal make acceptance invocation, a fresh AC-15 four-suite kernel-isolation run, DEL-01 completion or EXEC-08 final attestation. CI remains disabled, checkpoints are preserved, and no main merge is authorized by these records."
+  ]
+}

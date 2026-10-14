@@ -388,6 +388,10 @@ verify-exec-05:
 verify-exec-06:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.ac_16_quality run
 
+.PHONY: verify-exec-07
+verify-exec-07:
+	$(MAKE) -j1 verify-clean REF=HEAD
+
 audit-ac-16:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.ac_16_quality audit
 

@@ -48,6 +48,7 @@ ignored caches or build output.
 | `make verify-clean REF=HEAD` | Exact committed export, fresh Docker storage, deployed demos/replay, offline suites, production browser smoke, owned cleanup. Does not test uncommitted edits. |
 | `make verify` | Ordered catalog-first local static, repository, network, backend coverage, frontend and full browser gates, then source-drift comparison. Stops at the first failure. |
 | `make verify-exec-06` | The unchanged complete AC-16 source-bound quality run: all 20 gates, 17 safety-coverage modules, and 16 browser runners. Requires clean committed source; no partial selector or replacement command. |
+| `make verify-exec-07` | The complete clean-state journey for committed `HEAD`, through the unchanged `verify-clean` command. A caller-supplied `REF` cannot select an older commit. Full host quality and paired Compose backup/restore remain separately required. |
 | `make test` | Catalog validation, full backend discovery, network canaries, frontend units and full browser journeys, sequential even under parallel Make. Static/coverage enforcement belongs to `verify`. |
 | `make test-frontend` / `make test-e2e` | Frontend unit suite / all 16 owned browser runners, including OBJ-06. New unowned, missing, empty or filtered browser inventory fails closed. |
 | `make test-contract` / `make test-integration` | Independently runnable Python contract / integration directories. Empty pytest collection fails. |
@@ -101,6 +102,40 @@ Compose storage and paired backup/restore. Do not promote a host quality pass to
 AC-15 kernel-isolation, clean-state, real-provider, or complete-release acceptance.
 CI remains disabled by operator direction; this target neither enables nor
 dispatches a GitHub workflow. Checkpoint branches are not altered by verification.
+
+## EXEC-07 clean-state qualification boundary
+
+```sh
+make verify-exec-07
+```
+
+This serial alias runs the existing complete `verify-clean` journey against
+committed `HEAD`; it does not accept an older `REF` as qualification. It preserves
+the 1,620-second execution and 120-second cleanup budgets, fresh project-owned
+storage, credential-free public startup, frozen builds, idempotent seed,
+restart/replay checks, prebuilt offline suites and production browser smoke.
+The demo smoke requires the exact five unique scenario IDs and their reviewed
+external-write counts before creating runs. Email evidence requires observed
+zero attempts before approval and after only the first approval, then one
+successful delivery per action after both approvals. A read-only substitute
+cannot establish that evidence. Restart replay preserves run and receipt IDs;
+its preapproval result is historical evidence from the original run, not a new
+preapproval observation.
+
+For a readable report, pass `REPORT=<new-absolute-path-outside-repository>`; its
+parent must exist and the report path must not already exist. Without `REPORT`,
+the complete sanitized report is printed to stdout. The requirement verifier
+records a hash of each actual gate's output and stores its attestation outside
+Git; that record is trusted-local evidence, not independent authentication.
+
+EXEC-07 also requires a freshly observed complete AC-16 run on the same committed
+tree, its matching source-bound audit, and the actual paired Compose backup
+round-trip. The manifest invokes the clean and backup journeys, not just their
+unit tests. The short wrapper controls and a historical report cannot substitute
+for those executions. See the [EXEC-07 evidence contract](verification/requirements/EXEC-07.md).
+Do not report this as a literal `make acceptance` invocation, a new four-suite
+AC-15 kernel-isolation pass, live-provider qualification, or EXEC-08 completion.
+No target enables CI or modifies checkpoint branches.
 
 ## Network boundaries and optional compatibility
 
