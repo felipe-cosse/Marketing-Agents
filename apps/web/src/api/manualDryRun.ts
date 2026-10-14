@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import {
   assertLocalJsonResponse,
   LocalApiRequestError,
@@ -42,22 +43,9 @@ export interface CreateManualDryRunInput {
   readonly signal?: AbortSignal;
 }
 
-export interface ManualDryRunReceipt {
-  readonly status: "accepted";
-  readonly disposition: "created" | "replayed";
-  readonly eventId: string;
-  readonly workId: string;
-  readonly runId: string;
-  readonly executionMode: ManualDryRunExecutionMode;
-  readonly instanceUrl: string;
-  readonly runUrl: string;
-}
+export type ManualDryRunReceipt = ApiView<"ManualDryRunResponse">;
 
-export interface ManualDryRunFieldError {
-  readonly pointer: string;
-  readonly code: string;
-  readonly message: string;
-}
+export type ManualDryRunFieldError = ApiView<"ManualWorkRequestFieldError">;
 
 export class ManualDryRunRequestError extends Error {
   readonly status: number;

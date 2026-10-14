@@ -194,8 +194,9 @@ DEL-05 record qualified its revision `0006`. Evidence:
 
 Claim: Implemented but not live-tested by this documentation review — the
 committed [migration head](../apps/api/src/marketing_agents/infrastructure/db/migrations.py)
-is [revision `0009`](../apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0009_recurrence_resolution_snapshots.py),
-which adds recurrence-resolution snapshots after `0008`. This is a current source
+is [revision `0010`](../apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0010_campaign_brief_creation_audit.py),
+which extends two audit CHECK constraints for standalone campaign-brief creation
+after `0009` (EXEC-05). This is a current source
 fact, not a fresh migration run or PostgreSQL qualification. Historical migration
 results remain attached to the revisions and environments that produced them.
 

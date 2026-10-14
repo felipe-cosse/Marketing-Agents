@@ -125,6 +125,7 @@ _WEBHOOK_RATE_LIMIT_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | frozenset(
     {"retry_after_seconds"}
 )
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
+    "campaign_brief.created": frozenset({"new_revision"}),
     "ingress.manual_received": _MANUAL_WORK_AUDIT_FIELDS,
     "ingress.rate_limited": _WEBHOOK_RATE_LIMIT_AUDIT_FIELDS,
     "ingress.schema_rejected": _SCHEMA_REJECTION_AUDIT_FIELDS,

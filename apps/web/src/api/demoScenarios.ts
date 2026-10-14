@@ -1,3 +1,4 @@
+import type { ApiView } from "./apiContract";
 import {
   assertLocalJsonResponse,
   localApiResponseError,
@@ -112,30 +113,13 @@ export interface DemoJsonObject {
   readonly [key: string]: DemoJsonValue;
 }
 
-export interface DemoScenario {
-  readonly id: string;
-  readonly version: number;
-  readonly displayName: string;
-  readonly description: string;
-  readonly workflowId: string;
-  readonly effect: "read_only" | "mutating";
-  readonly mode: "deterministic_mock";
-  readonly selectedAgents: readonly {
-    readonly templateId: string;
-    readonly instanceId: string;
-  }[];
+export type DemoScenario = Omit<
+  ApiView<"DemoScenarioView">,
+  "inputSchema" | "preset"
+> & {
   readonly inputSchema: DemoJsonObject;
   readonly preset: DemoJsonObject;
-  readonly safeSubmitVerb: string;
-  readonly expected: {
-    readonly statePath: readonly string[];
-    readonly modelCalls: number;
-    readonly connectorCalls: number;
-    readonly externalActions: number;
-    readonly approvals: number;
-    readonly externalWrites: number;
-  };
-}
+};
 
 export interface CreateDemoScenarioRunInput {
   readonly scenarioId: string;
@@ -146,19 +130,7 @@ export interface CreateDemoScenarioRunInput {
   readonly signal?: AbortSignal;
 }
 
-export interface DemoScenarioRunReceipt {
-  readonly status: "accepted";
-  readonly disposition: "created" | "replayed";
-  readonly scenarioId: string;
-  readonly eventId: string;
-  readonly workId: string;
-  readonly runId: string;
-  readonly executionMode: "dry_run" | "mock_execute";
-  readonly instanceUrl: string;
-  readonly runUrl: string;
-  readonly timelineUrl: string;
-  readonly artifactsUrl: string;
-}
+export type DemoScenarioRunReceipt = ApiView<"DemoScenarioRunResponse">;
 
 export class DemoScenarioRequestError extends Error {
   readonly status: number;

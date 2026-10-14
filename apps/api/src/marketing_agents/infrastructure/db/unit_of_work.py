@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from marketing_agents.application.ports.campaign_briefs import CampaignBriefRepository
 from marketing_agents.application.ports.instance_configuration import (
     InstanceConfigurationRepository,
 )
@@ -60,6 +61,7 @@ class RepositoryBundle:
     artifacts: ArtifactRepository | None = None
     schedules: ScheduleRepository | None = None
     webhook_receipts: WebhookReceiptRepository | None = None
+    campaign_briefs: CampaignBriefRepository | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +78,7 @@ class SQLAlchemyRepositoryFactories:
     artifacts: Callable[[AsyncSession], ArtifactRepository] | None = None
     schedules: Callable[[AsyncSession], ScheduleRepository] | None = None
     webhook_receipts: Callable[[AsyncSession], WebhookReceiptRepository] | None = None
+    campaign_briefs: Callable[[AsyncSession], CampaignBriefRepository] | None = None
 
     def build(self, session: AsyncSession) -> RepositoryBundle:
         return RepositoryBundle(
@@ -99,6 +102,7 @@ class SQLAlchemyRepositoryFactories:
             ),
             artifacts=None if self.artifacts is None else self.artifacts(session),
             schedules=None if self.schedules is None else self.schedules(session),
+            campaign_briefs=None if self.campaign_briefs is None else self.campaign_briefs(session),
         )
 
 
@@ -130,6 +134,13 @@ class SQLAlchemyUnitOfWork:
         if self._repositories is None:
             raise SQLAlchemyUnitOfWorkError("unit of work has not been entered")
         return self._repositories
+
+    @property
+    def campaign_briefs(self) -> CampaignBriefRepository:
+        repository = self._require_repositories().campaign_briefs
+        if repository is None:
+            raise SQLAlchemyUnitOfWorkError("campaign brief repository is not configured")
+        return repository
 
     @property
     def works(self) -> WorkRepository:

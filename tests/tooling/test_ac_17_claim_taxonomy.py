@@ -78,7 +78,8 @@ class ClaimTaxonomyTests(unittest.TestCase):
         # These independently reviewed expectations are not generated from the
         # checker's contracts; source mutations below must invalidate the docs.
         self.assertEqual(16, original["browser_runners"])
-        self.assertEqual("0009", original["migration_head"])
+        # EXEC-05 adds standalone brief audit shapes at the reviewed revision 0010.
+        self.assertEqual("0010", original["migration_head"])
         self.assertEqual(43, original["instances"])
         self.assertIs(False, original["acceptance_verified"])
 
@@ -294,8 +295,8 @@ class ClaimTaxonomyTests(unittest.TestCase):
     def test_ac_17_source_migration_head_drift_invalidates_current_revision(self) -> None:
         self.rewrite(
             "apps/api/src/marketing_agents/infrastructure/db/migrations.py",
-            'HEAD_REVISION = "0009"',
             'HEAD_REVISION = "0010"',
+            'HEAD_REVISION = "0011"',
         )
         self.reject("ac17_claim:migration")
 
@@ -303,17 +304,17 @@ class ClaimTaxonomyTests(unittest.TestCase):
         path = self.root / "apps/api/src/marketing_agents/infrastructure/db/migrations.py"
         original = path.read_text()
         additions = (
-            'HEAD_REVISION = "0010"',
+            'HEAD_REVISION = "0011"',
             "HEAD_REVISION = choose_revision()",
-            'HEAD_REVISION: str = "0010"',
+            'HEAD_REVISION: str = "0011"',
             "HEAD_REVISION: str",
             'HEAD_REVISION += "1"',
-            'HEAD_REVISION, other = ("0010", None)',
-            'other = HEAD_REVISION = "0010"',
+            'HEAD_REVISION, other = ("0011", None)',
+            'other = HEAD_REVISION = "0011"',
             "del HEAD_REVISION",
-            '(HEAD_REVISION := "0010")',
-            'if condition:\n    HEAD_REVISION = "0010"',
-            'def nested():\n    HEAD_REVISION = "0010"',
+            '(HEAD_REVISION := "0011")',
+            'if condition:\n    HEAD_REVISION = "0011"',
+            'def nested():\n    HEAD_REVISION = "0011"',
             "def nested(HEAD_REVISION):\n    pass",
             "def HEAD_REVISION():\n    pass",
             "class HEAD_REVISION:\n    pass",
@@ -324,9 +325,9 @@ class ClaimTaxonomyTests(unittest.TestCase):
             "try:\n    pass\nexcept Exception as HEAD_REVISION:\n    pass",
             'match value:\n    case {"head": HEAD_REVISION}:\n        pass',
             "match value:\n    case {**HEAD_REVISION}:\n        pass",
-            'module.HEAD_REVISION = "0010"',
+            'module.HEAD_REVISION = "0011"',
             'HEAD_REVISION[0] = "1"',
-            'globals()["HEAD_REVISION"] = "0010"',
+            'globals()["HEAD_REVISION"] = "0011"',
         )
         for addition in additions:
             with self.subTest(mutation=addition):
@@ -338,15 +339,15 @@ class ClaimTaxonomyTests(unittest.TestCase):
         path = self.root / "apps/api/src/marketing_agents/infrastructure/db/migrations.py"
         original = path.read_text()
         for binding in (
-            'HEAD_REVISION: str = "0009"',
+            'HEAD_REVISION: str = "0010"',
             "HEAD_REVISION = compute_revision()",
-            'HEAD_REVISION = "000" + "9"',
-            "HEAD_REVISION = 1009",
-            'if condition:\n    HEAD_REVISION = "0009"',
-            'OTHER = HEAD_REVISION = "0009"',
+            'HEAD_REVISION = "001" + "0"',
+            "HEAD_REVISION = 1010",
+            'if condition:\n    HEAD_REVISION = "0010"',
+            'OTHER = HEAD_REVISION = "0010"',
         ):
             with self.subTest(binding=binding):
-                path.write_text(original.replace('HEAD_REVISION = "0009"', binding))
+                path.write_text(original.replace('HEAD_REVISION = "0010"', binding))
                 self.reject("ac17_migration_source")
         path.write_text(original)
 
@@ -355,7 +356,7 @@ class ClaimTaxonomyTests(unittest.TestCase):
         path.write_text(
             path.read_text() + '\nraise RuntimeError("product_source_must_not_execute")\n'
         )
-        self.assertEqual("0009", claims.verify(self.root)["migration_head"])
+        self.assertEqual("0010", claims.verify(self.root)["migration_head"])
 
     def test_ac_17_evidence_must_be_linked_from_the_relevant_section(self) -> None:
         cases = (
