@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from marketing_agents.config import get_settings
 from marketing_agents.workers.runtime.composition import build_runtime
+from marketing_agents.workers.runtime.retention import RetentionWorker
 from marketing_agents.workers.runtime.run_loop import RunWorker
 from marketing_agents.workers.runtime.scheduler import SchedulerWorker
 
@@ -40,6 +41,7 @@ async def run_process(kind: Literal["run", "scheduler"], args: argparse.Namespac
     runtime = await build_runtime(get_settings())
     worker_id = args.worker_id or f"worker.{kind}.{uuid4().hex}"
     worker = RunWorker(runtime, worker_id) if kind == "run" else SchedulerWorker(runtime, worker_id)
+    retention = RetentionWorker(runtime, worker_id) if kind == "scheduler" else None
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -47,13 +49,18 @@ async def run_process(kind: Literal["run", "scheduler"], args: argparse.Namespac
         worker.stop_claiming()
         stopping.set()
 
+    async def drain() -> None:
+        await worker.drain_once()
+        if retention is not None and not stopping.is_set():
+            await retention.drain_once()
+
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop)
     try:
         _health(args.health_file, worker_id, "ready")
         print(json.dumps({"service": kind, "worker_id": worker_id, "status": "ready"}), flush=True)
         while not stopping.is_set():
-            advancement = asyncio.create_task(worker.drain_once())
+            advancement = asyncio.create_task(drain())
             stop_waiter = asyncio.create_task(stopping.wait())
             try:
                 done, _ = await asyncio.wait(

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from marketing_agents.application.ports.clock import Clock
 from marketing_agents.application.ports.id_generator import IdGenerator
 from marketing_agents.application.ports.unit_of_work import UnitOfWork, UnitOfWorkFactory
+from marketing_agents.domain.audit import AuditContext
+from marketing_agents.domain.retention import RetentionPolicy
+from marketing_agents.security.digest_key import DigestKey
+
+if TYPE_CHECKING:
+    from marketing_agents.application.services.audit_events import AuditEventFactory
 
 
 class OrchestrationDependencyError(ValueError):
@@ -19,6 +26,22 @@ class OrchestrationDependencies:
     clock: Clock
     ids: IdGenerator
     unit_of_work_factory: UnitOfWorkFactory
+    retention_policy: RetentionPolicy = field(default_factory=RetentionPolicy)
+
+    def audit_factory(
+        self,
+        context: AuditContext,
+        *,
+        configuration_pseudonym_key: DigestKey | None = None,
+    ) -> AuditEventFactory:
+        """Carry this runtime's explicit policy into every new audit fact."""
+        from marketing_agents.application.services.audit_events import AuditEventFactory
+
+        return AuditEventFactory(
+            context,
+            retention_policy=self.retention_policy,
+            configuration_pseudonym_key=configuration_pseudonym_key,
+        )
 
     def utc_now(self) -> datetime:
         value = self.clock.now()

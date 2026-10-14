@@ -48,10 +48,48 @@ Read-only completion follows `received → validated → planned → executing �
 Email adds `awaiting_approval` before execution. Invalid input, rejection,
 cancellation, and terminal failure are not successful completion.
 
+## Submit one preset from the command line
+
+The commands below run from the repository root with Python 3.12 and an already
+started local stack. They use the same five committed
+[synthetic fixtures](../tests/fixtures/demos/) as the UI. No package install or
+provider credential is needed for this stdlib-only client. For native `make dev`,
+replace `http://127.0.0.1:8080` with `http://127.0.0.1:5173`; for a custom Compose
+port, use that exact loopback origin.
+
+The [single-preset client](../scripts/demo_local.py) checks readiness, local
+identity, mock model/connector modes, disabled external network permission, exact
+catalog counts, and the source fixture against discovery before submitting. It
+fetches the process-local token from `GET /api/v1/session`, then sends an
+authenticated same-origin `POST /api/v1/demo-scenarios/{id}/runs` with
+`X-CSRF-Token`, `Origin`, `Sec-Fetch-Site`, `Idempotency-Key`, and the fixed fixture
+under `overrides`. Local identity is the server's fixed local operator; there is
+no caller-supplied identity header or credential. Proxies and redirects cannot
+widen the client's explicit loopback destination. It accepts no arbitrary input
+file, personal-data override, or campaign brief.
+
+Output contains only bounded IDs/status and a relative `run_url`; `accepted_only`
+means admission, **not completion**. Open **Runs & audit** and inspect that run's
+authoritative timeline/artifacts, or GET the returned `run_url` at the same local
+origin. The Email command **never approves**: review and decide both actions in
+the UI using the walkthrough below. The other four commands need no approval.
+
+Each example has a separate synthetic retry key. Repeating the identical command
+against the same installation recovers its idempotent receipt, including a run
+that has already completed. Keep the key unchanged after a timeout/failed
+response; inspect existing runs before deciding to start fresh work. To explicitly
+create another run, choose a new 8–240-character visible ASCII key without spaces
+or personal data. The client never prints the key, token, or fixture payload.
+
 ## Social content draft
 
 Scenario ID: `demo.social-media.content-draft.v1`. Select **Social content draft**;
 the page heading is **Social idea to draft artifact**.
+
+```sh
+python3 -m scripts.demo_local --origin http://127.0.0.1:8080 \
+  --scenario demo.social-media.content-draft.v1 --idempotency-key walkthrough-social-0001
+```
 
 - Input: `idea`, `audience`, `tone`, and `key_points`; optional `call_to_action`
   and `source_urls`. The preset discusses governed AI workflows for marketing
@@ -72,6 +110,11 @@ the page heading is **Social idea to draft artifact**.
 
 Scenario ID: `demo.blog-seo.content-review.v1`. Select **Blog & SEO content review**;
 the heading is **Blog metadata to SEO/content review**.
+
+```sh
+python3 -m scripts.demo_local --origin http://127.0.0.1:8080 \
+  --scenario demo.blog-seo.content-review.v1 --idempotency-key walkthrough-blog-0001
+```
 
 - Input: `article_title`, `canonical_url`, `supplied_excerpt`, `last_updated_at`,
   `assessment_at`, `target_keywords`, and `current_product_metadata` containing
@@ -96,6 +139,11 @@ Scenario ID: `demo.email.signup-onboarding.v1`. Select **Email signup onboarding
 the heading is **Email signup approval boundary**. This scenario uses
 `mock_execute`, not live execution: representational writes still require exact
 human approval even though both connectors are mocks.
+
+```sh
+python3 -m scripts.demo_local --origin http://127.0.0.1:8080 \
+  --scenario demo.email.signup-onboarding.v1 --idempotency-key walkthrough-email-0001
+```
 
 The preset supplies synthetic `contact_id`, `name`, `email`, a fixed
 `newsletter_list_ref`, `consent`, `signup_at`, and `welcome_context`. It uses
@@ -149,6 +197,11 @@ completed worker run or mock connector side effects.
 Scenario ID: `demo.community.reminder-draft.v1`. Select **Community reminder draft**;
 the heading is **Event signup to reminder draft**.
 
+```sh
+python3 -m scripts.demo_local --origin http://127.0.0.1:8080 \
+  --scenario demo.community.reminder-draft.v1 --idempotency-key walkthrough-community-0001
+```
+
 - Input: `event_id`, `event_name`, `signup_event_id`, `admitted_source`, `signup_at`,
   `session_local_start`, `session_timezone`, `reminder_offset_minutes`,
   `attendee_display_name`, `channel_label`, and `event_details`. Use the complete
@@ -176,6 +229,11 @@ separate source instance sharing the template, not an invented cohort or channel
 Scenario ID: `demo.partnerships.application-review.v1`. Select **Partnership
 application review**; the heading is **Partner application to advisory review**.
 
+```sh
+python3 -m scripts.demo_local --origin http://127.0.0.1:8080 \
+  --scenario demo.partnerships.application-review.v1 --idempotency-key walkthrough-partner-0001
+```
+
 - Input: `applicant_id`, `organization_metadata`, `declared_capabilities`,
   `declared_regions`, `evidence_records`, `program_criteria`, `program_constraints`,
   and `missing_information_indicators`. The preset organization is Northstar
@@ -196,6 +254,36 @@ application review**; the heading is **Partner application to advisory review**.
 [browser intake tests](../apps/web/e2e/demo-05-partnership-review.spec.ts).
 
 ## Reproduce checks and understand limits
+
+### All-five deployed smoke: explicit synthetic approval authority
+
+The existing deployed smoke command is different from the individual commands
+above. Run it only against an **owned fresh synthetic test installation** where
+you intend to approve the two synthetic Email actions:
+
+```sh
+python3 -m scripts.del_05_runtime_smoke demos --origin http://127.0.0.1:8080
+```
+
+**Deterministic mock behavior:** this harness submits all five safe presets,
+waits for Email planning, and **automatically records both approvals as the local
+operator** using the current immutable payload hashes. It requires local/mock/
+offline session settings first; it does not enable live execution or send mail.
+This is deliberate test authority, not an unattended approval recommendation for
+real business work. Its fixed retry keys make it unsuitable for creating repeated
+fresh runs in an existing installation; the documented replay subcommand requires
+the original smoke report and checks the same run/action identities after restart.
+
+The smoke checks zero delivery attempts/receipts before approval and after the
+first decision, then one successful attempt and receipt per action. Its report's
+`email_preapproval_zero_calls` field does **not** independently measure model
+calls. Zero model calls before both approvals is separate
+[Email acceptance-test evidence](../tests/acceptance/test_email_signup_demo.py).
+Neither this smoke nor the single-preset client is a substitute for the complete
+source-bound `make verify-clean REF=<commit>` / `make acceptance REF=<commit>`
+release gates. These instructions do not claim a fresh Docker acceptance result.
+
+### Focused regression commands
 
 After the native dependencies are bootstrapped, the existing deterministic demo
 and browser entry points are:

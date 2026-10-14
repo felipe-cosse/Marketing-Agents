@@ -16,6 +16,7 @@ from marketing_agents.domain.audit import (
 )
 from marketing_agents.domain.entities import ExternalAction, Run, RunStep
 from marketing_agents.domain.enums import Effect, ExternalActionState, RunState, StepState
+from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.run_lifecycle import (
     FailureContext,
     RunFailurePhase,
@@ -57,6 +58,9 @@ class TerminalExecutionCleanupResult:
 
 class TerminalExecutionCleanupService:
     """Close all unstarted work and fail one executing plan atomically."""
+
+    def __init__(self, retention_policy: RetentionPolicy | None = None) -> None:
+        self._retention_policy = retention_policy or RetentionPolicy()
 
     async def fail_runtime_control_in_uow(
         self,
@@ -335,7 +339,7 @@ class TerminalExecutionCleanupService:
                 "Run changed before terminal cleanup committed",
             )
 
-        factory = AuditEventFactory(audit_context)
+        factory = AuditEventFactory(audit_context, retention_policy=self._retention_policy)
         audit_events = (
             *(
                 factory.action_runtime_cancelled(previous, cancelled)

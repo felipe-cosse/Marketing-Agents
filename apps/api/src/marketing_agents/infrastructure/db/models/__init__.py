@@ -37,6 +37,7 @@ from .execution_control import (
 )
 from .instance_configuration import AgentInstanceConfigurationRecord
 from .maintenance import MaintenanceRunRecord
+from .retention import RetentionDetailRecord
 from .run import RunRecord, RunStateTransitionRecord
 from .run_claim import RunWorkerClaimRecord
 from .schedule import ScheduleOccurrenceRecord, ScheduleRecord
@@ -81,6 +82,7 @@ __all__ = [
     "LocalRuntimeIdentityRecord",
     "MaintenanceRunRecord",
     "RateLimitWindowRecord",
+    "RetentionDetailRecord",
     "RunExecutionControlRecord",
     "RunPlanRecord",
     "RunPlanRoutingAssignmentRecord",

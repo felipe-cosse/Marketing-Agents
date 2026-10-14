@@ -12,6 +12,7 @@ from contextlib import contextmanager
 import uvicorn
 
 from marketing_agents.config import get_settings
+from marketing_agents.observability.logging import safe_server_logging_config
 from marketing_agents.workers.runtime.composition import RuntimeNotReady, build_runtime
 from marketing_agents.workers.runtime.unix_listener import unix_listener
 
@@ -45,6 +46,7 @@ async def serve() -> None:
                 host=settings.api_host,
                 port=settings.api_port,
                 access_log=False,
+                log_config=safe_server_logging_config(),
                 proxy_headers=False,
                 timeout_graceful_shutdown=20,
             )

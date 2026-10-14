@@ -45,6 +45,7 @@ from marketing_agents.domain.enums import RunState, StepState, TriggerKind, Work
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
 from marketing_agents.domain.identity import AuthenticatedPrincipal
 from marketing_agents.domain.provenance import ArtifactEnvelope
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import (
     CompletionContext,
     NoRunTransitionContext,
@@ -334,6 +335,8 @@ class DemoRunService:
         async with self._dependencies.unit_of_work() as unit_of_work:
             run = await unit_of_work.runs.get(run_id)
             work = None if run is None else await unit_of_work.works.get(run.work_item_id)
+            if isinstance(work, RetainedWorkItem):
+                raise DetailExpired("work", work.id)
         if run is None or work is None:
             raise DemoRunServiceError("demo_run_unavailable", "demo Run is unavailable")
         scenario = self._registry.get(work.workflow_id)

@@ -47,6 +47,7 @@ ignored caches or build output.
 | `make test-del-05-compose-backup` | Scoped Docker round-trip into new storage, distinct from the startup smoke. |
 | `make verify-clean REF=HEAD` | Exact committed export, fresh Docker storage, deployed demos/replay, offline suites, production browser smoke, owned cleanup. Does not test uncommitted edits. |
 | `make verify` | Ordered catalog-first local static, repository, network, backend coverage, frontend and full browser gates, then source-drift comparison. Stops at the first failure. |
+| `make verify-exec-06` | The unchanged complete AC-16 source-bound quality run: all 20 gates, 17 safety-coverage modules, and 16 browser runners. Requires clean committed source; no partial selector or replacement command. |
 | `make test` | Catalog validation, full backend discovery, network canaries, frontend units and full browser journeys, sequential even under parallel Make. Static/coverage enforcement belongs to `verify`. |
 | `make test-frontend` / `make test-e2e` | Frontend unit suite / all 16 owned browser runners, including OBJ-06. New unowned, missing, empty or filtered browser inventory fails closed. |
 | `make test-contract` / `make test-integration` | Independently runnable Python contract / integration directories. Empty pytest collection fails. |
@@ -75,6 +76,31 @@ the remaining backend tests, and both contribute to one measured report.
 Nested verification commands inherit offline/frozen dependency settings. The
 acceptance precondition compares committed blob bytes, executable bits and
 symlink targets directly, independent of Git's index change-detection hints.
+
+## EXEC-06 qualification boundary
+
+```sh
+make verify-exec-06
+```
+
+This entry point invokes the existing frozen/offline `scripts.ac_16_quality run`
+wrapper directly. It retains every gate, coverage threshold, network control,
+browser runner, and deadline, including the 1,800-second backend and browser
+deadlines. It records the exact committed source tree and a fresh local report;
+report consistency is not authenticated execution evidence. The
+[gate regressions](../tests/tooling/test_exec_06_product_gate.py) exercise the live
+Make connection and failure forwarding, not a substitute partial verifier.
+
+**Acceptance target not yet verified:** adding the command, passing focused
+regressions, or inspecting an old report does not establish a current full pass.
+The current candidate's observed results belong in the
+[verification record](verification.md). Full local quality is distinct from the
+four isolated clean-export suites and from
+`make verify-clean REF=<commit>` / `make acceptance REF=<commit>` with fresh
+Compose storage and paired backup/restore. Do not promote a host quality pass to
+AC-15 kernel-isolation, clean-state, real-provider, or complete-release acceptance.
+CI remains disabled by operator direction; this target neither enables nor
+dispatches a GitHub workflow. Checkpoint branches are not altered by verification.
 
 ## Network boundaries and optional compatibility
 

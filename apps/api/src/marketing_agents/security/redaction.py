@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.data_classification import DataClassification
+from marketing_agents.observability.context import observe_redaction
 
 REDACTED = "[REDACTED]"
 SENSITIVE_KEY_FRAGMENTS = (
@@ -197,10 +198,13 @@ def redact(
 ) -> Any:
     """Return a recursively redacted copy without mutating the source value."""
     if _schema_requires_redaction(schema):
+        observe_redaction("schema")
         return REDACTED
     if field_name is not None and is_sensitive_key(field_name):
+        observe_redaction("field")
         return REDACTED
     if isinstance(value, SecretValue):
+        observe_redaction("secret")
         return REDACTED
     if isinstance(value, Mapping):
         return {
@@ -277,6 +281,7 @@ def _mask_pointer(value: Any, tokens: tuple[str, ...], pointer: str) -> Any:
     if value == REDACTED:
         return REDACTED
     if not tokens:
+        observe_redaction("pointer")
         return REDACTED
     token, remaining = tokens[0], tokens[1:]
     if isinstance(value, dict):

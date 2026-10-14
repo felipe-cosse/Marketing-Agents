@@ -18,6 +18,7 @@ from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.enums import Effect, RunState, StepState
 from marketing_agents.domain.provenance import ArtifactEnvelope, ProvenanceSource, ProviderVersion
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.runtime_policy import (
     AttemptKind,
     canonical_payload_size_bytes,
@@ -29,8 +30,6 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 from marketing_agents.domain.validation import require_id
-
-from .audit_events import AuditEventFactory
 
 
 class LocalArtifactRenderer(Protocol):
@@ -75,6 +74,8 @@ class LocalArtifactExecutor:
             run = await uow.runs.get(step.run_id)
             plan = await uow.run_steps.get_plan(step.run_id)
             work = None if run is None else await uow.works.get(run.work_item_id)
+            if isinstance(work, RetainedWorkItem):
+                raise DetailExpired("work", work.id)
             control = await uow.execution_control.get(step.run_id)
             if run is None or plan is None or work is None or control is None:
                 raise LocalArtifactExecutionError("local_execution_snapshot_missing")
@@ -214,7 +215,7 @@ class LocalArtifactExecutor:
                 ):
                     raise LocalArtifactExecutionError("local_step_fence_lost")
             await uow.artifacts.add_or_get(artifact)
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             await uow.audits.append_many(
                 (
                     factory.step_transition(started.step, started.transition),

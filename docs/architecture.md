@@ -73,6 +73,7 @@ enforces inward dependencies with an
 - `infrastructure`: SQLAlchemy persistence, catalog compilation, and concrete adapters.
 - `api`: FastAPI transport and server-owned identity/application composition.
 - `workers`: executable composition, bounded run advancement, and scheduling.
+- `observability`: bounded local diagnostic projections, never execution authority or an exporter.
 - `apps/web/src`: presentation and API transport; no direct database access.
 
 The dependency checker proves its static import rules, not arbitrary reflection,
@@ -194,11 +195,20 @@ DEL-05 record qualified its revision `0006`. Evidence:
 
 Claim: Implemented but not live-tested by this documentation review — the
 committed [migration head](../apps/api/src/marketing_agents/infrastructure/db/migrations.py)
-is [revision `0010`](../apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0010_campaign_brief_creation_audit.py),
-which extends two audit CHECK constraints for standalone campaign-brief creation
-after `0009` (EXEC-05). This is a current source
+is [revision `0011`](../apps/api/src/marketing_agents/infrastructure/db/alembic/versions/0011_retention_details.py),
+which adds immutable retention expiry tracking, maintenance occurrence scope and
+the count-only retention audit shape after `0010` (EXEC-06). This is a current source
 fact, not a fresh migration run or PostgreSQL qualification. Historical migration
 results remain attached to the revisions and environments that produced them.
+
+The scheduler process also runs one bounded retention batch per UTC minute.
+Maintenance has its own durable occurrence, lease and transaction: it cannot
+admit work or authorize a connector. Safe historical identities are available
+through authenticated `/api/v1/retained-details/{record_kind}/{record_id}` reads;
+deleted execution detail is not reconstructed as a live entity. See
+[data handling](data-handling.md), [local telemetry](observability.md), and the
+[EXEC-06 review](verification/requirements/EXEC-06.md). These runtime additions
+require the candidate's full qualification; source wiring alone is not a pass.
 
 Claim: Implemented but not live-tested — optional PostgreSQL support uses the
 `postgresql` dependency extra, an explicit `postgresql+asyncpg` URL, repository/UoW

@@ -737,6 +737,7 @@ async def test_del_07_transition_audit_sequence_is_independently_bound(kind: str
         ("authority", "approval_authority_snapshot_mismatch"),
         ("missing", "approval_decision_audit_missing"),
         ("mismatch", "approval_decision_audit_mismatch"),
+        ("approval_mismatch", "approval_decision_audit_mismatch"),
     ],
 )
 @pytest.mark.asyncio
@@ -749,8 +750,13 @@ async def test_del_07_release_rechecks_human_authority_and_decision_audits(
     elif fault == "missing":
         del fixture.events[("external_action", fixture.action.id, 3)]
     else:
+        key = (
+            ("approval_request", fixture.request.id, 2)
+            if fault == "approval_mismatch"
+            else ("external_action", fixture.action.id, 3)
+        )
         _corrupt(
-            fixture.events[("external_action", fixture.action.id, 3)].draft,
+            fixture.events[key].draft,
             correlation_id="other.correlation",
         )
     with pytest.raises(boundary.ApprovalBoundaryServiceError) as failure:
@@ -758,6 +764,44 @@ async def test_del_07_release_rechecks_human_authority_and_decision_audits(
             fixture.uow, fixture.approved, fixture.approved_action
         )
     assert failure.value.code == code
+    fixture.uow.commit.assert_not_awaited()
+    fixture.uow.audits.append_many.assert_not_awaited()
+    fixture.uow.execution_control.start_execution.assert_not_awaited()
+
+
+@pytest.mark.parametrize("kind", ["action", "approval"])
+@pytest.mark.asyncio
+async def test_exec_06_release_rejects_integrity_valid_nonauthoritative_decision_audit(
+    kind: str,
+) -> None:
+    fixture = _approved_fixture()
+    alternate_decision = replace(fixture.approved.decision, correlation_id="other.correlation")
+    alternate_approval = replace(fixture.approved, decision=alternate_decision)
+    factory = AuditEventFactory(
+        AuditContext.authenticated_user(
+            alternate_decision.actor_id,
+            authentication_method=alternate_decision.authentication_method,
+            correlation_id=alternate_decision.correlation_id,
+        )
+    )
+    draft = (
+        factory.action_decided(fixture.action, fixture.approved_action, alternate_approval)
+        if kind == "action"
+        else factory.approval_decided(fixture.stored, alternate_approval, fixture.approved_action)
+    )
+    draft.verify_integrity()
+    _store_events(fixture, draft)
+
+    with pytest.raises(boundary.ApprovalBoundaryServiceError) as failure:
+        await fixture.service._require_release_decision_witnesses(
+            fixture.uow, fixture.approved, fixture.approved_action
+        )
+
+    assert failure.value.code == "approval_decision_audit_mismatch"
+    assert failure.value.run_id == fixture.run.id
+    fixture.uow.commit.assert_not_awaited()
+    fixture.uow.audits.append_many.assert_not_awaited()
+    fixture.uow.execution_control.start_execution.assert_not_awaited()
 
 
 @pytest.mark.parametrize("fault", ["missing", "mismatch"])

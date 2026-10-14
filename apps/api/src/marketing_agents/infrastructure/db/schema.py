@@ -9,11 +9,17 @@ from typing import Any
 
 from sqlalchemy import CheckConstraint, Column, UniqueConstraint, inspect, literal, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.sql.schema import Constraint, Index
 
 from .base import Base
 
-_SQL_TOKEN = re.compile(r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`[^`]*`|\[[^\]]*\]|\s+|.", re.S)
+# Group whole unquoted spans so their whitespace can be collapsed in one pass.
+# The final single-character branch preserves unmatched quote/bracket openers.
+_SQL_TOKEN = re.compile(
+    r"'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|`[^`]*`|\[[^\]]*\]|[^'\"`\[]+|.",
+    re.S,
+)
 
 
 def _normalized_sql(value: object | None) -> str | None:
@@ -27,8 +33,8 @@ def _normalized_sql(value: object | None) -> str | None:
             tokens.append(token)
         elif token.startswith(('"', "`", "[")):
             tokens.append(token[1:-1].casefold())
-        elif not token.isspace():
-            tokens.append(token.casefold())
+        else:
+            tokens.append("".join(token.split()).casefold())
     return "".join(tokens)
 
 
@@ -107,8 +113,9 @@ def _postgres_default_matches(
     return _postgres_expressions_match(connection, table_name, [(expected, str(default))])
 
 
-def _mapped_constraints_are_compatible(connection: Connection, table_name: str) -> bool:
-    inspector = inspect(connection)
+def _mapped_constraints_are_compatible(
+    connection: Connection, table_name: str, inspector: Inspector
+) -> bool:
     table = Base.metadata.tables[table_name]
     actual_primary = inspector.get_pk_constraint(table_name)
     if _constraint_name(connection, table.primary_key) != str(actual_primary.get("name")) or tuple(
@@ -240,6 +247,8 @@ def schema_matches_metadata(connection: Connection, *, exact_tables: bool = True
     Migration currency itself is checked separately by the migration inspector.
     """
 
+    # Reuse reflection only inside this comparison. A later call must reflect
+    # again, including when the caller retains the same database connection.
     inspector = inspect(connection)
     actual_tables = set(inspector.get_table_names()) - {"alembic_version"}
     expected_tables = set(Base.metadata.tables)
@@ -288,6 +297,6 @@ def schema_matches_metadata(connection: Connection, *, exact_tables: bool = True
             )
             if _normalized_default(actual.get("default")) != expected_default:
                 return False
-        if not _mapped_constraints_are_compatible(connection, table_name):
+        if not _mapped_constraints_are_compatible(connection, table_name, inspector):
             return False
     return True
