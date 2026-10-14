@@ -388,6 +388,10 @@ verify-exec-05:
 verify-exec-06:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.ac_16_quality run
 
+.PHONY: verify-exec-07
+verify-exec-07:
+	$(MAKE) -j1 verify-clean REF=HEAD
+
 audit-ac-16:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.ac_16_quality audit
 
@@ -447,8 +451,9 @@ logs:
 dev:
 	.venv/bin/python scripts/dev.py --state-dir "$(LOCAL_STATE)"
 
-# OBJ-04: explicit native-only qualification. Python-only backend images do not
-# contain Node/Corepack/Vite; missing native prerequisites must fail, not skip.
+# OBJ-04: explicit native-only qualification. The backend verification image's
+# standalone Node serves inventory checks, not the Corepack/Vite native toolchain.
+# Missing native prerequisites must fail, not skip.
 verify-native-offline:
 	PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q \
 		tests/tooling/obj_04_corepack_offline.py \

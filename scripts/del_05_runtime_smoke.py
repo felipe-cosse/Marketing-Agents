@@ -15,6 +15,15 @@ import urllib.request
 from pathlib import Path
 
 API_SOCKET = "/var/run/marketing-agents/api.sock"
+# Independent deployed-smoke contract: a response cannot redefine which demo
+# must cross the approval barrier, or replace it with another read-only demo.
+EXPECTED_SCENARIOS = {
+    "demo.blog-seo.content-review.v1": 0,
+    "demo.community.reminder-draft.v1": 0,
+    "demo.email.signup-onboarding.v1": 2,
+    "demo.partnerships.application-review.v1": 0,
+    "demo.social-media.content-draft.v1": 0,
+}
 
 
 class SmokeFailure(RuntimeError):
@@ -135,16 +144,124 @@ def safe_session(client: LocalClient) -> dict:
 
 
 def action_summary(run: dict) -> list[dict]:
-    return [
-        {key: action[key] for key in ("id", "state", "delivery_attempt_count", "receipt_id")}
-        for action in run["external_actions"]
-    ]
+    actions = run.get("external_actions") if type(run) is dict else None
+    require(type(actions) is list, "demo_action_summary_invalid")
+    fields = ("id", "state", "delivery_attempt_count", "receipt_id")
+    require(
+        all(
+            type(action) is dict
+            and all(field in action for field in fields)
+            and type(action["id"]) is str
+            and bool(action["id"])
+            and type(action["state"]) is str
+            and type(action["delivery_attempt_count"]) is int
+            and action["delivery_attempt_count"] >= 0
+            and (
+                action["receipt_id"] is None
+                or (type(action["receipt_id"]) is str and bool(action["receipt_id"]))
+            )
+            for action in actions
+        ),
+        "demo_action_summary_invalid",
+    )
+    return [{key: action[key] for key in fields} for action in actions]
+
+
+def validate_scenario_inventory(scenarios: object) -> list[dict]:
+    require(type(scenarios) is list and len(scenarios) == 5, "expected_five_demos")
+    seen = set()
+    for scenario in scenarios:
+        require(type(scenario) is dict, "demo_inventory_mismatch")
+        scenario_id = scenario.get("id")
+        require(
+            type(scenario_id) is str
+            and scenario_id in EXPECTED_SCENARIOS
+            and scenario_id not in seen,
+            "demo_inventory_mismatch",
+        )
+        expected = scenario.get("expected")
+        writes = expected.get("externalWrites") if type(expected) is dict else None
+        require(
+            type(writes) is int and writes == EXPECTED_SCENARIOS[scenario_id],
+            "demo_write_classification_mismatch",
+        )
+        seen.add(scenario_id)
+    require(seen == set(EXPECTED_SCENARIOS), "demo_inventory_mismatch")
+    return scenarios
+
+
+def validate_completed_actions(actions: list[dict], expected_writes: int) -> None:
+    if not expected_writes:
+        require(actions == [], "read_demo_external_actions")
+        return
+    require(
+        len(actions) == 2
+        and len({item["id"] for item in actions}) == 2
+        and len({item["receipt_id"] for item in actions}) == 2,
+        "email_expected_two_receipts",
+    )
+    require(
+        all(
+            item["state"] == "succeeded"
+            and item["delivery_attempt_count"] == 1
+            and item["receipt_id"]
+            for item in actions
+        ),
+        "email_expected_one_call_each",
+    )
+
+
+def validate_replay(replay: object, session: dict) -> dict[str, dict]:
+    """Validate the prior local witness before any replay admission request.
+
+    This checks report consistency, not authenticity. The coordinator supplies
+    its just-observed fresh-run result; an arbitrary caller can forge JSON.
+    """
+    require(
+        type(replay) is dict
+        and replay.get("email_preapproval_zero_calls") is True
+        and type(replay.get("restart_replay")) is bool
+        and replay.get("session") == session["session"]
+        and replay.get("counts") == session["counts"]
+        and replay.get("ok", True) is True,
+        "invalid_demo_replay_witness",
+    )
+    summaries = replay.get("demos")
+    require(type(summaries) is list and len(summaries) == 5, "invalid_demo_replay_witness")
+    indexed = {}
+    run_ids = set()
+    for summary in summaries:
+        require(type(summary) is dict, "invalid_demo_replay_witness")
+        scenario_id = summary.get("scenario")
+        run_id = summary.get("run_id")
+        require(
+            type(scenario_id) is str
+            and scenario_id in EXPECTED_SCENARIOS
+            and scenario_id not in indexed
+            and type(run_id) is str
+            and bool(run_id)
+            and run_id not in run_ids
+            and summary.get("state") == "completed",
+            "invalid_demo_replay_witness",
+        )
+        actions = action_summary({"external_actions": summary.get("actions")})
+        validate_completed_actions(actions, EXPECTED_SCENARIOS[scenario_id])
+        indexed[scenario_id] = summary
+        run_ids.add(run_id)
+    require(set(indexed) == set(EXPECTED_SCENARIOS), "invalid_demo_replay_witness")
+    return indexed
 
 
 def exercise_demos(client: LocalClient, *, replay: dict | None = None) -> dict:
     result = safe_session(client)
-    scenarios = client.request("/api/v1/demo-scenarios")["items"]
-    require(len(scenarios) == 5, "expected_five_demos")
+    inventory = client.request("/api/v1/demo-scenarios")
+    scenarios = validate_scenario_inventory(
+        inventory.get("items") if type(inventory) is dict else None
+    )
+    previous_summaries = {} if replay is None else validate_replay(replay, result)
+    email_before_zero = False
+    email_partial_zero = False
+    email_completed_once = False
     summaries = []
     for scenario in scenarios:
         scenario_id = scenario["id"]
@@ -154,26 +271,40 @@ def exercise_demos(client: LocalClient, *, replay: dict | None = None) -> dict:
             key="del-05-clean-" + hashlib.sha256(scenario_id.encode()).hexdigest(),
         )
         run_path = receipt["runUrl"]
-        previous = (
-            None
-            if replay is None
-            else next(item for item in replay["demos"] if item["scenario"] == scenario_id)
-        )
+        previous = previous_summaries.get(scenario_id)
         if previous is not None:
             require(receipt["runId"] == previous["run_id"], "restart_duplicate_run")
-        mutating = scenario["expected"]["externalWrites"] > 0
+        mutating = EXPECTED_SCENARIOS[scenario_id] > 0
         if mutating and replay is None:
             run = client.wait(run_path, "awaiting_approval")
-            require(len(run["external_actions"]) == 2, "email_expected_two_actions")
-            require(len(run["pending_approvals"]) == 2, "email_expected_two_approvals")
+            pending_actions = action_summary(run)
+            pending_action_ids = {action["id"] for action in pending_actions}
+            require(
+                len(pending_actions) == len(pending_action_ids) == 2,
+                "email_expected_two_actions",
+            )
+            pending_approvals = run.get("pending_approvals")
+            require(
+                type(pending_approvals) is list
+                and len(pending_approvals) == 2
+                and all(
+                    type(approval) is dict
+                    and type(approval.get("approval_url")) is str
+                    and bool(approval["approval_url"])
+                    for approval in pending_approvals
+                )
+                and len({approval["approval_url"] for approval in pending_approvals}) == 2,
+                "email_expected_two_approvals",
+            )
             require(
                 all(
                     action["delivery_attempt_count"] == 0 and action["receipt_id"] is None
-                    for action in run["external_actions"]
+                    for action in pending_actions
                 ),
                 "email_preapproval_calls",
             )
-            approvals = tuple(run["pending_approvals"])
+            email_before_zero = True
+            approvals = tuple(pending_approvals)
             for index, pending in enumerate(approvals):
                 approval = client.request(pending["approval_url"])
                 client.request(
@@ -186,32 +317,28 @@ def exercise_demos(client: LocalClient, *, replay: dict | None = None) -> dict:
                 if index == 0:
                     after_one = client.request(run_path)
                     require(after_one["state"] == "awaiting_approval", "email_partial_release")
+                    after_one_actions = action_summary(after_one)
                     require(
-                        all(
+                        len(after_one_actions) == 2
+                        and {action["id"] for action in after_one_actions} == pending_action_ids
+                        and all(
                             action["delivery_attempt_count"] == 0 and action["receipt_id"] is None
-                            for action in after_one["external_actions"]
+                            for action in after_one_actions
                         ),
                         "email_calls_after_one_approval",
                     )
+                    email_partial_zero = True
         run = client.wait(run_path, "completed")
         require(bool(run["artifact_summaries"]), "demo_missing_artifact")
         actions = action_summary(run)
+        validate_completed_actions(actions, EXPECTED_SCENARIOS[scenario_id])
         if mutating:
-            require(
-                len(actions) == 2 and len({item["receipt_id"] for item in actions}) == 2,
-                "email_expected_two_receipts",
-            )
-            require(
-                all(
-                    item["state"] == "succeeded"
-                    and item["delivery_attempt_count"] == 1
-                    and item["receipt_id"]
-                    for item in actions
-                ),
-                "email_expected_one_call_each",
-            )
-        else:
-            require(actions == [], "read_demo_external_actions")
+            if replay is None:
+                require(
+                    {action["id"] for action in actions} == pending_action_ids,
+                    "email_completed_action_identity_changed",
+                )
+            email_completed_once = True
         if previous is not None:
             require(actions == previous["actions"], "restart_duplicate_action")
         summaries.append(
@@ -224,7 +351,13 @@ def exercise_demos(client: LocalClient, *, replay: dict | None = None) -> dict:
         )
     result["demos"] = summaries
     result["email_preapproval_zero_calls"] = (
-        replay is None or replay["email_preapproval_zero_calls"]
+        (email_before_zero and email_partial_zero)
+        if replay is None
+        else replay["email_preapproval_zero_calls"]
+    ) and email_completed_once
+    require(
+        result["email_preapproval_zero_calls"],
+        "email_approval_observation_incomplete",
     )
     result["restart_replay"] = replay is not None
     return result

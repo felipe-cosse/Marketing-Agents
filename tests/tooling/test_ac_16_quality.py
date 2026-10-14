@@ -11,7 +11,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -24,6 +23,10 @@ from scripts.del_05_offline_diagnostics import (
     AC16_DIAGNOSTIC_MAX_DELTA,
     AC16_DIAGNOSTIC_PREFIX,
 )
+
+SYNTHETIC_STARTED_NS = 1_700_000_000_000_000_000
+SYNTHETIC_ARTIFACT_NS = SYNTHETIC_STARTED_NS + 1_000_000_000
+SYNTHETIC_FINISHED_NS = SYNTHETIC_STARTED_NS + 2_000_000_000
 
 
 def reviewed_gates(coverage: Path) -> tuple[runner.Gate, ...]:
@@ -193,7 +196,6 @@ class QualityRecordTests(unittest.TestCase):
         )
 
     def fixture_report(self) -> tuple[dict, dict]:
-        started = time.time_ns()
         directory = Path(tempfile.mkdtemp(prefix="report-", dir=self.artifacts))
         observed = [
             {"name": gate.name, "status": "passed", "returncode": 0, "elapsed_ms": 1}
@@ -229,8 +231,8 @@ class QualityRecordTests(unittest.TestCase):
             "valid": True,
             "trust": quality.TRUST,
             "source": copy.deepcopy(self.identity),
-            "started_ns": started,
-            "finished_ns": started,
+            "started_ns": SYNTHETIC_STARTED_NS,
+            "finished_ns": SYNTHETIC_FINISHED_NS,
             "tools": self.tools.copy(),
             "plan": plan,
             "observed": observed,
@@ -247,13 +249,22 @@ class QualityRecordTests(unittest.TestCase):
 
     def refresh(self, report: dict, saved: dict | None = None) -> None:
         directory = Path(report["artifact_directory"])
+        self.assertEqual(self.artifacts, directory.parent)
+        self.assertFalse(directory.is_symlink())
         if saved is not None:
             (directory / "verification.json").write_text(json.dumps(saved))
+        # EXEC-07: synthetic evidence owns its clock as well as its bytes. Linux
+        # filesystem write timestamps can precede an immediately sampled wall
+        # clock, so never derive this fixture's freshness from host clock timing.
+        # Production records and their strict freshness predicate stay unchanged.
+        for name in ("verification.json", "coverage.json", ".coverage"):
+            target = directory / name
+            self.assertFalse(target.is_symlink())
+            os.utime(target, ns=(SYNTHETIC_ARTIFACT_NS, SYNTHETIC_ARTIFACT_NS))
         report["artifacts"] = {
             name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
             for name in ("verification.json", "coverage.json", ".coverage")
         }
-        report["finished_ns"] = time.time_ns()
 
     def validate(self, report: dict) -> None:
         with patch.object(quality, "check_coverage", return_value=self.coverage) as checked:
@@ -673,6 +684,42 @@ class QualityRecordTests(unittest.TestCase):
                         target.rename(original)
                         target.symlink_to(original)
                     self.reject(report, "artifact_")
+
+    def test_exec_07_synthetic_fixture_and_refresh_have_explicit_matching_timestamps(self) -> None:
+        report, saved = self.fixture_report()
+        for refresh in (False, True):
+            with self.subTest(refresh=refresh):
+                if refresh:
+                    saved["summary"]["elapsed_ms"] += 1
+                    self.refresh(report, saved)
+                self.assertEqual(SYNTHETIC_STARTED_NS, report["started_ns"])
+                self.assertEqual(SYNTHETIC_FINISHED_NS, report["finished_ns"])
+                for name in ("verification.json", "coverage.json", ".coverage"):
+                    target = Path(report["artifact_directory"]) / name
+                    self.assertEqual(SYNTHETIC_ARTIFACT_NS, target.stat().st_mtime_ns)
+                self.validate(report)
+
+    def test_exec_07_each_artifact_accepts_exact_inclusive_freshness_boundaries(self) -> None:
+        for name in ("verification.json", "coverage.json", ".coverage"):
+            for boundary in (SYNTHETIC_STARTED_NS, SYNTHETIC_FINISHED_NS):
+                with self.subTest(artifact=name, boundary=boundary):
+                    report, _ = self.fixture_report()
+                    target = Path(report["artifact_directory"]) / name
+                    os.utime(target, ns=(boundary, boundary))
+                    self.assertEqual(boundary, target.stat().st_mtime_ns)
+                    self.validate(report)
+
+    def test_exec_07_each_artifact_rejects_one_nanosecond_outside_freshness_boundaries(
+        self,
+    ) -> None:
+        for name in ("verification.json", "coverage.json", ".coverage"):
+            for boundary in (SYNTHETIC_STARTED_NS - 1, SYNTHETIC_FINISHED_NS + 1):
+                with self.subTest(artifact=name, boundary=boundary):
+                    report, _ = self.fixture_report()
+                    target = Path(report["artifact_directory"]) / name
+                    os.utime(target, ns=(boundary, boundary))
+                    self.assertEqual(boundary, target.stat().st_mtime_ns)
+                    self.reject(report, "^artifact_not_fresh$")
 
     def test_artifacts_cannot_be_taken_from_source_tree_or_symlink_directory(self) -> None:
         report, _ = self.fixture_report()
