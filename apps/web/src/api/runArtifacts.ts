@@ -661,6 +661,7 @@ const RUN_RESOURCE_FIELDS = new Set([
   "artifacts_truncated",
   "external_actions",
   "terminal_error",
+  "details_expired",
 ]);
 const PAGE_FIELDS = new Set(["items", "next_cursor"]);
 const BOUND_PAGE_FIELDS = new Set(["run_id", "items", "next_cursor"]);
@@ -2537,6 +2538,7 @@ export function normalizeRunResource(
     ),
     externalActions: Object.freeze(externalActions),
     terminalError,
+    detailsExpired: asBoolean(record.details_expired, "run.details_expired"),
   });
 }
 

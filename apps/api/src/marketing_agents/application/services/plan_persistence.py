@@ -40,7 +40,6 @@ from marketing_agents.domain.step_lifecycle import (
 )
 
 from .approval_records import ApprovalRecordService
-from .audit_events import AuditEventFactory
 from .external_action_registration import ExternalActionRegistrationDisposition
 
 
@@ -227,7 +226,7 @@ class AuditedPlanPersistenceService:
                 stored.steps,
                 expect_inserted=True,
             )
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             plan_event = factory.run_plan_recorded(
                 transition_result.run,
                 transition_result.transition,

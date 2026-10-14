@@ -22,6 +22,7 @@ from marketing_agents.application.services.terminal_execution_cleanup import (
 from marketing_agents.domain.admission import AdmissionEnvelope
 from marketing_agents.domain.audit import AuditContext
 from marketing_agents.domain.enums import RunState, StepState, WorkMode
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import (
     FailureContext,
     RunFailurePhase,
@@ -57,6 +58,10 @@ class RunWorker:
         self.stopping = True
 
     async def drain_once(self) -> bool:
+        with self.runtime.telemetry.bind():
+            return await self._drain_once()
+
+    async def _drain_once(self) -> bool:
         if self.stopping:
             return False
         claim = await self.claims.claim_once(self.worker_id)
@@ -127,6 +132,8 @@ class RunWorker:
         async with dependencies.unit_of_work() as unit_of_work:
             run = await unit_of_work.runs.get(run_id)
             work = None if run is None else await unit_of_work.works.get(run.work_item_id)
+            if isinstance(work, RetainedWorkItem):
+                raise DetailExpired("work", work.id)
         if run is None or work is None or run.state.value not in ACTIVE_STATES:
             return
         # A signed admitted envelope, frozen schema, and exact registry contract
@@ -229,7 +236,9 @@ class RunWorker:
                     None,
                 )
                 if failed_step is not None:
-                    cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                    cleanup = await TerminalExecutionCleanupService(
+                        self.runtime.dependencies.retention_policy
+                    ).fail_execution_in_uow(
                         unit_of_work,
                         run_id=run_id,
                         failed_step_id=failed_step.id,

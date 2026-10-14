@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from marketing_agents.domain.retention import RetentionPolicy
+from marketing_agents.security.digest_key import DigestKey
+
 from .url import parse_database_url
 
 DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000
@@ -66,6 +69,8 @@ def create_database_runtime(
     *,
     echo: bool = False,
     sqlite_busy_timeout_ms: int = DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+    retention_policy: RetentionPolicy | None = None,
+    retention_key: DigestKey | None = None,
 ) -> DatabaseRuntime:
     """Build a lazy async runtime with portable sessions and SQLite connection policy."""
 
@@ -83,10 +88,18 @@ def create_database_runtime(
             file_backed=_is_file_backed_sqlite(url),
             busy_timeout_ms=sqlite_busy_timeout_ms,
         )
+    if retention_policy is not None:
+        # Loading this module installs only an opt-in, per-session transaction hook.
+        from . import retention_tracking  # noqa: F401
     sessions = async_sessionmaker(
         engine,
         class_=AsyncSession,
         autoflush=False,
         expire_on_commit=False,
+        info={
+            "retention_enabled": retention_policy is not None,
+            "retention_policy": retention_policy,
+            "retention_key": retention_key,
+        },
     )
     return DatabaseRuntime(engine=engine, session_factory=sessions)

@@ -27,6 +27,7 @@ from marketing_agents.domain.data_classification import (
     highest_classification,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.domain.validation import require_id, require_utc
 from marketing_agents.security.digest_key import DigestKey
 from marketing_agents.security.redaction import redact_json_pointers
@@ -313,6 +314,8 @@ class ArtifactResourceService:
                         limit=query.limit + 1,
                     )
                 )
+        except DetailExpired:
+            raise
         except (ArtifactRepositoryConflict, TypeError, ValueError, RuntimeError):
             raise ArtifactResourceServiceError(
                 "artifact_record_corrupt",
@@ -385,6 +388,8 @@ class ArtifactResourceService:
                     if stored is None
                     else await unit_of_work.runs.get_inspectable(stored.artifact.provenance.run_id)
                 )
+        except DetailExpired:
+            raise
         except (ArtifactRepositoryConflict, TypeError, ValueError, RuntimeError):
             raise ArtifactResourceServiceError(
                 "artifact_record_corrupt",

@@ -26,7 +26,7 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyWorkRepository,
     create_database_runtime,
 )
-from marketing_agents.infrastructure.db.migrations import upgrade_database
+from marketing_agents.infrastructure.db.migrations import HEAD_REVISION, upgrade_database
 from marketing_agents.infrastructure.db.models.audit import AuditEventRecord
 from marketing_agents.infrastructure.db.models.campaign_brief import CampaignBriefRecord
 from marketing_agents.infrastructure.db.repositories.campaign_briefs import (
@@ -161,7 +161,7 @@ async def test_exec05_brief_create_read_retry_conflict_and_restart(tmp_path):
         await database.dispose()
     restarted = create_database_runtime(f"sqlite+aiosqlite:///{tmp_path / 'briefs.db'}")
     try:
-        assert await upgrade_database(restarted) == "0010"
+        assert await upgrade_database(restarted) == HEAD_REVISION
         service = _service(restarted)
         assert (await service.read(principal=VIEWER, brief_id=identifier)).id == identifier
         replay = await service.create(principal=OPERATOR, command=_command())
@@ -462,7 +462,7 @@ async def test_exec05_brief_migration_preserves_existing_rows_indexes_and_constr
                     for c in inspect(sync).get_check_constraints("audit_events")
                 }
             )
-        assert await upgrade_database(database) == "0010"
+        assert await upgrade_database(database, "0010") == "0010"
         after = await _state(database)
         assert {k: v for k, v in before["rows"].items() if k != "alembic_version"} == {
             k: v for k, v in after["rows"].items() if k != "alembic_version"
@@ -470,7 +470,6 @@ async def test_exec05_brief_migration_preserves_existing_rows_indexes_and_constr
         assert before["indexes"] == after["indexes"]
         assert before["foreign_keys"] == after["foreign_keys"]
         async with database.engine.connect() as connection:
-            assert await connection.run_sync(schema_matches_metadata)
             new_checks = await connection.run_sync(
                 lambda sync: {
                     c["name"]: c["sqltext"]
@@ -485,8 +484,13 @@ async def test_exec05_brief_migration_preserves_existing_rows_indexes_and_constr
         assert new_checks["ck_audit_events_aggregate_links"].endswith(
             old_checks["ck_audit_events_aggregate_links"]
         )
-        assert await upgrade_database(database) == "0010"
+        assert await upgrade_database(database, "0010") == "0010"
         assert await _state(database) == after
+        # Preserve the exact historical 0009→0010 row/index/CHECK assertions;
+        # later additive retention schema belongs only to current-head parity.
+        assert await upgrade_database(database) == HEAD_REVISION
+        async with database.engine.connect() as connection:
+            assert await connection.run_sync(schema_matches_metadata)
         created = await _service(database).create(principal=OPERATOR, command=_command())
         assert created.disposition == "created"
     finally:

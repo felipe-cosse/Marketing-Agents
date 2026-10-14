@@ -33,6 +33,7 @@ from marketing_agents.infrastructure.db.models.step import (
     RunStepRecord,
 )
 from marketing_agents.infrastructure.db.models.work import WorkItemRecord
+from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
 
 _ARTIFACT_FINGERPRINT_DOMAIN = b"marketing-agents:artifact-envelope:persistence:v1\x00"
 
@@ -280,6 +281,7 @@ class SQLAlchemyArtifactRepository:
         return ArtifactInsertResult(artifact, inserted=True)
 
     async def _hydrate(self, record: ArtifactRecord) -> ArtifactEnvelope:
+        await require_live_detail(self._session, "artifact", record.id)
         parent_ids = await self._parent_ids(record.id)
         artifact = _to_domain(record, parent_ids)
         await self._validate_runtime_scope(artifact)

@@ -31,7 +31,11 @@ digest are installation-key integrity-bound. Audit stores only identity/revision
 
 Brief detail uses `RETENTION_ADMITTED_PAYLOAD_DAYS` (default 7 days). After the
 recorded expiry, reads and retries return safe identity/revision/timestamp metadata
-with `expired: true` and `details: null`. This is projection expiry, **not physical
-erasure**: there is no retention sweeper, and restricted database/backup content
-can outlive the TTL. Existing host protection and paired-key backup requirements
-apply. No edit, delete, or later-revision endpoint is provided in this increment.
+with `expired: true` and `details: null` until bounded maintenance erases eligible
+stored detail. After logical erasure, detail reads/retries return `410 detail_expired`;
+the authenticated `/api/v1/retained-details/brief/{id}` resource retains only safe
+identity/timestamps. The original identity remains reserved: retry does not recreate
+the brief. This does not sanitize SQLite pages/WAL, snapshots or backups. See
+[retention and recovery exclusions](data-handling.md#recorded-expiry-and-bounded-retention-maintenance).
+Existing host protection and paired-key backup requirements apply. No edit,
+delete, or later-revision endpoint is provided in this increment.

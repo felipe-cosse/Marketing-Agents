@@ -221,6 +221,23 @@ export function RunTimelinePage(): React.JSX.Element {
         </div>
       </header>
 
+      {run.detailsExpired ? (
+        <section
+          className="run-workspace__state"
+          role="status"
+          aria-labelledby="run-retention-notice"
+        >
+          <strong id="run-retention-notice">
+            Some run details have expired
+          </strong>
+          <p>
+            Retention has removed optional execution details. The run state,
+            sealed plan, and durable audit history remain available below.
+            Missing details do not mean an action never occurred.
+          </p>
+        </section>
+      ) : null}
+
       <div className="run-page__layout">
         <aside className="run-page__sidebar" aria-label="Run details">
           <RunExecutionSnapshot run={run} />

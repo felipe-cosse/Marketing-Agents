@@ -31,7 +31,6 @@ from marketing_agents.application.ports.repositories import (
     ReleaseCallMode,
 )
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
-from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.audit import (
     RUNTIME_CONTROL_DENIAL_CODES,
     TERMINAL_RUNTIME_CONTROL_DENIAL_CODES,
@@ -286,7 +285,7 @@ class ExternalActionDispatcher:
             step = await unit_of_work.run_steps.get(action.step_id)
             if step is None or step.run_id != action.run_id:
                 raise RuntimeError("runtime-control denial action binding is corrupt")
-            event = AuditEventFactory(
+            event = self._dependencies.audit_factory(
                 self._dispatch_audit_context(lease_owner, action)
             ).runtime_control_denied(
                 run_id=action.run_id,
@@ -330,7 +329,9 @@ class ExternalActionDispatcher:
                 and run is not None
                 and run.state is RunState.EXECUTING
             ):
-                cleanup = await TerminalExecutionCleanupService().fail_runtime_control_in_uow(
+                cleanup = await TerminalExecutionCleanupService(
+                    self._dependencies.retention_policy
+                ).fail_runtime_control_in_uow(
                     unit_of_work,
                     run_id=action.run_id,
                     denied_step_id=action.step_id,
@@ -516,7 +517,7 @@ class ExternalActionDispatcher:
                     "call_start_cas_lost",
                     "external action call-start transaction was not acquired",
                 )
-            factory = AuditEventFactory(
+            factory = self._dependencies.audit_factory(
                 self._dispatch_audit_context(
                     lease_owner,
                     started.action,
@@ -768,7 +769,9 @@ class ExternalActionDispatcher:
         cleanup = None
         if result is None and run.state is RunState.EXECUTING:
             assert reason_code is not None
-            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+            cleanup = await TerminalExecutionCleanupService(
+                self._dependencies.retention_policy
+            ).fail_execution_in_uow(
                 unit_of_work,
                 run_id=run.id,
                 failed_step_id=step.id,
@@ -868,7 +871,7 @@ class ExternalActionDispatcher:
                 "write_completion_step_conflict",
                 "WRITE step changed before its external action outcome was committed",
             )
-        factory = AuditEventFactory(
+        factory = self._dependencies.audit_factory(
             audit_context or self._dispatch_audit_context(lease_owner, previous)
         )
         if result is not None:

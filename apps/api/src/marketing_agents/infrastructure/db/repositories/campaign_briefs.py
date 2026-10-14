@@ -18,6 +18,7 @@ from marketing_agents.domain.data_classification import DataClassification
 from marketing_agents.domain.entities import CampaignBrief
 from marketing_agents.domain.validation import frozen_json_mapping
 from marketing_agents.infrastructure.db.models.campaign_brief import CampaignBriefRecord
+from marketing_agents.infrastructure.db.retention_tracking import require_live_detail
 
 
 def _hydrate(record: CampaignBriefRecord) -> CampaignBriefSnapshot:
@@ -78,6 +79,8 @@ class SQLAlchemyCampaignBriefRepository:
 
     async def get(self, brief_id: str) -> CampaignBriefSnapshot | None:
         record = await self._session.get(CampaignBriefRecord, (brief_id, 1))
+        if record is not None:
+            await require_live_detail(self._session, "brief", brief_id)
         return None if record is None else _hydrate(record)
 
     async def add_or_get(self, snapshot: CampaignBriefSnapshot) -> CampaignBriefInsertResult:

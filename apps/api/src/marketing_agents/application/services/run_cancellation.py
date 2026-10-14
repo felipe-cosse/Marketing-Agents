@@ -24,8 +24,6 @@ from marketing_agents.domain.step_lifecycle import (
     transition_step,
 )
 
-from .audit_events import AuditEventFactory
-
 _CANCEL_ACTOR_DOMAIN = b"marketing-agents:execution-cancel-actor:v1\x00"
 
 
@@ -279,7 +277,7 @@ class RunCancellationService:
                     "Run changed before cancellation committed",
                     run_id=run_id,
                 )
-            factory = AuditEventFactory(audit_context)
+            factory = self._dependencies.audit_factory(audit_context)
             await unit_of_work.audits.append_many(
                 (
                     *(

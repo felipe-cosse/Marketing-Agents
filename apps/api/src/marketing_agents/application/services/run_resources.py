@@ -49,6 +49,7 @@ from marketing_agents.domain.execution_control import (
     RunExecutionControl,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import RunLifecycleCommand
 from marketing_agents.domain.runtime_policy import (
     effective_call_timeout_seconds,
@@ -342,6 +343,7 @@ class RunResource:
     artifacts_url: str
     instance_url: str
     terminal_error: RunTerminalErrorResource | None = None
+    details_expired: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1034,6 +1036,7 @@ def _project_run(
     artifacts_truncated: bool = False,
     actions: tuple[ExternalActionResource, ...] = (),
     terminal_error: RunTerminalErrorResource | None = None,
+    details_expired: bool = False,
 ) -> RunResource:
     _validate_inspectable_run(item)
     run = item.run
@@ -1066,6 +1069,7 @@ def _project_run(
         artifacts_url=f"/api/v1/runs/{run.id}/artifacts",
         instance_url=f"/api/v1/agent-instances/{work.instance_id}",
         terminal_error=terminal_error,
+        details_expired=details_expired or type(work) is RetainedWorkItem,
     )
 
 
@@ -1259,6 +1263,7 @@ class RunResourceService:
     ) -> RunResource:
         self._authorize(principal)
         self._validate_id(run_id, "run")
+        details_expired = False
         try:
             async with self._unit_of_work() as unit_of_work:
                 stored = await unit_of_work.runs.get_inspectable(run_id)
@@ -1309,6 +1314,26 @@ class RunResourceService:
                                     action.idempotency_key,
                                 )
                 stored_again = await unit_of_work.runs.get_inspectable(run_id)
+        except DetailExpired:
+            # A verified erased child is not a corrupt Run. Reload the intact
+            # lifecycle/plan/control only; do not manufacture live child values.
+            details_expired = True
+            try:
+                async with self._unit_of_work() as unit_of_work:
+                    stored_again = await unit_of_work.runs.get_inspectable(run_id)
+                    if stored_again is None or stored_again.run.state not in {
+                        RunState.COMPLETED,
+                        RunState.FAILED,
+                        RunState.REJECTED,
+                        RunState.CANCELLED,
+                    }:
+                        raise ValueError("expired detail belongs to a nonterminal Run")
+                    plan_item = await unit_of_work.run_steps.get_inspectable_plan(run_id)
+                    control = await unit_of_work.execution_control.get(run_id)
+                pending_approvals, artifact_items, actions = (), (), ()
+                attempts_by_step, action_receipts = {}, {}
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                raise self._corrupt() from None
         except (
             AttributeError,
             ExternalActionRepositoryConflict,
@@ -1378,12 +1403,16 @@ class RunResourceService:
                     step,
                 )
             projected_actions = tuple(_project_action(value) for value in actions)
-            terminal_error = _project_terminal_error(
-                stored,
-                plan=plan_item,
-                control=control,
-                attempts_by_step=attempts_by_step,
-                actions=actions,
+            terminal_error = (
+                None
+                if details_expired
+                else _project_terminal_error(
+                    stored,
+                    plan=plan_item,
+                    control=control,
+                    attempts_by_step=attempts_by_step,
+                    actions=actions,
+                )
             )
             return _project_run(
                 stored,
@@ -1394,6 +1423,7 @@ class RunResourceService:
                 artifacts_truncated=len(artifact_items) > 10,
                 actions=projected_actions,
                 terminal_error=terminal_error,
+                details_expired=details_expired,
             )
         except (TypeError, ValueError):
             raise self._corrupt() from None
@@ -1524,6 +1554,8 @@ class RunResourceService:
                         step_transitions = await unit_of_work.run_steps.list_transitions(
                             envelope.step_id
                         )
+        except DetailExpired:
+            raise
         except (
             AttributeError,
             ExternalActionRepositoryConflict,

@@ -80,6 +80,7 @@ from marketing_agents.application.services.run_resources import (
 )
 from marketing_agents.domain.enums import RunState
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.security.redaction import redact
 
 _RUN_PATH = re.compile(r"^/api/v1/runs(?:/.*)?$")
@@ -657,6 +658,7 @@ def _resource_view(item: RunResource) -> RunResourceView:
         or type(item.pending_approvals) is not tuple
         or type(item.artifact_summaries) is not tuple
         or type(item.artifacts_truncated) is not bool
+        or type(item.details_expired) is not bool
         or len(item.artifact_summaries) > 10
         or tuple(value.sequence for value in item.transitions)
         != tuple(range(1, len(item.transitions) + 1))
@@ -688,6 +690,7 @@ def _resource_view(item: RunResource) -> RunResourceView:
             artifacts_truncated=item.artifacts_truncated,
             external_actions=tuple(_action_view(value) for value in item.external_actions),
             terminal_error=_terminal_error_view(item.run_id, item.terminal_error),
+            details_expired=item.details_expired,
         )
     except (AttributeError, TypeError, ValueError):
         _raise_unavailable()
@@ -884,6 +887,8 @@ async def list_runs(
         ) from None
     try:
         page = await executor.list(query, principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:
@@ -945,6 +950,8 @@ async def get_run(
 ) -> RunResourceView:
     try:
         resource = await executor.read(run_id, principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:
@@ -991,6 +998,8 @@ async def get_run_timeline(
         ) from None
     try:
         page = await executor.read_timeline(run_id, query, principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:
@@ -1048,6 +1057,8 @@ async def get_run_step(
 ) -> RunStepView:
     try:
         resource = await executor.read_step(run_id, step_id, principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:
@@ -1086,6 +1097,8 @@ async def get_external_action(
 ) -> ExternalActionView:
     try:
         resource = await executor.read_external_action(action_id, principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:
@@ -1141,6 +1154,8 @@ async def get_agent_instance_status_summary(
         )
     try:
         summary = await executor.read_instance_status_summary(principal=principal)
+    except DetailExpired:
+        raise
     except RunResourceServiceError as error:
         _raise_service_problem(error)
     except Exception:

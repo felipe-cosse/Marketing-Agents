@@ -42,6 +42,7 @@ from marketing_agents.domain.canonical_json import canonical_json_bytes
 from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import WorkMode
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 from marketing_agents.security.redaction import SecretValue
 
 _INSTANCE_ID_PATTERN = r"^inst\.[a-z0-9-]+\.[a-z0-9-]+\.[a-z0-9-]+\.[0-9]{2}$"
@@ -460,6 +461,8 @@ async def create_agent_instance_dry_run(
         )
     except ManualDryRunServiceError as error:
         return _service_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         return _problem_response(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

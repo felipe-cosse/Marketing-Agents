@@ -60,6 +60,7 @@ from marketing_agents.domain.provenance import (
     ProvenanceSource,
     ProviderVersion,
 )
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.runtime_policy import (
     AttemptKind,
     canonical_payload_size_bytes,
@@ -75,7 +76,6 @@ from marketing_agents.domain.step_lifecycle import (
 from marketing_agents.domain.validation import frozen_json_mapping, require_id
 from marketing_agents.security.redaction import REDACTED, redact_json_pointers
 
-from .audit_events import AuditEventFactory
 from .terminal_execution_cleanup import TerminalExecutionCleanupService
 
 
@@ -338,7 +338,9 @@ class ControlledReadExecutor:
             )
         )
         recovered_step = step
-        recovery_events = [AuditEventFactory(audit_context).attempt_completed(completed.attempt)]
+        recovery_events = [
+            self._dependencies.audit_factory(audit_context).attempt_completed(completed.attempt)
+        ]
         if completed.retry_not_before is None:
             terminal_reason = (
                 "run_cancelled"
@@ -346,7 +348,9 @@ class ControlledReadExecutor:
                 else completed.terminal_reason_code or "retry_deadline_exceeded"
             )
             if run.state is RunState.EXECUTING and not cancellation_observed:
-                cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                cleanup = await TerminalExecutionCleanupService(
+                    self._dependencies.retention_policy
+                ).fail_execution_in_uow(
                     unit_of_work,
                     run_id=run.id,
                     failed_step_id=step.id,
@@ -378,7 +382,7 @@ class ControlledReadExecutor:
                         step_id=step.id,
                     )
                 recovery_events.append(
-                    AuditEventFactory(audit_context).step_transition(
+                    self._dependencies.audit_factory(audit_context).step_transition(
                         transition.step, transition.transition
                     )
                 )
@@ -550,7 +554,7 @@ class ControlledReadExecutor:
             step = await unit_of_work.run_steps.get(step_id)
             if step is None:
                 return
-            event = AuditEventFactory(audit_context).runtime_control_denied(
+            event = self._dependencies.audit_factory(audit_context).runtime_control_denied(
                 run_id=step.run_id,
                 step_id=step.id,
                 operation_key=step.runtime_policy.operation_key,
@@ -591,7 +595,9 @@ class ControlledReadExecutor:
                 and run is not None
                 and run.state is RunState.EXECUTING
             ):
-                cleanup = await TerminalExecutionCleanupService().fail_runtime_control_in_uow(
+                cleanup = await TerminalExecutionCleanupService(
+                    self._dependencies.retention_policy
+                ).fail_runtime_control_in_uow(
                     unit_of_work,
                     run_id=run.id,
                     denied_step_id=step.id,
@@ -855,7 +861,7 @@ class ControlledReadExecutor:
                             step_id=step.id,
                         )
                     reservation_events.append(
-                        AuditEventFactory(audit_context).step_transition(
+                        self._dependencies.audit_factory(audit_context).step_transition(
                             transition.step,
                             transition.transition,
                         )
@@ -867,7 +873,7 @@ class ControlledReadExecutor:
                         step_id=step.id,
                     )
                 reservation_events.append(
-                    AuditEventFactory(audit_context).attempt_reserved(attempt)
+                    self._dependencies.audit_factory(audit_context).attempt_reserved(attempt)
                 )
                 await unit_of_work.audits.append_many(tuple(reservation_events))
                 await unit_of_work.commit()
@@ -1029,6 +1035,8 @@ class ControlledReadExecutor:
                             step_id=step.id,
                         )
                     work = await unit_of_work.works.get(run.work_item_id)
+                    if isinstance(work, RetainedWorkItem):
+                        raise DetailExpired("work", work.id)
                     plan = await unit_of_work.run_steps.get_plan(run.id)
                     if work is None or plan is None:
                         raise ControlledReadExecutorError(
@@ -1060,7 +1068,7 @@ class ControlledReadExecutor:
                         ),
                     )
                 )
-                audit_factory = AuditEventFactory(audit_context)
+                audit_factory = self._dependencies.audit_factory(audit_context)
                 completion_events = [audit_factory.attempt_completed(completed.attempt)]
                 if artifact is not None:
                     completion_events.append(
@@ -1069,18 +1077,20 @@ class ControlledReadExecutor:
                 updated_step = step
                 if completed.retry_not_before is None:
                     if effective_runtime_denial_code is not None:
-                        cleanup = (
-                            await TerminalExecutionCleanupService().fail_runtime_control_in_uow(
-                                unit_of_work,
-                                run_id=run.id,
-                                denied_step_id=step.id,
-                                plan_hash=step.plan_hash,
-                                denial_code=effective_runtime_denial_code,
-                                occurred_at=completed_at,
-                                audit_context=audit_context,
-                            )
+                        cleanup = await TerminalExecutionCleanupService(
+                            self._dependencies.retention_policy
+                        ).fail_runtime_control_in_uow(
+                            unit_of_work,
+                            run_id=run.id,
+                            denied_step_id=step.id,
+                            plan_hash=step.plan_hash,
+                            denial_code=effective_runtime_denial_code,
+                            occurred_at=completed_at,
+                            audit_context=audit_context,
                         )
-                        denial_event = AuditEventFactory(audit_context).runtime_control_denied(
+                        denial_event = self._dependencies.audit_factory(
+                            audit_context
+                        ).runtime_control_denied(
                             run_id=run.id,
                             step_id=step.id,
                             operation_key=reserved.operation.operation_key,
@@ -1116,7 +1126,9 @@ class ControlledReadExecutor:
                             else completed.terminal_reason_code or "unclassified_failure"
                         )
                         if run.state is RunState.EXECUTING and not cancellation_observed:
-                            cleanup = await TerminalExecutionCleanupService().fail_execution_in_uow(
+                            cleanup = await TerminalExecutionCleanupService(
+                                self._dependencies.retention_policy
+                            ).fail_execution_in_uow(
                                 unit_of_work,
                                 run_id=run.id,
                                 failed_step_id=step.id,
@@ -1165,7 +1177,7 @@ class ControlledReadExecutor:
                     retry_not_before=completed.retry_not_before,
                     cancellation_observed_after_return=cancellation_observed,
                 )
-        except (_CompletionConflict, ControlledReadExecutorError):
+        except (_CompletionConflict, ControlledReadExecutorError, DetailExpired):
             raise
         except ExecutionControlRepositoryConflict as exc:
             if getattr(exc, "code", None) in {

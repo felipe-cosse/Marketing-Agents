@@ -64,6 +64,7 @@ from marketing_agents.domain.enums import (
     ExternalActionState,
 )
 from marketing_agents.domain.identity import AuthenticatedPrincipal
+from marketing_agents.domain.retained_details import DetailExpired
 
 _RESOURCE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,239}$"
 _APPROVAL_REQUEST_PATH_PATTERN = re.compile(r"^/api/v1/external-actions/[^/]+/approval-requests/?$")
@@ -248,6 +249,8 @@ class ApprovalPrivateResponseMiddleware:
                 await self._app(scope, bounded_receive, private_send)
                 return
             await self._app(scope, receive, private_send)
+        except DetailExpired:
+            raise
         except Exception:
             if response_started:
                 raise
@@ -546,6 +549,8 @@ async def list_approvals(
         page = await executor.list(query, principal=principal)
     except ApprovalResourceServiceError as error:
         _raise_resource_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     if (
@@ -599,6 +604,8 @@ async def get_approval(
         resource = await executor.read(approval_id, principal=principal)
     except ApprovalResourceServiceError as error:
         _raise_resource_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     if type(resource) is not ApprovalResource or resource.approval_id != approval_id:
@@ -661,6 +668,8 @@ async def create_approval_request(
         result = await executor.request(command, principal=principal)
     except ApprovalResourceServiceError as error:
         _raise_resource_problem(error)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     if (
@@ -777,9 +786,13 @@ async def _decide(
                         principal=principal,
                     )
                 )
+            except DetailExpired:
+                raise
             except Exception:
                 current = None
         _raise_safe_service_problem(error, current=current)
+    except DetailExpired:
+        raise
     except Exception:
         _raise_unavailable()
     expected_status = (
@@ -859,6 +872,8 @@ async def _decide(
                 and candidate.decision_reason == recorded.reason
             ):
                 authoritative = candidate
+        except DetailExpired:
+            raise
         except Exception:
             authoritative = None
     _private_response(response)

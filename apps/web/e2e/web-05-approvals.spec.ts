@@ -391,6 +391,7 @@ function runFixture(refreshed = false): JsonObject {
         )
       : externalActions,
     terminal_error: null,
+    details_expired: false,
   };
 }
 

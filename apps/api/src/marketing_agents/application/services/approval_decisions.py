@@ -19,7 +19,6 @@ from marketing_agents.application.services.approval_integrity import (
     ApprovalIntegrityError,
     validate_current_action,
 )
-from marketing_agents.application.services.audit_events import AuditEventFactory
 from marketing_agents.domain.approval import (
     ApprovalDecision,
     AuthorizationSetStatus,
@@ -324,7 +323,7 @@ class ApprovalDecisionService:
             authentication_method=authority.authentication_method.value,
             correlation_id=command.correlation_id,
         )
-        factory = AuditEventFactory(audit_context)
+        factory = self._dependencies.audit_factory(audit_context)
         await unit_of_work.audits.append_many(
             (
                 factory.action_decided(action, decided_action, decided_request),

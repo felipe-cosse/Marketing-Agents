@@ -125,6 +125,7 @@ _WEBHOOK_RATE_LIMIT_AUDIT_FIELDS = _WEBHOOK_SIGNATURE_AUDIT_FIELDS | frozenset(
     {"retry_after_seconds"}
 )
 _EVENT_FIELDS: Mapping[str, frozenset[str]] = {
+    "retention.completed": frozenset(item.value for item in RetentionCategory),
     "campaign_brief.created": frozenset({"new_revision"}),
     "ingress.manual_received": _MANUAL_WORK_AUDIT_FIELDS,
     "ingress.rate_limited": _WEBHOOK_RATE_LIMIT_AUDIT_FIELDS,
@@ -946,6 +947,12 @@ def _validate_typed_value(
             f"audit metadata {field_name}",
             stored_representation=stored_configuration,
         )
+        return
+    if field_name in {item.value for item in RetentionCategory}:
+        if type(value) is not int or not 0 <= value <= 100:
+            raise AuditMetadataError(
+                "metadata_value_invalid", "retention counts must be bounded integers"
+            )
         return
     if field_name in _DIGEST_FIELDS:
         validator = require_digest

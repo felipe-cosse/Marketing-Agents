@@ -411,16 +411,19 @@ def verify(root: Path = ROOT) -> dict[str, int | str | bool]:
     )
     retention = section(
         documents["docs/data-handling.md"],
-        "Configured retention is not automatic deletion",
+        "Recorded expiry and bounded retention maintenance",
         "docs/data-handling.md",
     )
     require_phrases(
         retention,
         (
-            "implemented and verified — policy and projection only",
-            "acceptance target not yet verified",
-            "there is no physical retention sweeper",
-            "hiding an api field is not disk erasure",
+            "implemented; candidate verification required",
+            "one durable utc-minute occurrence processes at most 50 details",
+            "a failed audit or lost lease rolls back the batch",
+            "active runs, unresolved actions",
+            "logical field erasure, not a secure overwrite",
+            "ttl is an eligibility threshold, not a deletion sla",
+            "a stopped scheduler does not purge",
             "residual risk",
         ),
         "retention",

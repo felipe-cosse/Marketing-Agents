@@ -51,6 +51,7 @@ from marketing_agents.domain.instance_configuration import (
     InstanceConfigurationPatch,
     configuration_to_plain_mapping,
 )
+from marketing_agents.domain.retention import RetentionPolicy
 from marketing_agents.domain.validation import (
     frozen_json_mapping,
     require_digest,
@@ -160,6 +161,7 @@ class InstanceConfigurationService:
         clock: Clock,
         audit_pseudonym_key: DigestKey,
         workflows: ExecutableWorkflowRegistry | None = None,
+        retention_policy: RetentionPolicy | None = None,
     ) -> None:
         if type(audit_pseudonym_key) is not DigestKey:
             raise ValueError("instance configuration audit requires the exact pseudonym key")
@@ -170,6 +172,7 @@ class InstanceConfigurationService:
         self._clock = clock
         self._audit_pseudonym_key = audit_pseudonym_key
         self._workflows = workflows
+        self._retention_policy = retention_policy or RetentionPolicy()
 
     async def read(
         self,
@@ -337,6 +340,7 @@ class InstanceConfigurationService:
                 )
                 audit = AuditEventFactory(
                     audit_context,
+                    retention_policy=self._retention_policy,
                     configuration_pseudonym_key=self._audit_pseudonym_key,
                 ).instance_configuration_changed(
                     instance_id=current.instance_id,

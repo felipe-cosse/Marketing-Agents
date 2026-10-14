@@ -47,6 +47,10 @@ class SchedulerWorker:
         self.stopping = True
 
     async def drain_once(self) -> bool:
+        with self.runtime.telemetry.bind():
+            return await self._drain_once()
+
+    async def _drain_once(self) -> bool:
         if self.stopping:
             return False
         dependencies = self.runtime.dependencies
@@ -55,6 +59,9 @@ class SchedulerWorker:
         ).claim_due_once(lease_owner=self.worker_id)
         if claim is None:
             return False
+        self.runtime.telemetry.scheduler_claim(
+            (dependencies.utc_now() - claim.scheduled_for_utc).total_seconds()
+        )
         async with dependencies.unit_of_work() as unit_of_work:
             schedule = await unit_of_work.schedules.get(claim.schedule_id)
             configuration = (

@@ -39,6 +39,7 @@ from marketing_agents.infrastructure.runtime.run_claims import (
     RunClaims,
     RunRecoveryClaimLost,
 )
+from marketing_agents.observability import LocalTelemetry
 from marketing_agents.workers.runtime.composition import LocalRuntime
 from marketing_agents.workers.runtime.run_loop import RunWorker
 from sqlalchemy import select, update
@@ -62,7 +63,11 @@ from tests.integration.db.test_run_05_external_action_idempotency import (
 def _worker_runtime(database, dependencies):
     # Deliberately no workflow registry/providers: the focused terminal lane
     # must use only persisted evidence. Composed acceptance covers real startup.
-    return cast(LocalRuntime, SimpleNamespace(database=database, dependencies=dependencies))
+    # EXEC-06 adds process-local diagnostics without granting execution authority.
+    return cast(
+        LocalRuntime,
+        SimpleNamespace(database=database, dependencies=dependencies, telemetry=LocalTelemetry()),
+    )
 
 
 async def _business_snapshot(database):

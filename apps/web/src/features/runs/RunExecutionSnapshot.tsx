@@ -35,7 +35,13 @@ function actionIdempotencySupport(
 
 function ExternalActions({ run }: { readonly run: RunResource }) {
   if (run.externalActions.length === 0) {
-    return <p>No external action has been proposed for this run.</p>;
+    return (
+      <p>
+        {run.detailsExpired
+          ? "External action details are no longer available. Consult the retained audit history for action outcomes."
+          : "No external action has been proposed for this run."}
+      </p>
+    );
   }
   return (
     <ol className="run-snapshot__action-list">

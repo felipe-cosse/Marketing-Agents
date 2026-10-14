@@ -36,6 +36,7 @@ from marketing_agents.domain.entities import Run, WorkItem
 from marketing_agents.domain.enums import RunState, StepState, WorkMode
 from marketing_agents.domain.graph import DependencyGraph, TopologyStep
 from marketing_agents.domain.planner_output import PLANNER_OUTPUT_FAMILY, PROPOSAL_PREVIEW_KIND
+from marketing_agents.domain.retained_details import DetailExpired, RetainedWorkItem
 from marketing_agents.domain.run_lifecycle import (
     CompletionContext,
     NoRunTransitionContext,
@@ -135,6 +136,8 @@ class CatalogProposalWorkflowService:
         async with self._dependencies.unit_of_work() as uow:
             current = await uow.runs.get(run_id)
             work = None if current is None else await uow.works.get(current.work_item_id)
+            if isinstance(work, RetainedWorkItem):
+                raise DetailExpired("work", work.id)
         if current is None or work is None:
             raise ValueError("catalog_run_missing")
         definition = self._workflows.get(work.workflow_id)

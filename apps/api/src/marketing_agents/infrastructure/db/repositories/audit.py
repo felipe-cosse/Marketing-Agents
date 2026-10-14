@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import fields
 from datetime import datetime
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from marketing_agents.application.ports.repositories import AuditFeedPage
 from marketing_agents.domain.audit import (
+    _EVENT_REQUIRED_METADATA,
     AuditActorSource,
     AuditEvent,
     AuditEventDraft,
@@ -122,6 +124,39 @@ def _record_to_domain(record: AuditEventRecord) -> AuditEvent:
             "audit_record_corrupt",
             "persisted audit event violates its typed semantic contract",
         ) from exc
+
+
+def expire_optional_metadata(record: AuditEventRecord, *, now: datetime) -> None:
+    """Privileged retention seam: preserve every required semantic event field."""
+    event = _record_to_domain(record)
+    require_utc(now, "retention time")
+    if now < record.metadata_expires_at:
+        raise ValueError("audit metadata has not expired")
+    required = _EVENT_REQUIRED_METADATA[record.event_type]
+    if record.event_type == "attempt.completed" and record.new_state != "succeeded":
+        # This field is structurally optional because successful attempts must
+        # omit it, but the unchanged semantic validator requires the safe enum
+        # on every failed/cancelled completion. Never synthesize a missing code.
+        required = required | {"safe_error_code"}
+    retained = {name: value for name, value in record.safe_metadata.items() if name in required}
+    metadata = hydrate_audit_metadata(
+        record.event_type,
+        retained,
+        classification=DataClassification(record.metadata_classification),
+        occurred_at=record.occurred_at,
+        expires_at=record.metadata_expires_at,
+    )
+    values = {
+        item.name: getattr(event.draft, item.name)
+        for item in fields(event.draft)
+        if item.name not in {"schema_version", "issuance_fingerprint"}
+    }
+    values["safe_metadata"] = metadata
+    retained_draft = _issue_audit_event_draft(**values)
+    record.safe_metadata = retained
+    record.metadata_fingerprint = metadata.issuance_fingerprint
+    record.event_fingerprint = retained_draft.issuance_fingerprint
+    _record_to_domain(record)
 
 
 def _draft_to_record(
@@ -363,6 +398,14 @@ class SQLAlchemyAuditRepository:
             and event.aggregate_type == "agent_instance_configuration"
             for event in events
         )
+        retention_event = len(events) == 1 and all(
+            event.run_id is None
+            and event.schedule_id is None
+            and event.occurrence_id is None
+            and event.event_type == "retention.completed"
+            and event.aggregate_type == "maintenance_run"
+            for event in events
+        )
         campaign_brief_event = len(events) == 1 and all(
             event.run_id is None
             and event.schedule_id is None
@@ -415,6 +458,7 @@ class SQLAlchemyAuditRepository:
             scheduler_batch
             or instance_configuration_event
             or campaign_brief_event
+            or retention_event
             or ingress_rejection_event
             or webhook_batch
         ):

@@ -40,6 +40,7 @@ const RUN_FIELDS = new Set([
   "artifacts_truncated",
   "external_actions",
   "terminal_error",
+  "details_expired",
 ]);
 const PENDING_APPROVAL_FIELDS = new Set([
   "id",
@@ -663,6 +664,10 @@ export function normalizeApprovalRunSafety(
     100,
   ).map((item, index) => normalizeExternalAction(item, runId, index));
   asPlainOptionalRecord(record.terminal_error, "run.terminal_error");
+  const detailsExpired = asBoolean(
+    record.details_expired,
+    "run.details_expired",
+  );
   if (
     new Set(pendingApprovals.map(({ id }) => id)).size !==
       pendingApprovals.length ||
@@ -679,6 +684,7 @@ export function normalizeApprovalRunSafety(
     );
   }
   const zeroMockConnectorCallsConfirmed =
+    !detailsExpired &&
     mode === "mock_execution" &&
     externalActions.length > 0 &&
     externalActions.every(

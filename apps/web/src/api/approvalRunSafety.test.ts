@@ -111,6 +111,7 @@ function runBody(
     artifacts_truncated: false,
     external_actions: [actionBody()],
     terminal_error: null,
+    details_expired: false,
     ...overrides,
   };
 }
@@ -225,12 +226,19 @@ describe("WEB-05 authoritative approval run safety", () => {
     const noActions = normalizeApprovalRunSafety(
       runBody({ pending_approvals: [], external_actions: [] }),
     );
+    const expiredDetails = normalizeApprovalRunSafety(
+      runBody({ details_expired: true }),
+    );
 
     expect(attempted.externalActions[0]?.deliveryAttemptCount).toBe(1);
     expect(attempted.zeroMockConnectorCallsConfirmed).toBe(false);
     expect(dryRun.zeroMockConnectorCallsConfirmed).toBe(false);
     expect(receipted.zeroMockConnectorCallsConfirmed).toBe(false);
     expect(noActions.zeroMockConnectorCallsConfirmed).toBe(false);
+    expect(expiredDetails.zeroMockConnectorCallsConfirmed).toBe(false);
+    expect(() =>
+      normalizeApprovalRunSafety(runBody({ details_expired: "true" })),
+    ).toThrow(/details_expired/u);
   });
 
   it("WEB-05 rejects attempt-count, response-link, and expected-run drift", () => {
