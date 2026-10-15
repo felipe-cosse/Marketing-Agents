@@ -5,9 +5,11 @@ import gzip
 import hashlib
 import io
 import json
+import runpy
 import struct
 
 import pytest
+from _pytest.python import IdMaker
 
 from scripts import ac_15_kernel_collector as collector
 from scripts.ac_15_kernel_bytecode import COUNTER_NAMES, exit_instructions, instructions
@@ -74,15 +76,50 @@ def test_config_missing_enabled_or_ambiguous_symbol_fails_closed(monkeypatch, ra
     [
         b"",
         b"not gzip",
-        gzip.compress(b"x")[:-1],
-        gzip.compress(b"x") + b"x",
-        gzip.compress(b"x") * 2,
+        gzip.compress(b"x", mtime=0)[:-1],
+        gzip.compress(b"x", mtime=0) + b"x",
+        gzip.compress(b"x", mtime=0) * 2,
     ],
 )
 def test_config_truncated_invalid_or_multiple_gzip_members_fail_closed(monkeypatch, compressed):
     config_reader(monkeypatch, b"", compressed=compressed)
     with pytest.raises(ValueError, match="invalid_kernel_config_gzip"):
         collector.kernel_configuration()
+
+
+def test_exec_08_gzip_parameter_payloads_and_ids_are_clock_independent(monkeypatch, request):
+    """EXEC-08: real import-time fixture values and pytest IDs agree across workers."""
+    snapshots = []
+    for second in (1_700_000_000, 1_700_000_002):
+        with monkeypatch.context() as context:
+            context.setattr(gzip.time, "time", lambda second=second: second)
+            module = runpy.run_path(__file__, run_name="_exec08_gzip_fixture_clock")
+        function = module["test_config_truncated_invalid_or_multiple_gzip_members_fail_closed"]
+        marks = [mark for mark in function.pytestmark if mark.name == "parametrize"]
+        assert len(marks) == 1
+        names, values = marks[0].args
+        assert names == "compressed" and marks[0].kwargs == {}
+        # Exercise the pinned pytest ID generator, not a handwritten byte repr.
+        ids = IdMaker(
+            argnames=[names],
+            parametersets=[pytest.param(value) for value in values],
+            idfn=None,
+            ids=None,
+            config=request.config,
+            nodeid=request.node.nodeid,
+        ).make_unique_parameterset_ids()
+        snapshots.append((tuple(values), tuple(ids)))
+    assert snapshots[0] == snapshots[1]
+    compressed = gzip.compress(b"x", mtime=0)
+    assert snapshots[0][0] == (
+        b"",
+        b"not gzip",
+        compressed[:-1],
+        compressed + b"x",
+        compressed * 2,
+    )
+    assert len(set(snapshots[0][1])) == 5
+    assert all(payload[4:8] == bytes(4) for payload in snapshots[0][0][2:])
 
 
 def test_config_expansion_and_compressed_input_are_bounded(monkeypatch, tmp_path):

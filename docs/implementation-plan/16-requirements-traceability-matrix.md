@@ -178,7 +178,7 @@ Allowed status values:
 | EXEC-05 | APIs and org-chart control surface. | M7–M8 API/control-surface qualification; `docs/verification/requirements/EXEC-05.md` | implemented |
 | EXEC-06 | Demos/tooling/docs. | M8–M9 demo/retention/telemetry controls; complete source-bound qualification required; `docs/verification/requirements/EXEC-06.md` | implemented |
 | EXEC-07 | Complete clean-state verification. | Exact HEAD clean-state/demo controls; complete quality, fresh Compose and paired-backup execution required; `docs/verification/requirements/EXEC-07.md` | implemented |
-| EXEC-08 | Report files/commands/results/assumptions without overclaim. | `docs/verification.md` + handoff | planned |
+| EXEC-08 | Report files/commands/results/assumptions without overclaim. | Current handoff and historical evidence boundaries; full candidate qualification required; `docs/verification/requirements/EXEC-08.md` | implemented |
 
 ## Maintenance rule
 
