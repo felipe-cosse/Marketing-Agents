@@ -1032,9 +1032,9 @@ class Verification:
                 "CI=1",
                 f"{self.project}-web-verification",
                 "node",
-                "apps/web/scripts/run-del-05-e2e.mjs",
+                "apps/web/scripts/del-01-loopback-relay.mjs",
                 "--origin",
-                "http://127.0.0.1:8080",
+                self.origin,
             ],
             timeout=600,
         )
