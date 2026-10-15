@@ -217,6 +217,8 @@ class BackupVerification:
                 f"{transport.RUN_LABEL}={docker.token}",
                 "--network",
                 "none",
+                "--env",
+                f"DATABASE_URL={transport.DATABASE_URL}",
                 "--user",
                 "10001:10001",
                 "--read-only",

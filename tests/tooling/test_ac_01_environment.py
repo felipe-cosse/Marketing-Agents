@@ -29,6 +29,16 @@ PROJECT = "marketing-agents-del05-0123456789abcdef"
 PORT = 18080
 BACKEND_IMAGE_ID = "sha256:" + "a" * 64
 WEB_IMAGE_ID = "sha256:" + "b" * 64
+POSTGRES_IMAGE_ID = "sha256:" + "c" * 64
+POSTGRES_IMAGE_ENVIRONMENT = {
+    "PATH": "/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "LANG": "C.UTF-8",
+    "GPG_KEY": "7169605F62C751356D054A26A821E680E5FA6305",
+    "PYTHON_VERSION": "3.12.14",
+    "PYTHON_SHA256": "5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+}
 
 BACKEND_IMAGE_ENVIRONMENT = {
     "PATH": (
@@ -48,7 +58,7 @@ BACKEND_IMAGE_ENVIRONMENT = {
     "ALLOW_EXTERNAL_NETWORK": "false",
     "REAL_LLM_OPT_IN": "false",
     "REAL_CONNECTOR_OPT_IN": "false",
-    "DATABASE_URL": "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+    "DATABASE_URL": "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents?host=/var/run/marketing-agents-postgres",
     "MARKETING_AGENTS_DIGEST_KEY_PATH": "/var/lib/marketing-agents/secrets/digest.key",
     "CATALOG_ROOT": "/app/catalog/v1",
 }
@@ -68,7 +78,7 @@ BASE_COMPOSE_ENVIRONMENT = {
     "ALLOW_EXTERNAL_NETWORK": "false",
     "REAL_LLM_OPT_IN": "false",
     "REAL_CONNECTOR_OPT_IN": "false",
-    "DATABASE_URL": "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+    "DATABASE_URL": "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents?host=/var/run/marketing-agents-postgres",
     "MARKETING_AGENTS_DIGEST_KEY_PATH": "/var/lib/marketing-agents/secrets/digest.key",
     "CATALOG_ROOT": "/app/catalog/v1",
     "API_HOST": "127.0.0.1",
@@ -82,6 +92,11 @@ def environment_entries(environment: dict[str, str]) -> list[str]:
 
 
 def image_inspection(image_kind: str) -> dict[str, object]:
+    if image_kind == "postgres":
+        return {
+            "Id": POSTGRES_IMAGE_ID,
+            "Config": {"Env": environment_entries(POSTGRES_IMAGE_ENVIRONMENT)},
+        }
     if image_kind == "backend":
         return {
             "Id": BACKEND_IMAGE_ID,
@@ -91,7 +106,7 @@ def image_inspection(image_kind: str) -> dict[str, object]:
 
 
 def compose_environment(service: str, *, fixture_scope: str | None = None) -> dict[str, str]:
-    if service == "web":
+    if service in {"web", "postgres"}:
         return {}
     environment = dict(BASE_COMPOSE_ENVIRONMENT)
     if service == "api":
@@ -139,7 +154,7 @@ def runtime_network_inspection(
     fixture_scope: str | None = None,
     injected_entry: str | None = None,
 ) -> dict[str, object]:
-    image_kind = "web" if service == "web" else "backend"
+    image_kind = service if service in {"web", "postgres"} else "backend"
     baseline = verify_image_environment(image_inspection(image_kind), image_kind=image_kind)
     inspected = runtime_inspection(service, baseline, fixture_scope=fixture_scope)
     config = inspected["Config"]
@@ -319,7 +334,7 @@ def test_ac_01_compose_rejects_malformed_environment(value: object) -> None:
         validate_compose_service_environments(config, project=PROJECT, port=PORT)
 
 
-@pytest.mark.parametrize("image_kind", ["backend", "web"])
+@pytest.mark.parametrize("image_kind", ["backend", "web", "postgres"])
 def test_ac_01_image_environment_is_exact_and_baseline_is_frozen(image_kind: str) -> None:
     baseline = verify_image_environment(image_inspection(image_kind), image_kind=image_kind)
 
@@ -379,7 +394,13 @@ def test_ac_01_runtime_environment_matches_immutable_image_and_phase(
 ) -> None:
     backend, web = verified_baselines()
     for service in SERVICES:
-        baseline = web if service == "web" else backend
+        baseline = (
+            verify_image_environment(image_inspection("postgres"), image_kind="postgres")
+            if service == "postgres"
+            else web
+            if service == "web"
+            else backend
+        )
         inspected = runtime_inspection(service, baseline, fixture_scope=fixture_scope)
         validate_runtime_container_environment(
             inspected,
@@ -492,7 +513,7 @@ def test_ac_01_clean_state_wires_all_runtime_environments_in_both_phases(
     phase["scope"] = PROJECT
     verifier.inspect_runtime_network(fixture_scope=PROJECT)
 
-    service_order = ("web", *clean_state.BACKENDS)
+    service_order = ("web", *clean_state.BACKENDS, "postgres")
     assert validated == [
         *((service, None) for service in service_order),
         *((service, PROJECT) for service in service_order),
@@ -503,6 +524,7 @@ def test_ac_01_clean_state_wires_all_runtime_environments_in_both_phases(
             "probe-no-external-route-api",
             "probe-no-external-route-run-worker",
             "probe-no-external-route-scheduler-worker",
+            "probe-no-external-route-postgres",
         ]
         * 2
     )

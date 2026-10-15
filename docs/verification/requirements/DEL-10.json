@@ -1,0 +1,366 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-10",
+  "matrix_statement_sha256": "39d73f7b18a877686ce59dcb5913d4a2d1f3aebb7c361046a7b674b4da367ad6",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      ".env.example",
+      "Makefile",
+      "README.md",
+      "apps/api/src/marketing_agents/application/services/approval_resources.py",
+      "apps/api/src/marketing_agents/config.py",
+      "apps/api/src/marketing_agents/infrastructure/db/__init__.py",
+      "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py",
+      "apps/api/src/marketing_agents/workers/runtime/composition.py",
+      "compose.sqlite.yaml",
+      "compose.yaml",
+      "docker/api.Dockerfile",
+      "docker/postgres/bootstrap.sql",
+      "docker/postgres/pg_hba.conf",
+      "docker/postgres/pg_ident.conf",
+      "docker/postgres/start.sh",
+      "docs/adr/0003-database-backed-workers.md",
+      "docs/architecture.md",
+      "docs/assumptions.md",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/implementation/requirement-branch-workflow.md",
+      "docs/local-operations.md",
+      "docs/operations.md",
+      "docs/security.md",
+      "docs/testing.md",
+      "docs/verification/requirements/DEL-10.json",
+      "docs/verification/requirements/DEL-10.md",
+      "pyproject.toml",
+      "scripts/ac_01_environment.py",
+      "scripts/compose.sh",
+      "scripts/del_05_clean_state.py",
+      "scripts/del_05_replay_fixture.py",
+      "scripts/del_05_runtime_smoke.py",
+      "scripts/dev.py",
+      "scripts/local_backup.py",
+      "scripts/native_postgres.py",
+      "scripts/postgresql_backup.py",
+      "scripts/verify_local.py",
+      "scripts/verify_del_05_backup.py",
+      "scripts/verify_postgresql_backup.py",
+      "tests/acceptance/del_10_native_postgresql.py",
+      "tests/acceptance/del_10_native_recovery.py",
+      "tests/acceptance/obj_04_native_offline.py",
+      "tests/integration/runtime/test_postgresql_primary.py",
+      "tests/tooling/test_ac_01_environment.py",
+      "tests/tooling/test_del_01_delivery_entrypoint.py",
+      "tests/tooling/test_del_05_clean_state.py",
+      "tests/tooling/test_del_05_backup_build.py",
+      "tests/tooling/test_del_05_compose_contract.py",
+      "tests/tooling/test_del_05_native.py",
+      "tests/tooling/test_del_07_local_verification.py",
+      "tests/tooling/test_del_10_native_postgresql.py",
+      "tests/tooling/test_exec_07_verification_image.py",
+      "tests/tooling/test_obj_04_native_environment.py",
+      "tests/tooling/test_postgresql_backup.py",
+      "tests/tooling/test_postgresql_primary_smoke.py",
+      "tests/unit/config/test_arch_01_settings.py",
+      "uv.lock"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/config.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "compose.yaml"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "scripts/native_postgres.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "scripts/postgresql_backup.py"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "apps/api/src/marketing_agents/infrastructure/db/unit_of_work.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/unit/config/test_arch_01_settings.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/integration/runtime/test_postgresql_primary.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_postgresql_backup.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/acceptance/del_10_native_postgresql.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "postgresql-primary-with-preserved-fallback",
+      "type": "contract",
+      "statement": "Settings, native startup and Compose select PostgreSQL by default. SQLite remains explicit, existing storage prevents implicit switching, unknown selections fail closed, and required asyncpg installation does not enable network/provider settings.",
+      "test_refs": [
+        "tests/unit/config/test_arch_01_settings.py",
+        "tests/tooling/test_del_05_compose_contract.py",
+        "tests/tooling/test_del_10_native_postgresql.py"
+      ]
+    },
+    {
+      "id": "private-owned-postgresql-lifecycle",
+      "type": "negative_control",
+      "statement": "Compose runs a distinct database UID, private peer-authenticated socket and non-superuser app role without an IP network or database publication. Native startup owns a private no-TCP cluster and preserves existing state. Unsafe paths, marker/version drift and implicit adoption fail closed; only owned processes are stopped.",
+      "test_refs": [
+        "tests/tooling/test_del_05_compose_contract.py",
+        "tests/tooling/test_del_10_native_postgresql.py",
+        "tests/acceptance/del_10_native_postgresql.py"
+      ]
+    },
+    {
+      "id": "postgresql-runtime-and-consistent-projections",
+      "type": "journey",
+      "statement": "Live PostgreSQL tests require migrations, repeatable seed, all five mock workflows, the two-approval Email barrier, claim fencing and restart identity. Read-only resource projections use transaction-local repeatable-read snapshots; concurrent valid writes cannot mimic corruption, real corruption still fails, and writable transaction isolation is unchanged.",
+      "test_refs": [
+        "tests/integration/runtime/test_postgresql_primary.py",
+        "tests/acceptance/del_10_native_postgresql.py"
+      ]
+    },
+    {
+      "id": "paired-postgresql-recovery",
+      "type": "journey",
+      "statement": "A logical pg_dump and digest key are paired with consistent schema/all-table metadata and checksums. Backup refuses unsafe paths and mismatched identity; restore uses new owned storage and validates the restored pair without overwriting sources. Full owned Compose round-trip and native contracts are mandatory; legacy SQLite recovery remains separately tested.",
+      "test_refs": [
+        "tests/tooling/test_postgresql_backup.py",
+        "tests/acceptance/del_10_native_recovery.py"
+      ]
+    },
+    {
+      "id": "full-source-bound-qualification",
+      "type": "contract",
+      "statement": "The frozen candidate requires all 20 original quality gates and matching audit, complete committed clean-state/backend/frontend/production-browser verification with an added mandatory network-none PostgreSQL suite, native PostgreSQL and explicit SQLite fallback journeys, and both recovery gates. Existing coverage, checks, inventories and deadlines are retained; CI stays disabled.",
+      "test_refs": [
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_del_01_delivery_entrypoint.py",
+        "tests/tooling/test_del_07_local_verification.py"
+      ]
+    },
+    {
+      "id": "readonly-dialect-neutral-replay-evidence",
+      "type": "negative_control",
+      "statement": "Snapshot and scheduler replay checks accept only the owned local database forms, read consistent complete table/schema content without writes, include key identity and alembic state, and retain explicit read-only SQLite support. Row order cannot change a logical digest; unsafe paths, URLs and keys are rejected.",
+      "test_refs": [
+        "tests/tooling/test_postgresql_primary_smoke.py",
+        "tests/integration/runtime/test_postgresql_primary.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-10-default-selection",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "tests/unit/config/test_arch_01_settings.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "postgresql-primary-with-preserved-fallback"
+      ]
+    },
+    {
+      "id": "del-10-control-regressions",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "-o",
+        "pythonpath=apps/api/src",
+        "tests/tooling/test_del_05_compose_contract.py",
+        "tests/tooling/test_del_05_clean_state.py",
+        "tests/tooling/test_ac_01_environment.py",
+        "tests/tooling/test_del_10_native_postgresql.py",
+        "tests/tooling/test_postgresql_backup.py",
+        "tests/tooling/test_postgresql_primary_smoke.py",
+        "tests/tooling/test_del_01_delivery_entrypoint.py",
+        "tests/tooling/test_del_07_local_verification.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "postgresql-primary-with-preserved-fallback",
+        "private-owned-postgresql-lifecycle",
+        "paired-postgresql-recovery",
+        "full-source-bound-qualification",
+        "readonly-dialect-neutral-replay-evidence"
+      ]
+    },
+    {
+      "id": "del-10-live-postgresql",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-del-10-offline-postgresql"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600,
+      "network_requirement": "not_required",
+      "covers": [
+        "postgresql-runtime-and-consistent-projections",
+        "readonly-dialect-neutral-replay-evidence"
+      ]
+    },
+    {
+      "id": "del-10-native-postgresql",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-del-10-native"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "private-owned-postgresql-lifecycle",
+        "postgresql-runtime-and-consistent-projections",
+        "paired-postgresql-recovery"
+      ]
+    },
+    {
+      "id": "del-10-explicit-sqlite-native",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-native-offline"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "postgresql-primary-with-preserved-fallback",
+        "full-source-bound-qualification"
+      ]
+    },
+    {
+      "id": "del-10-exact-source-quality-audit",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "scripts.ac_16_quality",
+        "audit"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "full-source-bound-qualification"
+      ]
+    },
+    {
+      "id": "del-10-clean-state-production-delivery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-del-01"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "full-source-bound-qualification",
+        "postgresql-runtime-and-consistent-projections",
+        "private-owned-postgresql-lifecycle"
+      ]
+    },
+    {
+      "id": "del-10-legacy-sqlite-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-05-compose-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "paired-postgresql-recovery",
+        "full-source-bound-qualification"
+      ]
+    },
+    {
+      "id": "del-10-postgresql-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-10-postgresql-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "paired-postgresql-recovery",
+        "full-source-bound-qualification"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "apps/api/src/marketing_agents/config.py"
+    ],
+    "gate_id": "del-10-default-selection"
+  },
+  "limitations": [
+    "No existing Marketing Agents SQLite database or volume was found during bounded local inventory. The user authorized a fresh seeded primary in that case. No records were migrated and no existing SQLite files, unrelated volumes or checkpoint refs are removed.",
+    "PostgreSQL 17 Compose and the installed supported native PostgreSQL version are separate local qualifications. Native backups require matching major versions. This does not qualify production upgrades, hosted PostgreSQL, cross-major recovery, replication, availability or measured RPO/RTO.",
+    "Single-operator local identity and deterministic mocks remain unchanged. No live provider delivery, production authentication, secure erasure, application database encryption or universal exactly-once external effects are claimed.",
+    "Acquisition can contact registries; required runtime suites run under existing offline/network controls. The web ingress bridge retains its disclosed outbound route. This is not a fresh AC-15 four-suite kernel-isolation qualification.",
+    "The original 20-gate quality inventory stays unchanged. Acceptance adds PostgreSQL recovery without removing legacy SQLite recovery, and clean-state adds explicit PostgreSQL execution without relaxing its 1620-second execution or 120-second cleanup budgets.",
+    "Historical evidence remains bound to its original SQLite/default source. Full observed results are reported separately after freezing; focused diagnostics and optional skips do not qualify the candidate. Unsigned local attestations establish consistency, not independently authenticated execution.",
+    "No publication or main merge is authorized by this manifest. Preserve all checkpoints; keep CI disabled. Store sanitized evidence outside Git and never publish a database/key backup bundle or credential-bearing output."
+  ]
+}

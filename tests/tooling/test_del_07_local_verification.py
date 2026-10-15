@@ -1,4 +1,4 @@
-"""DEL-07: serial fail-fast gates, fresh coverage, and caller-preserving drift checks."""
+"""DEL-07/DEL-10: full fail-fast gates, fresh coverage and preserved source checks."""
 
 from __future__ import annotations
 
@@ -446,12 +446,13 @@ def test_del_07_acceptance_uses_resolved_commit_after_all_local_gates(source: Pa
 
     result = runner.verify_local(source, acceptance=True, ref="HEAD", executor=execute)
     assert result["valid"] is True
-    assert [gate.name for gate in seen[-3:]] == [
+    assert [gate.name for gate in seen[-4:]] == [
         "web-browser",
         "acceptance-clean",
         "acceptance-backup",
+        "acceptance-postgresql-backup",
     ]
-    assert f"REF={commit}" in seen[-2].argv
+    assert f"REF={commit}" in seen[-3].argv
     assert all(gate.timeout_seconds <= 1800 for gate in seen)
 
 
@@ -685,7 +686,7 @@ def test_del_07_list_is_read_only_and_ref_requires_acceptance(
     assert runner.main(["--list"]) == 0
     assert len(json.loads(capsys.readouterr().out)["gates"]) == 20
     assert runner.main(["--list", "--acceptance"]) == 0
-    assert len(json.loads(capsys.readouterr().out)["gates"]) == 22
+    assert len(json.loads(capsys.readouterr().out)["gates"]) == 23
     assert runner.main(["--list", "--backend"]) == 0
     assert len(json.loads(capsys.readouterr().out)["gates"]) == 8
     with pytest.raises(SystemExit) as invalid:

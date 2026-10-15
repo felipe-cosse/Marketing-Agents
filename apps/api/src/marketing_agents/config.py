@@ -98,7 +98,7 @@ class Settings(BaseSettings):
         "scope.external-write",
     )
     database_url: str = Field(
-        default="sqlite+aiosqlite:///./data/marketing_agents.db",
+        default="postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents",
         repr=False,
     )
     catalog_root: Path = Path("catalog/v1")

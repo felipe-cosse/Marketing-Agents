@@ -14,6 +14,7 @@ from marketing_agents.application.orchestration.executable_workflows import (
     ExecutableWorkflowRegistry,
 )
 from marketing_agents.application.ports.clock import Clock
+from marketing_agents.application.ports.unit_of_work import UnitOfWorkFactory
 from marketing_agents.application.ports.webhook_sources import WebhookSourceDefinition
 from marketing_agents.application.ports.webhooks import WebhookVerifierConfig
 from marketing_agents.application.services.approval_decisions import ApprovalDecisionService
@@ -52,6 +53,7 @@ from marketing_agents.infrastructure.db import (
     SQLAlchemyExternalActionRepository,
     SQLAlchemyInstanceConfigurationRepository,
     SQLAlchemyManualAdmissionUnitOfWorkFactory,
+    SQLAlchemyReadOnlyUnitOfWorkFactory,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyRunRepository,
     SQLAlchemyRunStepRepository,
@@ -122,6 +124,7 @@ class LocalRuntime:
     catalog_reads: CatalogReadWorkflowService
     catalog_proposals: CatalogProposalWorkflowService
     catalog_writes: CatalogWriteWorkflowService
+    read_unit_of_work: UnitOfWorkFactory
     telemetry: LocalTelemetry = field(default_factory=LocalTelemetry)
 
     def create_app(self) -> FastAPI:
@@ -142,17 +145,19 @@ class LocalRuntime:
                 recurrence=CroniterRecurrenceCalculator(),
             ),
             approval_decision_service=ApprovalDecisionService(dependencies),
-            approval_resource_service=ApprovalResourceService(dependencies),
+            approval_resource_service=ApprovalResourceService(
+                dependencies, read_unit_of_work=self.read_unit_of_work
+            ),
             run_resource_service=RunResourceService(
-                dependencies.unit_of_work_factory,
+                self.read_unit_of_work,
                 catalog_instance_ids=tuple(item.id for item in self.catalog.instances),
                 utc_now=dependencies.utc_now,
             ),
             artifact_resource_service=ArtifactResourceService(
-                dependencies.unit_of_work_factory, digest_key=self.digest_key
+                self.read_unit_of_work, digest_key=self.digest_key
             ),
             audit_resource_service=AuditResourceService(
-                dependencies.unit_of_work_factory, utc_now=dependencies.utc_now
+                self.read_unit_of_work, utc_now=dependencies.utc_now
             ),
             webhook_admission_service=self.webhook,
             readiness_probe=LocalReadinessProbe(self.settings),
@@ -314,6 +319,7 @@ async def build_runtime(settings: Settings, *, clock: Clock | None = None) -> Lo
             ),
             CatalogProposalWorkflowService(dependencies, catalog, workflows),
             CatalogWriteWorkflowService(dependencies, catalog, workflows),
+            SQLAlchemyReadOnlyUnitOfWorkFactory(database.session_factory, factories),
             telemetry,
         )
     except BaseException:

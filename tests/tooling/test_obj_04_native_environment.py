@@ -67,6 +67,7 @@ def test_obj_04_supervised_processes_keep_offline_flags_and_explicit_local_cache
         dev.Tools(Path(sys.executable), Path("/installed/node"), Path("/installed/pnpm")),
         api_port=18000,
         web_port=15173,
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'installation' / 'marketing_agents.db'}",
         inherited=inherited,
     )
     assert environment.get("COREPACK_ENABLE_NETWORK") == "0"
