@@ -63,6 +63,12 @@ export interface Obj06NetworkGuard {
   assertNoUnexpectedAttempts(): Promise<void>;
 }
 
+export interface Obj06NetworkGuardOptions {
+  // DEL-01's built production UI keeps its existing blanket WebSocket denial.
+  // The native development journey still permits exact-origin HMR by default.
+  readonly denyWebSockets?: boolean;
+}
+
 export function obj06AllowedUrl(value: string, origin: string): boolean {
   try {
     const url = new URL(value);
@@ -81,7 +87,9 @@ export function obj06AllowedUrl(value: string, origin: string): boolean {
 export async function installObj06NativeNetworkGuard(
   context: BrowserContext,
   allowedOrigin: string,
+  options: Obj06NetworkGuardOptions = {},
 ): Promise<Obj06NetworkGuard> {
+  const denyWebSockets = options.denyWebSockets === true;
   const parsed = new URL(allowedOrigin);
   if (
     parsed.protocol !== "http:" ||
@@ -192,7 +200,7 @@ export async function installObj06NativeNetworkGuard(
     await route.continue();
   });
   await context.routeWebSocket("**/*", (socket) => {
-    if (!obj06AllowedUrl(socket.url(), origin)) {
+    if (denyWebSockets || !obj06AllowedUrl(socket.url(), origin)) {
       blocked.push("websocket");
       void socket.close({ code: 1008, reason: "OBJ-06 local transport only" });
       return;

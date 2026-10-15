@@ -175,6 +175,16 @@ smoke. It removes only its own test resources. Required tests use no provider
 credentials. Broader delivery/acceptance status remains in the
 [requirements matrix](docs/implementation-plan/16-requirements-traceability-matrix.md).
 
+`make verify-del-01` pins that clean-state journey to the current committed
+`HEAD`. Its production browser additionally submits the Social draft through the
+real UI, follows the completed run to its authorized artifact, and reloads that
+artifact to check persisted identity and provenance. It retains all existing
+desktop/mobile, console, network, demo, restart and offline-suite checks.
+`make test-del-01` runs only its focused wiring and negative-control regressions;
+it is not live-stack proof. [DEL-01](docs/verification/requirements/DEL-01.md)
+requires fresh complete source-bound quality, clean-state and paired-backup
+qualification before a merge request. Neither command enables CI or real adapters.
+
 ## Local-only safety boundary
 
 This is not a multi-user production deployment. Local identity grants the local

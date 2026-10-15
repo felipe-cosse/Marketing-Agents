@@ -18,6 +18,7 @@ let tripwire: Server;
 let origin: string;
 let otherOrigin: string;
 let forbiddenHits = 0;
+let approvedUpgradeHits = 0;
 let headers: IncomingHttpHeaders | undefined;
 
 async function listen(server: Server): Promise<string> {
@@ -60,6 +61,10 @@ test.beforeAll(async () => {
       );
     }
   });
+  approved.on("upgrade", (_request, socket) => {
+    approvedUpgradeHits += 1;
+    socket.destroy();
+  });
   origin = await listen(approved);
 });
 test.afterAll(async () => {
@@ -71,6 +76,7 @@ test.afterAll(async () => {
 });
 test.beforeEach(() => {
   forbiddenHits = 0;
+  approvedUpgradeHits = 0;
   headers = undefined;
 });
 
@@ -152,6 +158,56 @@ test("OBJ-06 off-origin fetch, WebSocket and popup never reach local tripwire", 
     expect(forbiddenHits).toBe(0);
     await expect(guard.assertNoUnexpectedAttempts()).rejects.toThrow(
       "blocked 3 unexpected requests",
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test("DEL-01 native transport preserves browser metadata while denying every WebSocket", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  try {
+    const guard = await installObj06NativeNetworkGuard(context, origin, {
+      denyWebSockets: true,
+    });
+    const page = await context.newPage();
+    await page.goto(origin);
+    const status = await page.evaluate(
+      async () =>
+        (
+          await fetch("/mutation", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          })
+        ).status,
+    );
+    expect(status).toBe(200);
+    expect(headers?.origin).toBe(origin);
+    expect(headers?.["sec-fetch-site"]).toBe("same-origin");
+    expect(headers?.["sec-fetch-mode"]).toBe("cors");
+    await guard.assertNoUnexpectedAttempts();
+    for (const target of [origin, otherOrigin]) {
+      expect(
+        await page.evaluate(
+          (url) =>
+            new Promise<boolean>((resolve) => {
+              const socket = new WebSocket(url.replace("http:", "ws:"));
+              socket.onopen = () => resolve(false);
+              socket.onerror = () => resolve(true);
+              socket.onclose = () => resolve(true);
+            }),
+          target,
+        ),
+      ).toBe(true);
+    }
+    expect(guard.blocked).toEqual(["websocket", "websocket"]);
+    expect(approvedUpgradeHits).toBe(0);
+    expect(forbiddenHits).toBe(0);
+    await expect(guard.assertNoUnexpectedAttempts()).rejects.toThrow(
+      "blocked 2 unexpected requests",
     );
   } finally {
     await context.close();

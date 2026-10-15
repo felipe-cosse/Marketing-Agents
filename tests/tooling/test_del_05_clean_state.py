@@ -342,6 +342,54 @@ def test_del_05_offline_suites_stop_runtime_and_restore_verified_runtime_before_
     assert verifier.report["ok"]
 
 
+@pytest.mark.parametrize("port", (8080, 18080, 65535))
+def test_del_01_browser_uses_published_origin_without_changing_docker_boundary(
+    offline_sequence, port
+):
+    verifier, calls, _ = offline_sequence
+    verifier.origin = f"http://127.0.0.1:{port}"
+    verifier.execute()
+    browser = [
+        (argv, kwargs)
+        for label, argv, kwargs in calls
+        if label == "production-browser-loopback-only"
+    ]
+    assert browser == [
+        (
+            [
+                "docker",
+                "run",
+                "--name",
+                f"{verifier.project}-browser",
+                "--label",
+                f"com.docker.compose.project={verifier.project}",
+                "--network",
+                "container:" + "a" * 64,
+                "--env",
+                "CI=1",
+                f"{verifier.project}-web-verification",
+                "node",
+                "apps/web/scripts/del-01-loopback-relay.mjs",
+                "--origin",
+                verifier.origin,
+            ],
+            {"timeout": 600},
+        )
+    ]
+    readiness = [argv for label, argv, _ in calls if label == "verify-resumed-runtime"]
+    assert len(readiness) == 1
+    assert readiness[0][-2:] == ["--origin", verifier.origin]
+
+
+def test_del_01_browser_relay_failure_never_records_success(offline_sequence):
+    verifier, calls, options = offline_sequence
+    options["fail_at"] = "production-browser-loopback-only"
+    with pytest.raises(VerificationFailure, match="injected_command_failure"):
+        verifier.execute()
+    assert "retain-browser-evidence" not in [label for label, _, _ in calls]
+    assert not verifier.report["ok"]
+
+
 @pytest.mark.parametrize("service", ("api", "web", "run-worker", "scheduler-worker"))
 def test_del_05_running_runtime_blocks_offline_suites(offline_sequence, service):
     verifier, calls, options = offline_sequence

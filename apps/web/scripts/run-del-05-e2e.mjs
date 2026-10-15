@@ -7,6 +7,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installPlaywrightIsolation } from "../../../scripts/playwright-network-isolation.mjs";
+import { installObj06NativeNetworkGuard } from "../config/obj-06-native-network.ts";
+import { runDel01ProductJourney } from "./del-01-product-journey.mjs";
 
 const args = process.argv.slice(2);
 assert.equal(
@@ -40,13 +42,15 @@ const isolation = await installPlaywrightIsolation({
   context,
   requestFactory: request,
   allowedOrigin: origin.origin,
+  // DEL-01 needs Chromium's own Origin/Fetch Metadata for genuine mutations.
+  // Retain DEL-05's denial of every WebSocket, including same-origin sockets.
+  installContextGuard: (guardedContext, allowedOrigin) =>
+    installObj06NativeNetworkGuard(guardedContext, allowedOrigin, {
+      denyWebSockets: true,
+    }),
 });
 
 try {
-  await context.routeWebSocket(/.*/, (socket) => {
-    failures.push("unexpected_websocket_blocked");
-    socket.close();
-  });
   const page = await context.newPage();
   page.on("pageerror", () => failures.push("uncaught_page_error"));
   page.on("console", (message) => {
@@ -110,6 +114,11 @@ try {
     false,
     "mobile document must not overflow horizontally",
   );
+  const deliveryChecks = await runDel01ProductJourney({
+    page,
+    expect,
+    origin: origin.origin,
+  });
   assert.deepEqual(
     failures,
     [],
@@ -128,6 +137,7 @@ try {
         "zoom",
         "search",
         "mobile-tree",
+        ...deliveryChecks,
       ],
       warnings: warnings.length,
       screenshots: evidence,
