@@ -1,0 +1,125 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-01",
+  "matrix_statement_sha256": "c2bb26b547075ae41cbaabf747960ad620ccb2376b7695a6d740d84502516f0e",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "README.md",
+      "apps/web/scripts/run-del-05-e2e.mjs",
+      "apps/web/scripts/del-01-product-journey.mjs",
+      "apps/web/scripts/del-01-product-journey.test.mjs",
+      "apps/web/config/obj-06-native-network.ts",
+      "apps/web/config/obj-06-network-canary.spec.ts",
+      "tests/tooling/test_del_01_delivery_entrypoint.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/DEL-01.json",
+      "docs/verification/requirements/DEL-01.md"
+    ],
+    "required_path_groups": [
+      {"kind": "implementation", "one_of": ["Makefile"]},
+      {"kind": "implementation", "one_of": ["apps/web/scripts/run-del-05-e2e.mjs"]},
+      {"kind": "implementation", "one_of": ["apps/web/scripts/del-01-product-journey.mjs"]},
+      {"kind": "implementation", "one_of": ["apps/web/config/obj-06-native-network.ts"]},
+      {"kind": "test", "one_of": ["apps/web/scripts/del-01-product-journey.test.mjs"]},
+      {"kind": "test", "one_of": ["apps/web/config/obj-06-network-canary.spec.ts"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_del_01_delivery_entrypoint.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "production-ui-to-persisted-artifact",
+      "type": "journey",
+      "statement": "The fresh production browser submits the read-only Social draft through real UI controls and the web proxy to the API, worker and database. It correlates the accepted receipt, completed run and authorized artifact, verifies mock/read-only provenance, and reloads the same artifact. No fulfilled API response or fixture backend substitutes for this live composition.",
+      "test_refs": ["apps/web/scripts/del-01-product-journey.test.mjs"]
+    },
+    {
+      "id": "delivery-negative-controls",
+      "type": "negative_control",
+      "statement": "Injected-browser regressions reject broken receipt, run, artifact, provenance and reload relationships; they are not live-stack evidence. The native guard preserves Chromium security metadata, with deny-all-WebSocket mode checked by an owned canary. Existing redirect, off-origin, hierarchy, desktop/mobile and console checks remain mandatory. The complete clean-state gate supplies live delivery evidence.",
+      "test_refs": ["apps/web/scripts/del-01-product-journey.test.mjs", "apps/web/config/obj-06-network-canary.spec.ts"]
+    },
+    {
+      "id": "committed-head-delivery-entrypoint",
+      "type": "contract",
+      "statement": "The new delivery entrypoint serially invokes the existing complete clean-state verifier with REF=HEAD, forwards failures, and cannot silently select an older ref or replace verification with an audit or a partial suite. Restoring only Makefile to the base removes this hook and causes the retained connection tests to fail ordinarily.",
+      "test_refs": ["tests/tooling/test_del_01_delivery_entrypoint.py"]
+    },
+    {
+      "id": "complete-frozen-source-qualification",
+      "type": "contract",
+      "statement": "Before merge approval the exact frozen candidate requires an observed complete AC-16 20-gate run and matching audit, then full committed-HEAD clean-state/browser and paired-backup gates. All existing checks, coverage, inventories, network boundaries and deadlines remain unchanged. This covers the complete constituent checks without claiming a literal make acceptance invocation.",
+      "test_refs": ["tests/tooling/test_del_01_delivery_entrypoint.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-01-entrypoint-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_del_01_delivery_entrypoint.py"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["committed-head-delivery-entrypoint", "complete-frozen-source-qualification"]
+    },
+    {
+      "id": "del-01-browser-journey-regressions",
+      "runner": "argv",
+      "argv": ["node", "--test", "apps/web/scripts/del-01-product-journey.test.mjs"],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": ["production-ui-to-persisted-artifact", "delivery-negative-controls"]
+    },
+    {
+      "id": "del-01-existing-clean-state-controls",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_del_05_clean_state.py", "tests/tooling/test_ac_01_browser_evidence.py"],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "not_required",
+      "covers": ["delivery-negative-controls", "complete-frozen-source-qualification"]
+    },
+    {
+      "id": "del-01-source-bound-quality-audit",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.ac_16_quality", "audit"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["delivery-negative-controls", "complete-frozen-source-qualification"]
+    },
+    {
+      "id": "del-01-complete-production-delivery",
+      "runner": "argv",
+      "argv": ["make", "-j1", "verify-del-01"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["production-ui-to-persisted-artifact", "delivery-negative-controls", "committed-head-delivery-entrypoint", "complete-frozen-source-qualification"]
+    },
+    {
+      "id": "del-01-paired-compose-backup",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-05-compose-backup"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["complete-frozen-source-qualification"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["Makefile"],
+    "gate_id": "del-01-entrypoint-regressions"
+  },
+  "limitations": [
+    "DEL-01 adds executable delivery qualification for the existing backend/frontend, not a new API, workflow, connector or UI feature. Its injected-browser and Make-fixture controls cannot prove live execution; only the separately observed complete runs qualify the exact candidate.",
+    "The delivered target is single-operator local identity, SQLite and deterministic mocks. Optional PostgreSQL skips are not PostgreSQL qualification. Live-provider delivery, production authentication, cloud deployment, exactly-once remote effects, secure erasure and production RPO/RTO remain unqualified.",
+    "The new production UI journey exercises one read-only Social draft; it does not claim all five demos are driven through browser controls. Existing five-demo HTTP, Email approval, replay/restart, full browser inventory and other quality checks remain independently required and unfiltered.",
+    "Image/dependency acquisition may use registries. Backend/frontend test containers use network-none and browser requests use the existing scoped same-origin policy. The web ingress container retains its disclosed OS outbound route; this is not universal container egress denial or a fresh AC-15 kernel-isolation run.",
+    "The fresh 20-gate quality run plus complete clean-state and paired-backup gates cover the acceptance aggregate's constituent checks, but are not a literal make acceptance invocation. Local unsigned records prove consistency, not independently authenticated execution. CI stays disabled and all checkpoint branches are preserved.",
+    "No main merge is authorized by this manifest. Do not amend the source or commit metadata after qualification. Preserve failed candidates before replacement; keep sanitized reports and screenshots outside Git and never retain credentials, raw payloads or database/key bundles as evidence."
+  ]
+}

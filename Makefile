@@ -397,6 +397,16 @@ verify-exec-07:
 verify-exec-08:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.verify_exec_08_handoff
 
+# DEL-01 qualifies the actual committed production backend/frontend composition.
+.PHONY: verify-del-01
+verify-del-01:
+	$(MAKE) -j1 verify-clean REF=HEAD
+
+.PHONY: test-del-01
+test-del-01:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m pytest -q tests/tooling/test_del_01_delivery_entrypoint.py
+	node --test apps/web/scripts/del-01-product-journey.test.mjs
+
 audit-ac-16:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.ac_16_quality audit
 
