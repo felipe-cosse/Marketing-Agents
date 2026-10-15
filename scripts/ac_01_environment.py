@@ -20,6 +20,7 @@ BACKEND_SERVICES: Final = (
     "migrate-seed",
 )
 SERVICES: Final = (
+    "postgres",
     "api",
     "web",
     "run-worker",
@@ -43,7 +44,7 @@ _BASE_BACKEND_COMPOSE_ENVIRONMENT: Final = {
     "ALLOW_EXTERNAL_NETWORK": "false",
     "REAL_LLM_OPT_IN": "false",
     "REAL_CONNECTOR_OPT_IN": "false",
-    "DATABASE_URL": "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+    "DATABASE_URL": "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents?host=/var/run/marketing-agents-postgres",
     "MARKETING_AGENTS_DIGEST_KEY_PATH": "/var/lib/marketing-agents/secrets/digest.key",
     "CATALOG_ROOT": "/app/catalog/v1",
     "API_HOST": "127.0.0.1",
@@ -54,6 +55,15 @@ _BASE_BACKEND_COMPOSE_ENVIRONMENT: Final = {
 # instructions in each tracked runtime stage.  Image inspection binds the values
 # to an immutable image ID before any container is accepted.
 _EXPECTED_IMAGE_ENVIRONMENTS: Final = {
+    "postgres": {
+        "PATH": "/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG": "C.UTF-8",
+        "GPG_KEY": "7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION": "3.12.14",
+        "PYTHON_SHA256": "5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUNBUFFERED": "1",
+    },
     "backend": {
         "PATH": (
             "/app/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:"
@@ -73,7 +83,7 @@ _EXPECTED_IMAGE_ENVIRONMENTS: Final = {
         "ALLOW_EXTERNAL_NETWORK": "false",
         "REAL_LLM_OPT_IN": "false",
         "REAL_CONNECTOR_OPT_IN": "false",
-        "DATABASE_URL": "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+        "DATABASE_URL": "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents?host=/var/run/marketing-agents-postgres",
         "MARKETING_AGENTS_DIGEST_KEY_PATH": "/var/lib/marketing-agents/secrets/digest.key",
         "CATALOG_ROOT": "/app/catalog/v1",
     },
@@ -170,7 +180,7 @@ def _expected_compose_environment(
 ) -> dict[str, str]:
     _validate_context(project, port, fixture_scope)
     _require(service in SERVICES, "unexpected_environment_service")
-    if service == "web":
+    if service in {"web", "postgres"}:
         return {}
     expected = dict(_BASE_BACKEND_COMPOSE_ENVIRONMENT)
     expected["API_TRUSTED_ORIGINS"] = json.dumps(
@@ -246,7 +256,7 @@ def validate_runtime_container_environment(
 
     _validate_context(project, port, fixture_scope)
     _require(service in SERVICES, "unexpected_environment_service")
-    required_kind = "web" if service == "web" else "backend"
+    required_kind = service if service in {"web", "postgres"} else "backend"
     _require(
         baseline.image_kind == required_kind
         and bool(_IMAGE_ID_PATTERN.fullmatch(baseline.image_id))

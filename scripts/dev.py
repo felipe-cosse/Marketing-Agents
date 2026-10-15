@@ -22,6 +22,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+if __package__:
+    from scripts import native_postgres
+else:
+    import native_postgres
+
 ROOT = Path(__file__).resolve().parents[1]
 NODE_VERSION = "v24.20.0"
 PNPM_VERSION = "11.24.0"
@@ -120,6 +125,7 @@ def safe_environment(
     *,
     api_port: int,
     web_port: int,
+    database_url: str,
     inherited: Mapping[str, str] | None = None,
     root: Path = ROOT,
 ) -> dict[str, str]:
@@ -145,7 +151,7 @@ def safe_environment(
                 ]
             ),
             "MARKETING_AGENTS_NATIVE_API_PORT": str(api_port),
-            "DATABASE_URL": f"sqlite+aiosqlite:///{state / 'marketing_agents.db'}",
+            "DATABASE_URL": database_url,
             "MARKETING_AGENTS_DIGEST_KEY_PATH": str(state / "secrets" / "digest.key"),
             "CATALOG_ROOT": str(root / "catalog" / "v1"),
         }
@@ -367,8 +373,23 @@ def run(args: argparse.Namespace) -> None:
     tools = prerequisites(node=args.node)
     state = state_directory(args.state_dir)
     require_free_ports(args.api_port, args.web_port)
-    environment = safe_environment(state, tools, api_port=args.api_port, web_port=args.web_port)
     with installation_lock(state):
+        postgres = None
+        if args.database == "postgresql":
+            postgres = native_postgres.ManagedPostgres(state, _tool_environment(node=tools.node))
+            database_url = postgres.url
+        else:
+            if os.path.lexists(state / "postgres") or os.path.lexists(
+                state / native_postgres.MARKER
+            ):
+                raise NativeStartupError(
+                    "native_existing_postgres: use --database postgresql for that installation, "
+                    "or choose a fresh --state-dir for SQLite"
+                )
+            database_url = f"sqlite+aiosqlite:///{state / 'marketing_agents.db'}"
+        environment = safe_environment(
+            state, tools, api_port=args.api_port, web_port=args.web_port, database_url=database_url
+        )
         logs = Path(tempfile.mkdtemp(prefix="native-run-", dir=state))
         supervisor = Supervisor(environment=environment, logs=logs)
         previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
@@ -380,6 +401,7 @@ def run(args: argparse.Namespace) -> None:
         for sig in previous:
             signal.signal(sig, stop)
         try:
+            database_children = [postgres.start(supervisor)] if postgres is not None else []
             python = str(tools.python)
             supervisor.initialize(
                 "local-secret",
@@ -401,9 +423,10 @@ def run(args: argparse.Namespace) -> None:
                     cwd=state,
                 )
             active = [
+                *database_children,
                 supervisor.start(
                     "api", [python, "-m", "marketing_agents.workers.serve_api"], cwd=state
-                )
+                ),
             ]
             for kind in ("run", "scheduler"):
                 active.append(
@@ -469,9 +492,13 @@ def run(args: argparse.Namespace) -> None:
                 supervisor.check_children(active)
                 time.sleep(0.25)
         finally:
-            supervisor.close()
-            for sig, handler in previous.items():
-                signal.signal(sig, handler)
+            try:
+                supervisor.close()
+                if postgres is not None:
+                    postgres.close()
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -481,15 +508,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--web-port", type=int, default=5173)
     parser.add_argument("--startup-timeout", type=float, default=90)
     parser.add_argument("--node", type=Path, help="Explicit installed Node 24.20.0 binary")
+    parser.add_argument(
+        "--database",
+        choices=("postgresql", "sqlite"),
+        default="postgresql",
+        help="Owned local PostgreSQL by default; SQLite requires explicit opt-in",
+    )
     parser.add_argument("--smoke", action="store_true", help="Wait for readiness, then stop")
     args = parser.parse_args(argv)
     if not 1 <= args.startup_timeout <= 300:
         parser.error("startup timeout must be between 1 and 300 seconds")
     try:
         run(args)
-    except (NativeStartupError, OSError) as error:
+    except (NativeStartupError, native_postgres.NativePostgresError, OSError) as error:
         print(
-            str(error) if isinstance(error, NativeStartupError) else "native_process_start_failed",
+            str(error)
+            if isinstance(error, (NativeStartupError, native_postgres.NativePostgresError))
+            else "native_process_start_failed",
             file=sys.stderr,
         )
         return 1

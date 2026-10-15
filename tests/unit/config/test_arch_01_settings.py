@@ -1,5 +1,9 @@
-import unittest
+"""ARCH-01/DEL-10: typed safe settings and explicit primary database selection."""
 
+import unittest
+from pathlib import Path
+
+import marketing_agents.config as config
 from marketing_agents.config import Settings
 from pydantic import ValidationError
 
@@ -7,13 +11,30 @@ from pydantic import ValidationError
 class SettingsTests(unittest.TestCase):
     """Requirement ARCH-01: typed settings preserve secure local defaults."""
 
-    def test_arch_01_defaults_are_loopback_mock_and_sqlite(self) -> None:
+    def test_del_10_settings_belong_to_the_collected_source_tree(self) -> None:
+        expected = Path(__file__).resolve().parents[3] / "apps/api/src/marketing_agents/config.py"
+        self.assertEqual(expected, Path(config.__file__).resolve())
+
+    def test_arch_01_defaults_are_loopback_mock_and_postgresql(self) -> None:
         settings = Settings(_env_file=None)
         self.assertEqual("127.0.0.1", settings.api_host)
         self.assertEqual("mock", settings.llm_provider)
         self.assertEqual("mock", settings.connector_mode)
         self.assertFalse(settings.allow_external_network)
-        self.assertTrue(settings.database_url.startswith("sqlite+aiosqlite://"))
+        self.assertEqual(
+            "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents",
+            settings.database_url,
+        )
+
+    def test_postgresql_primary_preserves_explicit_sqlite_selection(self) -> None:
+        selected = "sqlite+aiosqlite:///./data/retained.db"
+        settings = Settings(_env_file=None, database_url=selected)
+        self.assertEqual(settings.database_url, selected)
+        self.assertFalse(settings.allow_external_network)
+
+    def test_postgresql_primary_rejects_invalid_selection_without_fallback(self) -> None:
+        with self.assertRaises(ValidationError):
+            Settings(_env_file=None, database_url="postgresql://localhost/marketing_agents")
 
     def test_arch_01_rejects_unsafe_environment_and_network_modes(self) -> None:
         with self.assertRaises(ValidationError):

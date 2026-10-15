@@ -198,7 +198,7 @@ class DockerTransport:
                     "--project-name",
                     self.project,
                     "--file",
-                    str(ROOT / "compose.yaml"),
+                    str(ROOT / "compose.sqlite.yaml"),
                     "config",
                     "--format",
                     "json",

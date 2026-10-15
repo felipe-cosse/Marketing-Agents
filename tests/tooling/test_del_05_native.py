@@ -30,6 +30,7 @@ def test_del_05_native_environment_is_explicit_mock_local_and_credential_free(
         _tools(),
         api_port=18000,
         web_port=15173,
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'marketing_agents.db'}",
         inherited={
             "HOME": "/test/home",
             "PATH": "/bin",
@@ -231,6 +232,7 @@ def test_del_05_native_smoke_wires_all_services_after_shared_initialization(
             web_port=15173,
             startup_timeout=1,
             smoke=True,
+            database="sqlite",
         )
     )
     assert [(item[0], item[1]) for item in calls[:-1]] == [

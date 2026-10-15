@@ -59,12 +59,12 @@ REQUIRED = (
     "scripts/ac_01_environment.py",
     "Makefile",
 )
-DATABASE = "/var/lib/marketing-agents/data/marketing_agents.db"
+DATABASE = "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents?host=/var/run/marketing-agents-postgres"
 KEY = "/var/lib/marketing-agents/secrets/digest.key"
 API_SOCKET = "/var/run/marketing-agents/api.sock"
-VOLUMES = ("data", "local-secrets", "api-socket")
+VOLUMES = ("postgres-data", "postgres-socket", "postgres-secrets", "api-socket")
 BACKENDS = ("api", "run-worker", "scheduler-worker", "local-secret-init", "migrate-seed")
-RUNTIME_SERVICES = ("api", "web", "run-worker", "scheduler-worker")
+RUNTIME_SERVICES = ("api", "web", "run-worker", "scheduler-worker", "postgres")
 PROJECT_PATTERN = re.compile(r"^marketing-agents-del05-[0-9a-f]{16}$")
 PUBLIC_FIXTURE_HMAC = "del-05-public-test-signing-material-never-use-as-a-secret"
 EXECUTION_SECONDS = 1620
@@ -304,12 +304,21 @@ def validate_compose_boundary(config: dict, project: str, source: Path | None = 
     )
     require(
         set(config["services"])
-        == {"api", "web", "run-worker", "scheduler-worker", "local-secret-init", "migrate-seed"},
+        == {
+            "api",
+            "web",
+            "run-worker",
+            "scheduler-worker",
+            "local-secret-init",
+            "migrate-seed",
+            "postgres",
+        },
         "unexpected_compose_services",
     )
     require(not config.get("secrets") and not config.get("configs"), "external_config_forbidden")
     for name, service in config["services"].items():
-        expected_image = f"{project}-{'web' if name == 'web' else 'backend'}:local"
+        kind = name if name in {"web", "postgres"} else "backend"
+        expected_image = f"{project}-{kind}:local"
         require(service.get("image") == expected_image, "image_tag_outside_scoped_project")
         require(
             not service.get("privileged")
@@ -341,9 +350,25 @@ def validate_compose_boundary(config: dict, project: str, source: Path | None = 
             {("api-socket", "/var/run/marketing-agents", True)}
             if name == "web"
             else {
-                ("data", "/var/lib/marketing-agents/data", name == "local-secret-init"),
-                ("local-secrets", "/var/lib/marketing-agents/secrets", name != "local-secret-init"),
+                ("postgres-socket", "/var/run/marketing-agents-postgres", True),
+                (
+                    "postgres-secrets",
+                    "/var/lib/marketing-agents/secrets",
+                    name != "local-secret-init",
+                ),
             }
+        )
+        if name == "postgres":
+            expected_mounts = {
+                ("postgres-data", "/var/lib/postgresql/data", False),
+                ("postgres-socket", "/var/run/marketing-agents-postgres", False),
+            }
+        require(
+            service.get("user")
+            == (
+                "101:101" if name == "web" else "999:10001" if name == "postgres" else "10001:10001"
+            ),
+            "unexpected_service_user",
         )
         if name == "api":
             expected_mounts.add(("api-socket", "/var/run/marketing-agents", False))
@@ -395,7 +420,10 @@ def validate_container_network(inspected: dict, service: str, project: str, port
             "runtime_loopback_port_not_published",
         )
     else:
-        require(service in BACKENDS and network_mode == "none", "runtime_backend_network_not_none")
+        require(
+            service in (*BACKENDS, "postgres") and network_mode == "none",
+            "runtime_backend_network_not_none",
+        )
         require(not ports and set(networks).issubset({"none"}), "runtime_backend_network_attached")
 
 
@@ -555,7 +583,7 @@ class Verification:
                 "python",
                 "scripts/del_05_runtime_smoke.py",
                 "snapshot",
-                "--database",
+                "--database-url",
                 DATABASE,
                 "--key",
                 KEY,
@@ -755,7 +783,7 @@ class Verification:
         port = urlsplit(self.origin).port
         require(port is not None, "missing_runtime_loopback_port")
         baselines = {}
-        for kind in ("backend", "web"):
+        for kind in ("backend", "web", "postgres"):
             images = json.loads(
                 self.command(
                     f"inspect-runtime-image-{kind}",
@@ -772,7 +800,7 @@ class Verification:
                 "runtime_image_source_revision_mismatch",
             )
             baselines[kind] = verify_image_environment(images[0], image_kind=kind)
-        for service in ("web", *BACKENDS):
+        for service in ("web", *BACKENDS, "postgres"):
             container_id = (
                 self.compose_command(f"resolve-runtime-{service}", "ps", "--all", "-q", service)
                 .stdout.decode()
@@ -791,7 +819,7 @@ class Verification:
             validate_runtime_container_environment(
                 inspected[0],
                 service=service,
-                baseline=baselines["web" if service == "web" else "backend"],
+                baseline=baselines[service if service in {"web", "postgres"} else "backend"],
                 project=self.project,
                 port=port,
                 fixture_scope=fixture_scope,
@@ -803,7 +831,7 @@ class Verification:
             "s.settimeout(2); result=s.connect_ex(('192.0.2.1',443)); s.close(); "
             "assert result in (errno.ENETUNREACH,errno.EHOSTUNREACH), 'unexpected_external_route'"
         )
-        for service in ("api", "run-worker", "scheduler-worker"):
+        for service in ("api", "run-worker", "scheduler-worker", "postgres"):
             self.compose_command(
                 f"probe-no-external-route-{service}", "exec", "-T", service, "python", "-c", probe
             )
@@ -985,6 +1013,11 @@ class Verification:
         self.report["offline_runtime_isolation"] = {"all_services_stopped": True}
         self.run_offline(
             f"{self.project}-api-verification", ["make", "verify-del-05-offline-backend"], "backend"
+        )
+        self.run_offline(
+            f"{self.project}-api-verification",
+            ["make", "verify-del-10-offline-postgresql"],
+            "postgresql",
         )
         self.run_offline(
             f"{self.project}-web-verification", ["make", "verify-del-05-offline-web"], "frontend"

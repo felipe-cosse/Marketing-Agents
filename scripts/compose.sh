@@ -4,6 +4,12 @@ set -eu
 del05_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 del05_project=${COMPOSE_PROJECT_NAME:-marketing-agents-local}
 del05_port=${MARKETING_AGENTS_WEB_PORT:-8080}
+del05_database=${MARKETING_AGENTS_DATABASE:-postgresql}
+case "$del05_database" in
+    postgresql) del05_file=compose.yaml ;;
+    sqlite) del05_file=compose.sqlite.yaml ;;
+    *) echo 'Database must be postgresql or explicitly sqlite.' >&2; exit 2 ;;
+esac
 case "$del05_project" in
     marketing-agents-*) ;;
     *) echo 'Compose project must start with marketing-agents-.' >&2; exit 2 ;;
@@ -34,12 +40,16 @@ case "$del05_major" in ''|*[!0-9]*) echo 'Docker engine version is unavailable.'
 export COMPOSE_PROJECT_NAME="$del05_project" MARKETING_AGENTS_WEB_PORT="$del05_port"
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
 del05_compose() {
-    docker compose --env-file /dev/null --project-directory "$del05_root" --project-name "$del05_project" --file "$del05_root/compose.yaml" "$@"
+    docker compose --env-file /dev/null --project-directory "$del05_root" --project-name "$del05_project" --file "$del05_root/$del05_file" "$@"
 }
 case "${1:-}" in
     up)
+        if [ "$del05_database" = postgresql ] && docker volume inspect "${del05_project}_data" >/dev/null 2>&1; then
+            echo 'Existing SQLite volume preserved. Use MARKETING_AGENTS_DATABASE=sqlite or a new Compose project; PostgreSQL does not migrate or hide existing records.' >&2
+            exit 2
+        fi
         del05_compose up --build --detach --wait --wait-timeout 180
-        echo "Marketing Agents: http://127.0.0.1:$del05_port (local identity, deterministic mocks, API/workers network-disabled)"
+        echo "Marketing Agents: http://127.0.0.1:$del05_port ($del05_database, local identity, deterministic mocks, API/workers network-disabled)"
         ;;
     down) del05_compose down --timeout 40 ;;
     logs) del05_compose logs --no-color --tail 100 ;;

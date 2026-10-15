@@ -144,6 +144,7 @@ Allowed status values:
 | DEL-07 | Required unit/catalog/API/state/idempotency/approval/adapter/frontend tests. | 14 | Full test tree | `make verify` | verified |
 | DEL-08 | Format/lint/type/test task runner commands. | 01, 14, 15 | Makefile/configs | Static gates | implemented |
 | DEL-09 | History verification accepts only explicitly pinned legacy merge-subject exceptions. | 14, 15 | Evidence verifier/policy | Pinned exception tooling tests | verified |
+| DEL-10 | PostgreSQL is the primary seeded database with explicit SQLite compatibility and preserved local security and recovery boundaries. | 04, 14, 15 | Private PostgreSQL Compose/native startup and paired logical backup | Full quality, live PostgreSQL, clean-state browser, native restart and paired restore gates | implemented |
 
 ## Acceptance criteria matrix
 

@@ -44,7 +44,10 @@ ignored caches or build output.
 | `make test-del-04-persistence` | SQLite migrations, seed, readiness, and native CLI contracts. |
 | `make test-del-05-runtime` | Real local API/worker/scheduler process composition, claims, restart, and mock demos. |
 | `make test-del-05-backup` | Paired database/key backup contracts and rejection paths. |
-| `make test-del-05-compose-backup` | Scoped Docker round-trip into new storage, distinct from the startup smoke. |
+| `make test-del-05-compose-backup` | Legacy SQLite scoped Docker round-trip into new storage, distinct from the startup smoke. |
+| `make verify-del-10-native` | Required native PostgreSQL startup, five demos, Email approval barrier, restart/replay and paired recovery against owned storage. |
+| `make verify-del-10-offline-postgresql` | Required opt-in PostgreSQL migrations, seed, CLI and runtime cases; no prerequisite skips. Also runs inside the clean verifier's network-none image. |
+| `make test-del-10-postgresql-backup` | Required PostgreSQL paired dump/key backup and restore into fresh scoped Compose storage. |
 | `make verify-clean REF=HEAD` | Exact committed export, fresh Docker storage, deployed demos/replay, offline suites, production browser smoke, owned cleanup. Does not test uncommitted edits. |
 | `make verify` | Ordered catalog-first local static, repository, network, backend coverage, frontend and full browser gates, then source-drift comparison. Stops at the first failure. |
 | `make verify-exec-06` | The unchanged complete AC-16 source-bound quality run: all 20 gates, 17 safety-coverage modules, and 16 browser runners. Requires clean committed source; no partial selector or replacement command. |
@@ -200,18 +203,30 @@ fresh full-suite pass, AC-15 no-external-call acceptance, AC-16 quality-gate pas
 or final release acceptance. Browser interception is not a universal
 operating-system egress boundary for arbitrary child processes.
 
-## Optional PostgreSQL compatibility
+## Required PostgreSQL-primary qualification
 
-Optional PostgreSQL tests use an opt-in temporary Unix-socket cluster and the
-project's optional `postgresql` dependency. Install the extra and supported
-PostgreSQL binaries first; see the [fixture contract](../tests/support/postgresql_runtime.py).
+The ordinary backend suite retains optional collection semantics for its legacy
+PostgreSQL cases. DEL-10 separately requires explicit opt-in execution against
+owned Unix-socket clusters; absence of the driver or server binaries fails
+instead of skipping. asyncpg is now a required dependency. Native verification
+requires supported PostgreSQL 14+ binaries; the clean verifier uses the pinned
+PostgreSQL 17 binaries with no IP network. See the
+[fixture contract](../tests/support/postgresql_runtime.py).
 
 ```sh
-make test-del-04-postgresql
+make verify-del-10-offline-postgresql
+make verify-del-10-native
+make test-del-10-postgresql-backup
 ```
 
-Skipped compatibility cases are **skipped**, not passed. A SQLite success is
-not PostgreSQL qualification. No live PostgreSQL run was performed for DEL-06.
+## Optional PostgreSQL compatibility
+
+This historical collection mode still applies to the ordinary backend suite,
+not to the mandatory DEL-10 gates above. Skipped compatibility cases are **skipped**, not passed. A SQLite success is
+not PostgreSQL qualification. No live PostgreSQL run was performed for DEL-06;
+that historical scope is unchanged. The PostgreSQL-primary candidate requires
+the complete source-bound quality, clean-state/browser, native PostgreSQL and
+both PostgreSQL and legacy SQLite recovery gates before merge approval.
 
 ## Results, witnesses, and unresolved release work
 

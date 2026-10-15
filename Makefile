@@ -21,7 +21,7 @@ HEAD ?= HEAD
 verify-exec-04:
 	PYTHONDONTWRITEBYTECODE=1 $(UV) run --offline --frozen python -m scripts.verify_exec_04
 
-DATABASE_URL ?= sqlite+aiosqlite:///./data/marketing_agents.db
+DATABASE_URL ?= postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents
 MARKETING_AGENTS_DIGEST_KEY_PATH ?= data/digest.key
 CATALOG_ROOT ?= catalog/v1
 
@@ -354,6 +354,7 @@ api-contract-generate:
 	node tools/api-contract/generate.mjs --write
 
 verify-repository:
+	$(MAKE) -j1 verify-del-10-tooling
 	$(UV) run --offline --frozen ruff format --check scripts/verify_exec_04.py tests/tooling/test_exec_04_foundation_gate.py
 	$(UV) run --offline --frozen ruff check scripts/verify_exec_04.py tests/tooling/test_exec_04_foundation_gate.py
 	$(UV) run --offline --frozen ruff format --check scripts/ac_16_quality.py tests/tooling/test_ac_16_quality.py
@@ -441,6 +442,8 @@ verify-web: web-format-check web-lint web-typecheck web-test web-test-demo-01-un
 LOCAL_MODE ?= compose
 LOCAL_PROJECT ?= marketing-agents-local
 LOCAL_IMAGE ?= $(LOCAL_PROJECT)-backend:local
+LOCAL_POSTGRES_IMAGE ?= $(LOCAL_PROJECT)-postgres:local
+LOCAL_DATABASE ?= postgresql
 LOCAL_STATE ?= $(CURDIR)/data/native
 REF ?= HEAD
 REPORT ?=
@@ -464,7 +467,7 @@ logs:
 	sh scripts/compose.sh logs
 
 dev:
-	.venv/bin/python scripts/dev.py --state-dir "$(LOCAL_STATE)"
+	.venv/bin/python scripts/dev.py --state-dir "$(LOCAL_STATE)" --database "$(LOCAL_DATABASE)"
 
 # OBJ-04: explicit native-only qualification. The backend verification image's
 # standalone Node serves inventory checks, not the Corepack/Vite native toolchain.
@@ -475,10 +478,26 @@ verify-native-offline:
 		tests/acceptance/obj_04_native_offline.py
 
 backup-local:
-	.venv/bin/python scripts/local_backup.py backup --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --destination "$(DESTINATION)" $(if $(filter native,$(LOCAL_MODE)),--database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)",)
+	@test "$(LOCAL_DATABASE)" = postgresql -o "$(LOCAL_DATABASE)" = sqlite
+	.venv/bin/python scripts/$(if $(filter sqlite,$(LOCAL_DATABASE)),local_backup,postgresql_backup).py backup --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --destination "$(DESTINATION)" $(if $(filter native,$(LOCAL_MODE)),$(if $(filter postgresql,$(LOCAL_DATABASE)),--state-dir "$(LOCAL_STATE)",--database-url "$(DATABASE_URL)" --key-path "$(MARKETING_AGENTS_DIGEST_KEY_PATH)"),)
 
 restore-local:
-	.venv/bin/python scripts/local_backup.py restore --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --image "$(LOCAL_IMAGE)" --backup "$(BACKUP)" $(if $(DESTINATION),--destination "$(DESTINATION)",)
+	@test "$(LOCAL_DATABASE)" = postgresql -o "$(LOCAL_DATABASE)" = sqlite
+	.venv/bin/python scripts/$(if $(filter sqlite,$(LOCAL_DATABASE)),local_backup,postgresql_backup).py restore --mode "$(LOCAL_MODE)" --project "$(LOCAL_PROJECT)" --image "$(LOCAL_IMAGE)" $(if $(filter postgresql,$(LOCAL_DATABASE)),--postgres-image "$(LOCAL_POSTGRES_IMAGE)",) --backup "$(BACKUP)" $(if $(DESTINATION),--destination "$(DESTINATION)",)
+
+.PHONY: verify-del-10-native test-del-10-postgresql-backup verify-del-10-offline-postgresql verify-del-10-tooling
+verify-del-10-tooling:
+	$(UV) run --offline --frozen ruff format --check scripts/native_postgres.py scripts/postgresql_backup.py scripts/verify_postgresql_backup.py scripts/dev.py scripts/del_05_*.py scripts/ac_01_environment.py scripts/local_backup.py tests/tooling/test_del_10_native_postgresql.py tests/tooling/test_postgresql_*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_environment.py
+	$(UV) run --offline --frozen ruff check scripts/native_postgres.py scripts/postgresql_backup.py scripts/verify_postgresql_backup.py scripts/dev.py scripts/del_05_*.py scripts/ac_01_environment.py scripts/local_backup.py tests/tooling/test_del_10_native_postgresql.py tests/tooling/test_postgresql_*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_environment.py
+
+verify-del-10-native:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m pytest -q tests/acceptance/del_10_native_postgresql.py tests/acceptance/del_10_native_recovery.py
+
+test-del-10-postgresql-backup:
+	PYTHONPATH="$(CURDIR)/apps/api/src:$(CURDIR)" PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.verify_postgresql_backup --build
+
+verify-del-10-offline-postgresql:
+	MARKETING_AGENTS_TEST_POSTGRES=1 PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m pytest -q --disable-socket --allow-unix-socket tests/integration/db/test_del_04_postgresql.py tests/integration/db/test_del_04_postgresql_installation.py tests/integration/db/test_del_04_postgresql_cli.py tests/integration/runtime/test_postgresql_primary.py
 
 verify-clean:
 	sh scripts/verify_clean_state.sh --ref "$(REF)" $(if $(REPORT),--report "$(REPORT)",)
