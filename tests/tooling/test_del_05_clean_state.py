@@ -281,6 +281,7 @@ def test_del_05_offline_suites_stop_runtime_and_restore_verified_runtime_before_
         "quiesce-runtime-for-offline",
         "verify-runtime-quiesced",
         "offline-backend",
+        "offline-postgresql",
         "offline-frontend",
         "resume-runtime-for-browser",
         "inspect-resumed-runtime-network",
@@ -293,7 +294,13 @@ def test_del_05_offline_suites_stop_runtime_and_restore_verified_runtime_before_
     positions = [labels.index(label) for label in expected_order]
     assert positions == sorted(positions)
     arguments = {label: (argv, kwargs) for label, argv, kwargs in calls}
-    assert clean_state.RUNTIME_SERVICES == ("api", "web", "run-worker", "scheduler-worker")
+    assert clean_state.RUNTIME_SERVICES == (
+        "api",
+        "web",
+        "run-worker",
+        "scheduler-worker",
+        "postgres",
+    )
     assert arguments["quiesce-runtime-for-offline"][0] == [
         *verifier.compose,
         "stop",
@@ -324,10 +331,14 @@ def test_del_05_offline_suites_stop_runtime_and_restore_verified_runtime_before_
         if label in {"inspect-runtime-network", "inspect-resumed-runtime-network"}
     ]
     assert network_scopes == [None, verifier.project, verifier.project]
-    for suffix, target in (("backend", "backend"), ("frontend", "web")):
+    for suffix, target in (
+        ("backend", "del-05-offline-backend"),
+        ("postgresql", "del-10-offline-postgresql"),
+        ("frontend", "del-05-offline-web"),
+    ):
         argv, kwargs = arguments["offline-" + suffix]
         assert argv[argv.index("--network") + 1] == "none"
-        assert argv[-2:] == ["make", "verify-del-05-offline-" + target]
+        assert argv[-2:] == ["make", "verify-" + target]
         assert kwargs == {"timeout": 1800}
     browser_argv, browser_kwargs = arguments["production-browser-loopback-only"]
     assert browser_argv[browser_argv.index("--network") + 1] == "container:" + "a" * 64
@@ -406,6 +417,7 @@ def test_del_05_running_runtime_blocks_offline_suites(offline_sequence, service)
         "quiesce-runtime-for-offline",
         "verify-runtime-quiesced",
         "offline-backend",
+        "offline-postgresql",
         "offline-frontend",
         "resume-runtime-for-browser",
         "inspect-resumed-runtime-network",
@@ -617,12 +629,12 @@ def test_del_05_smoke_uses_real_unix_http_transport_without_tcp_or_proxy(monkeyp
 def test_del_05_cleanup_refuses_broad_names_and_foreign_labels():
     project = "marketing-agents-del05-0123456789abcdef"
     labels = {"Labels": {"com.docker.compose.project": project}}
-    validate_owned_resource("volume", project + "_data", project, labels)
+    validate_owned_resource("volume", project + "_postgres-data", project, labels)
     for name in ("/", "data", "marketing-agents_data", project + "_unrelated"):
         with pytest.raises(VerificationFailure, match="unsafe_cleanup_target"):
             validate_owned_resource("volume", name, project, labels)
     with pytest.raises(VerificationFailure, match="cleanup_ownership_mismatch"):
-        validate_owned_resource("volume", project + "_data", project, {"Labels": {}})
+        validate_owned_resource("volume", project + "_postgres-data", project, {"Labels": {}})
 
 
 def test_del_05_cleanup_failure_is_failure_and_never_widens_scope(tmp_path):
@@ -683,7 +695,8 @@ def test_del_05_export_reproducibility_detects_modified_and_new_files(tmp_path):
 def compose_config(project):
     config = {
         "volumes": {
-            name: {"name": f"{project}_{name}"} for name in ("data", "local-secrets", "api-socket")
+            name: {"name": f"{project}_{name}"}
+            for name in ("postgres-data", "postgres-socket", "postgres-secrets", "api-socket")
         },
         "networks": {
             "default": {
@@ -693,7 +706,7 @@ def compose_config(project):
             }
         },
         "services": {
-            name: {"image": f"{project}-{'web' if name == 'web' else 'backend'}:local"}
+            name: {"image": f"{project}-{name if name in {'web', 'postgres'} else 'backend'}:local"}
             for name in (
                 "web",
                 "api",
@@ -701,10 +714,14 @@ def compose_config(project):
                 "migrate-seed",
                 "run-worker",
                 "scheduler-worker",
+                "postgres",
             )
         },
     }
     for name, service in config["services"].items():
+        service["user"] = (
+            "101:101" if name == "web" else "999:10001" if name == "postgres" else "10001:10001"
+        )
         if name == "web":
             service["networks"] = {"default": None}
             service["ports"] = [{"host_ip": "127.0.0.1", "target": 8080, "published": "18080"}]
@@ -721,17 +738,30 @@ def compose_config(project):
             service["volumes"] = [
                 {
                     "type": "volume",
-                    "source": "data",
-                    "target": "/var/lib/marketing-agents/data",
-                    "read_only": name == "local-secret-init",
+                    "source": "postgres-socket",
+                    "target": "/var/run/marketing-agents-postgres",
+                    "read_only": True,
                 },
                 {
                     "type": "volume",
-                    "source": "local-secrets",
+                    "source": "postgres-secrets",
                     "target": "/var/lib/marketing-agents/secrets",
                     "read_only": name != "local-secret-init",
                 },
             ]
+            if name == "postgres":
+                service["volumes"] = [
+                    {
+                        "type": "volume",
+                        "source": "postgres-data",
+                        "target": "/var/lib/postgresql/data",
+                    },
+                    {
+                        "type": "volume",
+                        "source": "postgres-socket",
+                        "target": "/var/run/marketing-agents-postgres",
+                    },
+                ]
             if name == "api":
                 service["environment"] = {
                     "MARKETING_AGENTS_API_SOCKET": "/var/run/marketing-agents/api.sock"
@@ -786,7 +816,9 @@ def test_del_05_compose_accepts_canonical_omitted_false_network_setting():
         validate_compose_boundary(config, project)
 
 
-@pytest.mark.parametrize("volume", ["data", "local-secrets", "api-socket"])
+@pytest.mark.parametrize(
+    "volume", ["postgres-data", "postgres-socket", "postgres-secrets", "api-socket"]
+)
 def test_del_05_compose_refuses_named_volume_host_bind_disguises(volume):
     project = "marketing-agents-del05-0123456789abcdef"
     config = compose_config(project)
@@ -796,7 +828,8 @@ def test_del_05_compose_refuses_named_volume_host_bind_disguises(volume):
 
 
 @pytest.mark.parametrize(
-    "service", ["api", "run-worker", "scheduler-worker", "local-secret-init", "migrate-seed"]
+    "service",
+    ["api", "run-worker", "scheduler-worker", "local-secret-init", "migrate-seed", "postgres"],
 )
 def test_del_05_compose_refuses_any_backend_network_attachment(service):
     project = "marketing-agents-del05-0123456789abcdef"
@@ -814,7 +847,7 @@ def test_del_05_compose_refuses_web_sensitive_mount_and_writable_socket():
         validate_compose_boundary(config, project)
     config = compose_config(project)
     config["services"]["web"]["volumes"].append(
-        {"type": "volume", "source": "data", "target": "/var/lib/marketing-agents/data"}
+        {"type": "volume", "source": "postgres-data", "target": "/var/lib/postgresql/data"}
     )
     with pytest.raises(VerificationFailure, match="unexpected_service_mounts"):
         validate_compose_boundary(config, project)

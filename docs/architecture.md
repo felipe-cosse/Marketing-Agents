@@ -20,7 +20,7 @@ flowchart TB
     Socket[Private shared Unix socket: api.sock]
     Outbound[Residual: web has an OS-level outbound route]
     Catalog[Versioned catalog/v1 YAML, prompts and schemas]
-    DB[(SQLite data volume: durable projection and runtime state)]
+    DB[(PostgreSQL: private Unix socket and durable data volume)]
     Key[Private digest-key volume]
     subgraph Backend[Backend containers: network_mode none]
         Init[One-shot key initializer]
@@ -181,10 +181,18 @@ post-call cancellation cannot recall a sent request. See
 [ADR-0005](adr/0005-action-scoped-approval.md),
 [ADR-0007](adr/0007-external-action-delivery.md), and [adapter contracts](adapter-contracts.md).
 
-## SQLite and optional PostgreSQL
+## PostgreSQL primary and explicit SQLite compatibility
 
-Claim: Implemented and verified — file-backed SQLite is the required local
-database and the supplied Compose topology. Database and private digest key are
+Claim: Implemented but not live-tested by this documentation review — DEL-10
+makes PostgreSQL the primary database in settings, Compose and native startup.
+Compose runs PostgreSQL 17 on a private Unix socket with no IP network or
+published database port. Peer authentication maps the application OS user to a
+non-superuser role; the database process alone owns the data volume. Native
+startup supervises an owned local PostgreSQL cluster with no TCP listener.
+The former SQLite topology remains explicitly selectable, never an automatic
+fallback. Existing SQLite storage blocks an implicit switch and is preserved.
+Full candidate qualification is required by [DEL-10](verification/requirements/DEL-10.md).
+Database and private digest key are
 one restart/recovery unit. Frozen migrations own schema changes; startup does not
 replace a lost key or silently adopt an unversioned database. The historical
 DEL-05 record qualified its revision `0006`. Evidence:
@@ -199,7 +207,8 @@ is [revision `0011`](../apps/api/src/marketing_agents/infrastructure/db/alembic/
 which adds immutable retention expiry tracking, maintenance occurrence scope and
 the count-only retention audit shape after `0010` (EXEC-06). This is a current source
 fact, not a fresh migration run or PostgreSQL qualification. Historical migration
-results remain attached to the revisions and environments that produced them.
+results, including DEL-05 revision `0006`, remain attached to the revisions and
+environments that produced them.
 
 The scheduler process also runs one bounded retention batch per UTC minute.
 Maintenance has its own durable occurrence, lease and transaction: it cannot
@@ -210,11 +219,9 @@ deleted execution detail is not reconstructed as a live entity. See
 [EXEC-06 review](verification/requirements/EXEC-06.md). These runtime additions
 require the candidate's full qualification; source wiring alone is not a pass.
 
-Claim: Implemented but not live-tested — optional PostgreSQL support uses the
-`postgresql` dependency extra, an explicit `postgresql+asyncpg` URL, repository/UoW
-ports, and a preprovisioned database; it is not a switch that makes the network-none
-Compose backend reach a PostgreSQL server. DEL-04 records scoped live PostgreSQL
-14.17 migration/seed checks. DEL-05’s later `0006` PostgreSQL cases were collected
-but not live-run in that record, and this documentation change makes no new
-PostgreSQL runtime or race-parity claim. See
-[ADR-0003](adr/0003-database-backed-workers.md).
+The asyncpg driver is now required. The legacy `postgresql` extra remains a
+compatible alias, not an additional prerequisite. PostgreSQL qualification is
+mandatory in DEL-10's explicit native and network-none gates; skipped optional
+cases in the ordinary backend suite are not a PostgreSQL pass. DEL-04's scoped
+14.17 migration/seed result and DEL-05's unexecuted optional cases retain their
+historical scope. See [ADR-0003](adr/0003-database-backed-workers.md).

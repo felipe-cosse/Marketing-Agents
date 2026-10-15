@@ -8,6 +8,8 @@ native supervision, paired backup/restore, and restart behavior are recorded in
 [native tooling tests](../tests/tooling/test_del_05_native.py), and
 [backup tests](../tests/integration/db/test_del_05_backup.py).
 Those records are not a fresh health check of an existing installation.
+The current primary database is PostgreSQL; historical SQLite evidence is not
+a claim that the PostgreSQL change has passed fresh full-release qualification.
 
 **Deterministic mock behavior:** the running application supports the five
 [demos](demos.md); it does not contact real model or connector providers.
@@ -26,7 +28,8 @@ make up
 
 The wrapper builds, starts detached services, waits for bounded readiness, and
 prints [http://127.0.0.1:8080](http://127.0.0.1:8080). It does not require `.env`,
-cloud credentials, a database server, or a manual seed step. Initial acquisition
+cloud credentials, an external database service, or a manual seed step. It owns a
+private local PostgreSQL service. Initial acquisition
 may contact image/package registries. It rejects remote Docker daemons and pins
 builds to the selected local daemon.
 
@@ -45,7 +48,8 @@ named volumes. It does not reset data. Do not use broad Docker pruning to repair
 this installation.
 
 For native development, activate Python 3.12, Node 24.20.0, pnpm 11.24.0, and
-uv 0.10.7, then run:
+uv 0.10.7. Install PostgreSQL 14+ locally, with matching-major `initdb`, `postgres`,
+`pg_ctl`, and `psql` on `PATH`, then run:
 
 ```sh
 make bootstrap
@@ -53,11 +57,19 @@ make dev
 ```
 
 Native mode serves [http://127.0.0.1:5173](http://127.0.0.1:5173), supervises the
-API and both workers, and stores its database/key beneath ignored `data/native`.
-Ctrl-C stops owned child processes. The separate `make migrate`, `make seed`, and
-`make seed-check` defaults target a different installation (`data/marketing_agents.db`
-and `data/digest.key`); do not run them against native state without explicitly
-setting both paths. See the detailed [native workflow](local-operations.md#native-workflow)
+owned PostgreSQL, API, and both workers, and stores its cluster/key beneath ignored
+`data/native`. PostgreSQL listens only on a private temporary Unix socket; its
+application role is not a superuser. Ctrl-C stops owned child processes and removes
+only transient sockets, retaining the cluster and key. Missing PostgreSQL tools
+fail explicitly, without installing tools or selecting another database.
+
+Existing SQLite installations require `make dev LOCAL_DATABASE=sqlite` with the
+correct `LOCAL_STATE`; otherwise choose a fresh state directory for PostgreSQL.
+No automatic conversion or key rebinding occurs. The separate `make migrate`,
+`make seed`, and `make seed-check` defaults use a PostgreSQL URL at `localhost:5432`
+and `data/digest.key`, not the supervisor's private socket/key. Do not run them
+against native state without explicitly setting both values. See the detailed
+[native workflow](local-operations.md#native-workflow)
 for path and port overrides.
 
 Native startup, including version checks, uses a sanitized environment and
@@ -67,27 +79,35 @@ proxy, and loader variables are not. Missing installed/cached dependencies must
 be acquired separately with explicit `make bootstrap`, never by enabling runtime
 network access. This does not turn the native processes into an OS-level sandbox.
 
-After bootstrap, `make verify-native-offline` checks the real native launcher with
-fresh storage, an empty home, synthetic credential variables, all five mock demos,
+After bootstrap, `make verify-native-offline` checks the real native launcher in
+explicit SQLite compatibility mode with fresh storage, an empty home, synthetic
+credential variables, all five mock demos,
 and restart/replay. It requires pinned Node/Corepack and a prewarmed pnpm cache;
 it fails rather than skipping or installing absent prerequisites. It is a
 separate native-only gate, not part of the backend verification image tests or a
 replacement for committed-export Compose verification. That verification image
 includes only the pinned standalone Node binary needed by browser-inventory
 controls, not Corepack, Vite or the native development toolchain. The backend
-application runtime image remains Python-only. Detailed instrumentation
-and coverage limits are recorded in [OBJ-04](verification/requirements/OBJ-04.md).
+application runtime image has no Node development toolchain. The separate
+`make verify-del-10-native PYTHON=.venv/bin/python` exercises the PostgreSQL default,
+all five mock demos, restricted application role, private socket, and restart
+persistence. These are commands and coverage descriptions, not a fresh green
+release claim. Detailed historical OBJ-04 instrumentation and coverage limits
+are recorded in [OBJ-04](verification/requirements/OBJ-04.md).
 
 ## Readiness and safe operation
 
-Initialization is ordered: local key creation/verification, migration and seed,
+Initialization is ordered: owned PostgreSQL readiness, local key
+creation/verification, migration and seed,
 then API/workers/web. Liveness only means a process responds; readiness checks
 the initialized database/catalog and mock composition. A successful web page load
 or safe-mode banner is not evidence that a queued run completed.
 
-The default persistent data and local-secret volumes form a pair. The API socket
-volume is disposable IPC, not a backup of either. Native and Compose paths are
-separate installations. Changing a project name creates new storage rather than
+The default `postgres-data` and `postgres-secrets` volumes form a pair.
+The `postgres-socket` and `api-socket` volumes are disposable IPC, not backups.
+Legacy SQLite volumes remain untouched; new PostgreSQL volumes do not convert
+them. Native and Compose paths are separate installations. Changing a project
+name creates new storage rather than
 migrating an old installation.
 
 ## Current workflow scope
@@ -130,12 +150,22 @@ there is no analytics exporter or public metrics endpoint. Never add raw request
 exception or provider objects to diagnostics to troubleshoot a failure.
 
 Follow the existing [paired backup and restore procedure](local-operations.md#paired-backup-and-restore)
-for complete commands and prerequisites. It uses SQLite's online snapshot API,
-stages a checksummed database/key pair privately, and restores only into new,
-empty scoped storage. Restore does not start services. Backups are secret-bearing:
+for complete commands and prerequisites. PostgreSQL backup uses a custom-format
+logical dump with a consistent exported snapshot; SQLite's online backup API is
+available only through the explicit legacy backend option. Both stage a
+checksummed database/key pair privately and restore only into new scoped storage.
+PostgreSQL restore temporarily starts its owned database for import/verification,
+then stops it; it does not start API/workers/web. Matching PostgreSQL server/client
+majors are required, and restore is not a database-engine or major-version upgrade.
+Stop the native supervisor before `make backup-local LOCAL_MODE=native
+LOCAL_STATE=/absolute/private/native DESTINATION=/absolute/private/new-backup`;
+the wrapper refuses an active installation and temporarily supervises only its
+owned PostgreSQL database during backup.
+Backups are secret-bearing:
 keep them out of Git, screenshots, ordinary logs, and CI artifacts.
 
-Do not copy a live `.db` alone, delete WAL files, regenerate a lost key beside a
+Do not copy a live PostgreSQL cluster or `.db` alone, delete WAL files, regenerate
+a lost key beside a
 database, or overwrite the source installation. If the key or database is lost,
 recover a known-good matching pair into new storage. The checks fail closed for
 missing halves, mismatches, unsupported versions, unsafe permissions, or modified
@@ -148,6 +178,7 @@ encryption. See [data handling](data-handling.md).
 | --- | --- |
 | Port already occupied | Select an unused loopback port with `MARKETING_AGENTS_WEB_PORT`; use the native supervisor's explicit port options for native mode. Do not kill unrelated listeners. |
 | Native toolchain rejected | Activate the exact versions above, rerun bootstrap from frozen locks, and retry. Do not remove the version check or replace lockfiles to hide drift. |
+| Native PostgreSQL prerequisite or state rejected | Install matching PostgreSQL14+ tools separately; preserve existing state. Select explicit SQLite compatibility for SQLite data or a fresh PostgreSQL state directory. Never remove ownership/version checks or replace a paired key. |
 | Registry acquisition fails | Check local Docker/package access during the build/bootstrap phase. Runtime provider credentials and network opt-ins are not a remedy. |
 | Data volume unwritable or key permissions invalid | Preserve the current pair and inspect the scoped paths/ownership using the detailed runbook. Do not recursively chmod unrelated directories. Recover a verified pair if necessary. |
 | Migration/catalog readiness failure | Read bounded service diagnostics, compare the selected revision and catalog, and preserve the existing pair. Unknown revisions, downgrade, and fingerprint mismatch are not fixed by reseeding blindly. |

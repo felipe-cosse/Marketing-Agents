@@ -156,6 +156,7 @@ def gates(
         result += (
             make("acceptance-clean", "verify-clean", 1800, f"REF={ref}"),
             make("acceptance-backup", "test-del-05-compose-backup", 1800),
+            make("acceptance-postgresql-backup", "test-del-10-postgresql-backup", 1800),
         )
     return result
 

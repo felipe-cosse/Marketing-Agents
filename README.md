@@ -58,7 +58,7 @@ or resume CI as a prerequisite for trying the local mocks.
 
 The React/TypeScript/Vite UI is the configuration and control surface. FastAPI
 validates intake and exposes catalog, configuration, run, artifact, and approval
-resources. Separate run and scheduler workers share SQLite with the API through
+resources. Separate run and scheduler workers share PostgreSQL with the API through
 application services; the scheduler admits work rather than executing it itself.
 
 Version-controlled `catalog/v1` is authoritative for templates, schemas, prompts,
@@ -70,8 +70,9 @@ action has its own immutable approval and persisted idempotency identity.
 
 Compose initializes a private digest key, migrates/seeds once, then starts the
 API, workers, and web. The web proxy reaches the API through a Unix socket;
-backend containers have no IP network. SQLite is the required local database;
-optional PostgreSQL compatibility is not a production qualification. See
+backend containers have no IP network. PostgreSQL 17 is the primary Compose database,
+reached through a separate private Unix socket with no published database port.
+SQLite is retained only as an explicit compatibility mode. See
 [architecture](docs/architecture.md) for boundaries and flow, and
 [adapter contracts](docs/adapter-contracts.md) for deferred real integrations.
 
@@ -112,12 +113,12 @@ approval steps, expected results, limitations, and executable evidence.
 
 The **Org chart** supports search, zoom, instance details, and a keyboard-accessible
 tree on narrow screens. **Approvals** and **Runs & audit** expose recorded work.
-Configuration, work, approvals, artifacts, and audit events persist in SQLite.
+Configuration, work, approvals, artifacts, and audit events persist in PostgreSQL.
 
 ## Development and verification
 
 The secondary native workflow uses Python 3.12, Node **24.20.0**, pnpm **11.24.0**,
-and uv **0.10.7**. Activate those installed versions before running:
+and uv **0.10.7**, plus installed PostgreSQL server/client tools. Activate those installed versions before running:
 
 ```sh
 make bootstrap
@@ -126,7 +127,9 @@ make dev
 
 `make dev` supervises API, workers, scheduler, and Vite at
 [http://127.0.0.1:5173](http://127.0.0.1:5173), using the ignored `data/native`
-installation. Ctrl-C stops only its child processes. See
+installation, including an owned socket-only PostgreSQL process. Ctrl-C stops only
+its child processes and retains database/key state. An existing SQLite installation
+requires explicit `--database sqlite`; startup never silently hides its records. See
 [operations](docs/operations.md) for explicit paths, paired backups, recovery,
 networking, and troubleshooting.
 
@@ -135,7 +138,8 @@ strips inherited credential, proxy, and loader variables and disables Corepack
 downloads and pnpm updates. If the pinned package manager is not cached, startup
 fails with a bootstrap instruction; it does not fetch it automatically.
 `make verify-native-offline` separately qualifies the installed native stack with
-fresh state, an empty home, five mock demos, and a restart. See the
+explicit SQLite compatibility, fresh state, an empty home, five mock demos, and a restart.
+DEL-10 separately requires the PostgreSQL native startup/restart gate. See the
 [OBJ-04 evidence and guard limits](docs/verification/requirements/OBJ-04.md).
 
 ## Current verification commands
@@ -186,6 +190,17 @@ requires fresh complete source-bound quality, clean-state and paired-backup
 qualification before a merge request. Neither command enables CI or real adapters.
 
 ## Local-only safety boundary
+
+### PostgreSQL primary and SQLite compatibility
+
+Claim: **Implemented but not live-tested** until the exact DEL-10 candidate passes
+its recorded qualification. `make up` owns fresh PostgreSQL data, socket and paired
+key volumes; it does not connect to an unrelated server or migrate SQLite implicitly.
+If the selected project has an existing SQLite data volume, startup stops with an
+explicit choice. Use `MARKETING_AGENTS_DATABASE=sqlite make up` for that preserved
+installation, or choose a separate project for PostgreSQL. Never delete the old
+database or regenerate its key to force a switch. PostgreSQL being the primary
+local database is not production/cloud, HA or live-provider qualification.
 
 This is not a multi-user production deployment. Local identity grants the local
 operator administrative and approval privileges, including self-approval. Anyone

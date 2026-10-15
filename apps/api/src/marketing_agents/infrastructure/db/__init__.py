@@ -65,6 +65,7 @@ from .types import UTCDateTime
 from .unit_of_work import (
     RepositoryBundle,
     SQLAlchemyManualAdmissionUnitOfWorkFactory,
+    SQLAlchemyReadOnlyUnitOfWorkFactory,
     SQLAlchemyRepositoryFactories,
     SQLAlchemyUnitOfWork,
     SQLAlchemyUnitOfWorkError,
@@ -122,6 +123,7 @@ __all__ = [
     "SQLAlchemyExternalActionRepository",
     "SQLAlchemyInstanceConfigurationRepository",
     "SQLAlchemyManualAdmissionUnitOfWorkFactory",
+    "SQLAlchemyReadOnlyUnitOfWorkFactory",
     "SQLAlchemyRepositoryFactories",
     "SQLAlchemyRunRepository",
     "SQLAlchemyRunStepRepository",

@@ -122,6 +122,8 @@ def _launch(
                 sys.executable,
                 str(ROOT / "tests/acceptance/obj_04_controller.py"),
                 str(reports),
+                "--database",
+                "sqlite",
                 "--state-dir",
                 str(state),
                 "--api-port",

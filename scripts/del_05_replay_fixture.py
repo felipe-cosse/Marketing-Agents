@@ -10,7 +10,6 @@ import hmac
 import json
 import os
 import re
-import sqlite3
 import time
 import urllib.request
 from dataclasses import replace
@@ -18,9 +17,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from .del_05_runtime_smoke import API_SOCKET, LocalClient, SmokeFailure, require
+    from .del_05_runtime_smoke import (
+        API_SOCKET,
+        LocalClient,
+        SmokeFailure,
+        readonly_database_engine,
+        require,
+    )
 except ImportError:  # Direct execution inside the deployed API container.
-    from del_05_runtime_smoke import API_SOCKET, LocalClient, SmokeFailure, require
+    from del_05_runtime_smoke import (
+        API_SOCKET,
+        LocalClient,
+        SmokeFailure,
+        readonly_database_engine,
+        require,
+    )
 
 # Public synthetic signing material for this temporary verification installation.
 # It is not a credential and must never be configured by normal make up.
@@ -71,7 +82,11 @@ def fixture_settings():
     )
     require(
         settings.database_url
-        == "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db"
+        in {
+            "sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+            "postgresql+asyncpg://marketing_agents@localhost:5432/marketing_agents"
+            "?host=/var/run/marketing-agents-postgres",
+        }
         and settings.marketing_agents_digest_key_path
         == Path("/var/lib/marketing-agents/secrets/digest.key"),
         "fixture_requires_fresh_compose_paths",
@@ -179,6 +194,33 @@ async def prepare() -> dict:
         await runtime.database.dispose()
 
 
+async def wait_for_schedule_occurrence(database_url: str) -> tuple:
+    """Poll only the verification fixture, with one fresh read-only transaction per read."""
+    from sqlalchemy import text
+
+    engine = readonly_database_engine(database_url)
+    deadline = time.monotonic() + 90
+    try:
+        while time.monotonic() < deadline:
+            async with engine.begin() as connection:
+                rows = (
+                    await connection.execute(
+                        text(
+                            "SELECT id, work_item_id, run_id, state FROM schedule_occurrences "
+                            "WHERE schedule_id = :schedule_id"
+                        ),
+                        {"schedule_id": SCHEDULE_ID},
+                    )
+                ).all()
+            require(len(rows) <= 1, "fixture_duplicate_schedule_occurrence")
+            if rows and rows[0][1] is not None and rows[0][2] is not None:
+                return tuple(rows[0])
+            await asyncio.sleep(0.2)
+    finally:
+        await engine.dispose()
+    raise SmokeFailure("fixture_schedule_worker_deadline")
+
+
 def deliver() -> dict:
     from marketing_agents.infrastructure.webhook_signatures import WEBHOOK_SIGNATURE_DOMAIN
 
@@ -216,22 +258,7 @@ def deliver() -> dict:
     with client.opener.open(request, timeout=5) as response:
         receipt = json.load(response)
     require(len(receipt["deliveries"]) == 1, "fixture_expected_one_webhook_delivery")
-    database = Path(settings.database_url.removeprefix("sqlite+aiosqlite:///"))
-    deadline = time.monotonic() + 90
-    occurrence = None
-    while time.monotonic() < deadline:
-        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
-            rows = connection.execute(
-                "SELECT id, work_item_id, run_id, state FROM schedule_occurrences "
-                "WHERE schedule_id = ?",
-                (SCHEDULE_ID,),
-            ).fetchall()
-        require(len(rows) <= 1, "fixture_duplicate_schedule_occurrence")
-        if rows and rows[0][1] is not None and rows[0][2] is not None:
-            occurrence = rows[0]
-            break
-        time.sleep(0.2)
-    require(occurrence is not None, "fixture_schedule_worker_deadline")
+    occurrence = asyncio.run(wait_for_schedule_occurrence(settings.database_url))
     return {
         "scope": "synthetic-local-admission-only",
         "webhook_receipt_id": receipt["receiptId"],
