@@ -392,6 +392,11 @@ verify-exec-06:
 verify-exec-07:
 	$(MAKE) -j1 verify-clean REF=HEAD
 
+# Documentation contracts only; full EXEC-08 qualification is separately required.
+.PHONY: verify-exec-08
+verify-exec-08:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.verify_exec_08_handoff
+
 audit-ac-16:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -B -m scripts.ac_16_quality audit
 

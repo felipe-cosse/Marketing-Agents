@@ -1,0 +1,126 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "EXEC-08",
+  "matrix_statement_sha256": "6e0e6ab1a17d31d4b196e0fb78fbf6f77bc1ebf6b1ee69fbfcc7c90af9327699",
+  "evidence_class": "process_gate",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "docs/verification.md",
+      "docs/assumptions.md",
+      "scripts/verify_exec_08_handoff.py",
+      "tests/tooling/test_exec_08_handoff.py",
+      "apps/api/src/marketing_agents/infrastructure/catalog/loader.py",
+      "tests/catalog/test_exec_08_yaml_loader.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/verification/requirements/EXEC-08.*"
+    ],
+    "required_path_groups": [
+      {"kind": "control", "one_of": ["scripts/verify_exec_08_handoff.py"]},
+      {"kind": "test", "one_of": ["tests/tooling/test_exec_08_handoff.py"]},
+      {"kind": "implementation", "one_of": ["docs/verification.md"]},
+      {"kind": "implementation", "one_of": ["apps/api/src/marketing_agents/infrastructure/catalog/loader.py"]},
+      {"kind": "test", "one_of": ["tests/catalog/test_exec_08_yaml_loader.py"]}
+    ]
+  },
+  "claims": [
+    {
+      "id": "source-scoped-handoff",
+      "type": "documentation",
+      "statement": "The handoff names the changed files, baseline identities, environment, commands, observed outcomes, failures and skips, while separating inherited historical evidence from the new candidate's required execution. Local records establish consistency, not authenticated execution, and no document self-identifies its final commit.",
+      "test_refs": ["tests/tooling/test_exec_08_handoff.py"]
+    },
+    {
+      "id": "honest-assumptions-and-limits",
+      "type": "documentation",
+      "statement": "Current scope retains deterministic mocks, SQLite-only qualification, local identity and host trust, web outbound capability, bounded logical retention rather than secure erasure, and deferred production/provider guarantees. Historical failures and optional skips remain distinct. CI stays disabled, checkpoints are preserved, and DEL-01 remains separately pending.",
+      "test_refs": ["tests/tooling/test_exec_08_handoff.py"]
+    },
+    {
+      "id": "reporting-negative-controls",
+      "type": "negative_control",
+      "statement": "Bounded offline documentation contracts reject missing, duplicated or hidden sections, changed source identities and removed evidence limits. Negative controls cannot substitute old results or mock outcomes for current acceptance. Restoring only the handoff document to the base must fail an ordinary documentation assertion with checker and tests retained.",
+      "test_refs": ["tests/tooling/test_exec_08_handoff.py"]
+    },
+    {
+      "id": "bounded-safe-yaml-loader",
+      "type": "contract",
+      "statement": "The approved optimization prefers the installed C-backed safe YAML parser, retaining the pure safe parser for compatibility-sensitive syntax or absent C support. Both keep duplicate-key, local-file, symlink, byte-size, UTF-8 and mapping-root boundaries. Compatibility and rejection regressions preserve catalog meaning and fail-closed behavior without dependency, schema-validation, cache, coverage, network, deadline or Docker changes.",
+      "test_refs": ["tests/catalog/test_exec_08_yaml_loader.py"]
+    },
+    {
+      "id": "fresh-candidate-qualification",
+      "type": "contract",
+      "statement": "The exact committed candidate requires an independently observed complete AC-16 20-gate run, matching source-bound audit, actual HEAD clean-state journey and paired Compose backup/restore. Historical counts, documentation checks and a report alone are not replacements. Existing inventories, coverage, network controls, acquisition rules and deadlines remain unchanged.",
+      "test_refs": ["tests/tooling/test_exec_08_handoff.py"]
+    }
+  ],
+  "gates": [
+    {
+      "id": "exec-08-handoff-contract",
+      "runner": "argv",
+      "argv": ["make", "verify-exec-08", "PYTHON=python3"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["source-scoped-handoff", "honest-assumptions-and-limits", "reporting-negative-controls"]
+    },
+    {
+      "id": "exec-08-reporting-regressions",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "pytest", "-q", "tests/tooling/test_exec_08_handoff.py", "tests/catalog/test_exec_08_yaml_loader.py", "tests/tooling/test_ac_17_claim_taxonomy.py", "tests/tooling/test_del_06_product_docs.py", "tests/source/test_src_03_assumption_register.py"],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "not_required",
+      "covers": ["source-scoped-handoff", "honest-assumptions-and-limits", "reporting-negative-controls", "bounded-safe-yaml-loader"]
+    },
+    {
+      "id": "exec-08-existing-claim-review",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.verify_ac_17_claims"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["source-scoped-handoff", "honest-assumptions-and-limits"]
+    },
+    {
+      "id": "exec-08-source-bound-quality-audit",
+      "runner": "argv",
+      "argv": ["python3", "-B", "-m", "scripts.ac_16_quality", "audit"],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": ["fresh-candidate-qualification"]
+    },
+    {
+      "id": "exec-08-complete-clean-state",
+      "runner": "argv",
+      "argv": ["make", "-j1", "verify-exec-07"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["fresh-candidate-qualification"]
+    },
+    {
+      "id": "exec-08-paired-compose-backup",
+      "runner": "argv",
+      "argv": ["make", "-j1", "test-del-05-compose-backup"],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": ["fresh-candidate-qualification"]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": ["docs/verification.md"],
+    "gate_id": "exec-08-handoff-contract"
+  },
+  "limitations": [
+    "This changes reporting, a bounded documentation checker and the explicitly approved safe YAML parser selection, not workflow semantics or the protected evidence policy/schema/executor. Curated prose contracts and catalog microbenchmarks are not full-suite proof or authenticated execution; independent review and observed complete runs remain necessary.",
+    "Historical AC-15 four-suite evidence and EXEC-07 quality/clean/backup results retain their original revisions. This is not a new AC-15 kernel-isolation qualification or a literal make acceptance invocation. Fresh candidate full quality, clean-state and paired-backup runs are separately required before requesting merge.",
+    "SQLite, local identity and deterministic mocks are the qualification target. PostgreSQL skips do not establish compatibility; no live-provider delivery, production authentication, cloud deployment, remote exactly-once effect, secure media/backup erasure or production RPO/RTO is established.",
+    "Image and dependency acquisition may contact registries. Offline test containers use network-none, browser requests have scoped local-origin checks, and web ingress retains a disclosed operating-system outbound route; this is not universal all-container egress denial.",
+    "DEL-01 remains a separate pending requirement. CI stays disabled, all checkpoint branches are preserved, and completing this reporting requirement neither completes all 124 requirements nor authorizes a main merge. Reports stay outside Git and exclude secrets, raw payloads and database/key bundles."
+  ]
+}
