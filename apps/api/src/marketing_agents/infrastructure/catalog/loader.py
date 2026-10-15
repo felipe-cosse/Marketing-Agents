@@ -4,26 +4,41 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import yaml
 
+if TYPE_CHECKING:
+    # The alternative safe parser exposes the same constructor interface.
+    from yaml import SafeLoader as _SafeLoader
+else:
+    try:
+        from yaml import CSafeLoader as _SafeLoader
+    except ImportError:
+        # LibYAML is optional. Neither parser caches documents or bypasses checks.
+        from yaml import SafeLoader as _SafeLoader
+
 MAX_YAML_BYTES = 1_000_000
 MAX_JSON_BYTES = 1_000_000
 MAX_PROMPT_BYTES = 100_000
+_PYTHON_COLLECTION_MARKER_THRESHOLD = 128
 
 
 class DuplicateKeyError(ValueError):
     pass
 
 
-class UniqueKeyLoader(yaml.SafeLoader):
+class UniqueKeyLoader(_SafeLoader):
+    pass
+
+
+class _PythonUniqueKeyLoader(yaml.SafeLoader):
     pass
 
 
 def _construct_unique_mapping(
-    loader: UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
+    loader: UniqueKeyLoader | _PythonUniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[Any, Any]:
     mapping: dict[Any, Any] = {}
     for key_node, value_node in node.value:
@@ -35,6 +50,9 @@ def _construct_unique_mapping(
 
 
 UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
+)
+_PythonUniqueKeyLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
 )
 
@@ -75,7 +93,29 @@ def read_bounded(path: Path, *, maximum_bytes: int) -> bytes:
 def load_yaml(root: Path, relative: str) -> dict[str, Any]:
     path = resolve_local_file(root, relative, suffixes={".yaml", ".yml"})
     payload = read_bounded(path, maximum_bytes=MAX_YAML_BYTES)
-    value = yaml.load(payload.decode("utf-8"), Loader=UniqueKeyLoader)
+    decoded = payload.decode("utf-8")
+    # LibYAML differs from the prior Python scanner for token-separator tabs,
+    # directives/encoded tags, flow question marks and escaped Unicode. Keep
+    # those inputs on the prior parser, including valid quoted occurrences.
+    # Deep flow/block collections can also exceed the prior Python parser's
+    # stack while LibYAML accepts them. Count potential openings conservatively,
+    # even in quoted scalars, and route heavily indented lines through Python.
+    # Exceeding 128 openings or reaching 128 leading spaces selects the prior
+    # parser, not a new validation/depth limit.
+    collection_markers = (
+        decoded.count("[")
+        + decoded.count("{")
+        + sum(decoded.count("-" + separator) for separator in " \r\n\x85\u2028\u2029")
+    )
+    # Selection neither rewrites text nor caches results.
+    selected = (
+        _PythonUniqueKeyLoader
+        if any(marker in decoded for marker in ("\t", "%", "?", "\\"))
+        or collection_markers > _PYTHON_COLLECTION_MARKER_THRESHOLD
+        or any(line.startswith(" " * 128) for line in decoded.splitlines())
+        else UniqueKeyLoader
+    )
+    value = yaml.load(decoded, Loader=selected)
     if not isinstance(value, dict):
         raise ValueError("YAML document root must be an object")
     return value

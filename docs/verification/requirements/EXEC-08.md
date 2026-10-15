@@ -1,0 +1,127 @@
+# EXEC-08 — Source-scoped verification handoff
+
+## Scope and authority
+
+Continues from main `a8e197da4ca9f4a7abbc842af737b1c8fbecb2ef` after the
+approved EXEC-07 merge, on `req/exec-08-verification-handoff`. The user requested
+full verification before a merge request, with CI disabled and every checkpoint
+preserved. This record does not authorize a merge or complete DEL-01.
+Machine authority: [EXEC-08.json](EXEC-08.json).
+
+## Report and controls
+
+The [current handoff](../../verification.md#exec-08-current-verification-handoff)
+lists the changed files, source identities, actual baseline commands/results,
+environment and remaining assumptions. Older AC-17, DEL-06, DEL-07 and OBJ-03
+records retain their original facts with explicit historical-snapshot notices.
+The assumption register now describes EXEC-06's bounded logical retention
+maintenance without implying secure-media erasure, backup deletion or a deletion
+SLA. The user separately approved the bounded YAML loader optimization and
+test-only gzip fixture correction below.
+No workflow, migration, connector, network, Docker or CI behavior changes.
+
+`make verify-exec-08` checks bounded reporting contracts only. It never executes
+documented examples, authenticates a report, or proves arbitrary prose correct.
+Its lightweight owned-fixture regressions exercise omission, identity/scope
+drift and false success claims. The existing complete documentation/link checks,
+AC-17 negative controls and assumption-register tests remain required. The
+connection witness restores only `docs/verification.md` to the base, retaining
+the new checker and tests; it must fail for the missing current handoff.
+
+Although EXEC-08 is an allowed carrier for protected evidence files, no change
+to the existing policy, schema or evidence executor is needed or included.
+
+## Approved bounded YAML optimization
+
+The first candidate `7ce6a8d` passed 20 quality gates but required a reporting
+correction; its subsequent evidence run was interrupted during image acquisition.
+The corrected candidate `7199ace` then hit the unchanged 1,800-second backend
+deadline after 11 passing gates. Both remain on their named checkpoint branches.
+Neither is the completed qualification for this revised source.
+
+The user explicitly approved preferring PyYAML's C-backed safe loader with an
+explicit pure-Python safe-loader fallback. Inputs with tabs, percent signs,
+question marks or backslashes retain the original parser because the installed
+parsers differ for some token separators, directives, escapes and tags. Text with
+more than 128 potential collection openings, or a line beginning with 128 spaces,
+also stays on the original parser to retain its recursion behavior;
+this selects a parser, not a new rejection or
+depth limit. The checked-in catalog takes the fast path; neither parser's global
+constructor registry is changed. Preserve the existing duplicate-key constructor,
+local-file and symlink restrictions, bounded byte reads, UTF-8
+decoding, mapping-root requirement and all downstream catalog validation. Add
+compatibility/security regressions for both parser paths, including complete
+catalog equivalence, malformed input, duplicate/colliding keys, aliases and
+tags. No dependency, global cache, verification rule or timeout changes belong
+to this optimization. A small diagnostic improvement is not full-suite proof;
+the native and Docker qualification must run against the final committed tree.
+
+## Approved deterministic gzip fixtures
+
+Candidate `f5eabbb` passed all 20 quality gates and is preserved on
+`codex/exec-08-checkpoint-f5eabbb`. Its two complete clean-state attempts failed
+at offline backend verification; the retained second log reports zero tests
+executed and identifies xdist workers collecting different IDs for three existing gzip fixtures because the
+default compressed-header timestamp crossed a wall-clock second. The first
+attempt's bounded tail did not establish its precise cause. A separate complete
+offline backend reproduction passed, but neither six-gate attempt qualified.
+
+The user approved exactly three import-time fixture calls changing to
+`gzip.compress(b"x", mtime=0)`, a determinism regression and this narrow evidence
+scope addition. Exercise the real fixture definitions under different wall-clock
+seconds. Preserve their truncated, trailing-data and multiple-member rejection
+cases and every existing assertion; do not change the runtime fixture helper,
+collector, test inventories, network boundaries, deadlines or Docker settings.
+The additional test module joins the existing 180-second regression gate, not a
+replacement for either complete qualification command.
+
+## Qualification procedure
+
+Freeze one nonempty primary commit, including its verification commands in the
+commit body, before the final runs. Keep the working tree clean and all results
+outside Git. Do not amend the source or metadata after qualification; if a new
+candidate is needed, preserve the previous checkpoint and qualify the new one.
+
+1. Run focused reporting, YAML compatibility/security and gzip determinism tests, existing
+   documentation/assumption regressions and static checks before freezing the
+   candidate.
+2. Run `python -B -m scripts.ac_16_quality run` with the pinned native toolchain,
+   frozen/offline dependencies and no runner overrides. All 20 gates, 17 safety
+   modules and 16 browser runners remain required, with original deadlines.
+3. Run `python -B -m scripts.verify_requirement_evidence branch --id EXEC-08
+   --base main --run --witness`. This executes all six manifest gates, including
+   the matching quality audit, complete committed-HEAD clean-state journey and
+   separate paired Compose backup/restore, then the restored-document witness.
+4. Independently review the actual outputs, source/tree identity, cleanup,
+   unchanged checkpoint refs and disabled CI state. Publish only reviewed refs.
+5. Report the exact qualified commit/tree, files, commands, pass/fail/skip results,
+   assumptions and limitations in the final handoff before requesting the
+   explicitly approved non-fast-forward merge.
+
+The source-bound quality record and requirement attestation are local consistency
+evidence, not independently authenticated execution. The checked-in handoff
+describes inherited baseline evidence and the procedure; its candidate result
+status remains conditional on the separately observed external records. It
+cannot embed the final hash of a commit that includes itself.
+
+## Preserved limits
+
+- CI is disabled, not green; all existing checkpoint branches are retained.
+- DEL-01 remains pending. EXEC-08 is not whole-project completion or production
+  release approval, even after its own gates pass.
+- Optional PostgreSQL skips are not PostgreSQL qualification. Live providers,
+  real delivery, production identity, cloud deployment and production RPO/RTO
+  remain unqualified.
+- Historical AC-15 isolation reports are not fresh EXEC-08 four-suite results.
+  These commands are not a literal `make acceptance` invocation.
+- Acquisition may reach registries; network-none test phases and local-origin
+  browser checks do not remove the web ingress container's OS outbound route.
+- Retention maintenance is bounded logical field erasure, not secure erasure of
+  media or backups, and TTL eligibility is not a deletion SLA.
+- Failed/interrupted attempts remain failed/interrupted. Subtest/report-event
+  counts are not unique test counts. A consistency-only record is not proof of
+  executed behavior without observation, and a passing documentation checker is
+  not a product qualification.
+- No secret, database/key bundle, raw payload, full prompt or personal data belongs
+  in verification artifacts or Git. Owned test cleanup does not remove reusable
+  dependency/image caches or unrelated developer data.
