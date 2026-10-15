@@ -31,8 +31,17 @@ INSTALL = (
 )
 RUNTIME_MARKER = "FROM base AS runtime\n"
 # Independently frozen from the approved EXEC-06 runtime stage. This image
-# prerequisite repair must not change any runtime byte, environment or command.
+# prerequisite repair must not change unrelated runtime bytes. DEL-10 permits
+# only the explicit database default replacement below in that historical stage.
 RUNTIME_SHA256 = "e6d94d05b5e2e788270982b52af7184af558f236a2692018c3adff056793c199"
+POSTGRES_STAGE = (
+    "FROM postgres:17.11-bookworm@sha256:"
+    "3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826 AS postgres-tools"
+)
+POSTGRES_DEFAULT = (
+    'DATABASE_URL="postgresql+asyncpg://marketing_agents@localhost:5432/'
+    'marketing_agents?host=/var/run/marketing-agents-postgres"'
+)
 
 
 def _assert_verification_contract(recipe: str, web_recipe: str, node_version: str) -> None:
@@ -60,7 +69,11 @@ def _assert_verification_contract(recipe: str, web_recipe: str, node_version: st
         "dependencies",
         "verification",
         "runtime",
+        "postgres-tools",
+        "postgres",
     }, "EXEC-07 changed the bounded Docker stage inventory"
+    assert lines.count(POSTGRES_STAGE) == 1, "EXEC-07/DEL-10 requires the exact PostgreSQL pin"
+    assert stages["postgres-tools"] == [], "EXEC-07/DEL-10 PostgreSQL source must not mutate"
     assert stages["verification-node"] == [], "EXEC-07 Node source must be copied without mutation"
     verification = stages["verification"]
     assert lines.count(NODE_COPY) == verification.count(NODE_COPY) == 1, (
@@ -82,12 +95,20 @@ def _assert_verification_contract(recipe: str, web_recipe: str, node_version: st
     assert not re.search(r"\b(?:npm|pnpm|corepack|node_modules)\b", "\n".join(verification)), (
         "EXEC-07 must not install a frontend toolchain in the backend verification image"
     )
-    for stage in ("base", "dependencies", "runtime"):
+    for stage in ("base", "dependencies", "runtime", "postgres", "postgres-tools"):
         assert not re.search(
             r"\b(?:node|npm|pnpm|corepack|node_modules)\b", "\n".join(stages[stage])
         ), "EXEC-07 Node must not enter runtime or its ancestors"
     assert recipe.count(RUNTIME_MARKER) == 1, "EXEC-07 changed the runtime stage parent"
     runtime = RUNTIME_MARKER + recipe.split(RUNTIME_MARKER, 1)[1]
+    assert runtime.count(POSTGRES_DEFAULT) == 1, (
+        "EXEC-07/DEL-10 requires private PostgreSQL default"
+    )
+    runtime = runtime.replace(
+        POSTGRES_DEFAULT,
+        "DATABASE_URL=sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db",
+        1,
+    )
     assert hashlib.sha256(runtime.encode()).hexdigest() == RUNTIME_SHA256, (
         "EXEC-07 must preserve the approved runtime stage byte-for-byte"
     )
@@ -149,6 +170,8 @@ def test_exec_07_build_time_node_check_executes_real_version_and_inventory(tmp_p
         "ignored_check",
         "extra_library",
         "runtime_environment_change",
+        "postgres_pin_change",
+        "postgres_default_change",
     ),
 )
 def test_exec_07_image_prerequisite_or_runtime_drift_fails(mutation):
@@ -196,6 +219,10 @@ def test_exec_07_image_prerequisite_or_runtime_drift_fails(mutation):
         )
     elif mutation == "runtime_environment_change":
         recipe = recipe.replace("ALLOW_EXTERNAL_NETWORK=false", "ALLOW_EXTERNAL_NETWORK=true", 1)
+    elif mutation == "postgres_pin_change":
+        recipe = recipe.replace(POSTGRES_STAGE, POSTGRES_STAGE.replace("17.11", "17.10"), 1)
+    elif mutation == "postgres_default_change":
+        recipe = recipe.replace(POSTGRES_DEFAULT, "DATABASE_URL=postgresql+asyncpg://remote/db", 1)
     else:
         raise AssertionError("unknown fixture mutation")
     with pytest.raises(AssertionError, match="EXEC-07"):

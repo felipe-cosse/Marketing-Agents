@@ -22,6 +22,7 @@ from marketing_agents.application.ports.repositories import (
     ApprovalRepositoryConflict,
     ExternalActionRepositoryConflict,
 )
+from marketing_agents.application.ports.unit_of_work import UnitOfWorkFactory
 from marketing_agents.application.services.approval_records import (
     ApprovalRecordService,
     ApprovalRecordServiceError,
@@ -310,10 +311,18 @@ def _project(stored: StoredActionApprovalRequest, *, now: datetime) -> ApprovalR
 class ApprovalResourceService:
     """Authorize and project approvals without exposing execution authority."""
 
-    def __init__(self, dependencies: OrchestrationDependencies) -> None:
+    def __init__(
+        self,
+        dependencies: OrchestrationDependencies,
+        *,
+        read_unit_of_work: UnitOfWorkFactory | None = None,
+    ) -> None:
         if type(dependencies) is not OrchestrationDependencies:
             raise ValueError("approval resources require exact orchestration dependencies")
         self._dependencies = dependencies
+        self._read_unit_of_work = (
+            dependencies.unit_of_work_factory if read_unit_of_work is None else read_unit_of_work
+        )
         self._records = ApprovalRecordService(dependencies)
 
     async def list(
@@ -330,7 +339,7 @@ class ApprovalResourceService:
             )
         boundary = _decode_cursor(query)
         try:
-            async with self._dependencies.unit_of_work() as unit_of_work:
+            async with self._read_unit_of_work() as unit_of_work:
                 stored = await unit_of_work.approvals.list_requests(
                     status=query.status,
                     run_id=query.run_id,
@@ -368,7 +377,7 @@ class ApprovalResourceService:
                 "approval request identity is invalid",
             ) from None
         try:
-            async with self._dependencies.unit_of_work() as unit_of_work:
+            async with self._read_unit_of_work() as unit_of_work:
                 stored = await unit_of_work.approvals.get_inspectable(approval_id)
         except (ApprovalRepositoryConflict, ExternalActionRepositoryConflict):
             raise ApprovalResourceServiceError(

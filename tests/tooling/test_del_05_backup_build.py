@@ -17,6 +17,25 @@ IMAGE = "sha256:" + "a" * 64
 OTHER_IMAGE = "sha256:" + "b" * 64
 
 
+def test_del_10_legacy_backup_fixture_explicitly_selects_sqlite():
+    calls = []
+    docker = SimpleNamespace(
+        token="owned-test-token",
+        project="marketing-agents-legacy-fixture",
+        command=lambda arguments: calls.append(arguments) or b"ok",
+    )
+    verifier = gate.BackupVerification("existing-backend:local")
+    assert (
+        verifier.run_helper(docker, IMAGE, ["/bin/sh", "/app/scripts/migrate-and-seed.sh"]) == b"ok"
+    )
+    (arguments,) = calls
+    assert arguments[arguments.index("--env") + 1] == (
+        "DATABASE_URL=sqlite+aiosqlite:////var/lib/marketing-agents/data/marketing_agents.db"
+    )
+    assert arguments[arguments.index("--network") + 1] == "none"
+    assert arguments[arguments.index("--pull") + 1] == "never"
+
+
 @pytest.fixture
 def acquisition(monkeypatch):
     monkeypatch.setenv("DOCKER_HOST", "tcp://untrusted-host:2375")

@@ -41,6 +41,8 @@ elif arguments[:1] == ["version"]:
     print(os.environ.get("DEL05_FAKE_ENGINE", "28.4.0"))
 elif arguments[:1] == ["compose"]:
     sys.exit(int(os.environ.get("DEL05_FAKE_COMPOSE_EXIT", "0")))
+elif arguments[:2] == ["volume", "inspect"]:
+    sys.exit(int(os.environ.get("DEL10_FAKE_SQLITE_PRESENT", "1")))
 else:
     sys.exit(91)
 """
@@ -93,6 +95,56 @@ def test_del_05_compose_pins_local_builder_despite_inherited_selection(run_wrapp
     operations = compose_operations(calls)
     assert operations
     assert all(call["environment"]["BUILDX_BUILDER"] == "default" for call in operations)
+
+
+def test_del_10_existing_sqlite_volume_blocks_implicit_switch(run_wrapper):
+    result, calls = run_wrapper("up", DEL10_FAKE_SQLITE_PRESENT="0")
+    assert result.returncode == 2
+    assert "Existing SQLite volume preserved" in result.stderr
+    assert compose_operations(calls) == []
+    assert calls[-1]["args"] == ["volume", "inspect", "marketing-agents-local_data"]
+
+
+def test_del_10_explicit_sqlite_selects_preserved_topology(run_wrapper):
+    result, calls = run_wrapper(
+        "up", MARKETING_AGENTS_DATABASE="sqlite", DEL10_FAKE_SQLITE_PRESENT="0"
+    )
+    assert result.returncode == 0
+    (operation,) = compose_operations(calls)
+    arguments = operation["args"]
+    assert arguments[arguments.index("--file") + 1] == str(ROOT / "compose.sqlite.yaml")
+    assert not any(call["args"][:2] == ["volume", "inspect"] for call in calls)
+
+
+def test_del_10_unknown_database_refuses_before_docker(run_wrapper):
+    result, calls = run_wrapper("up", MARKETING_AGENTS_DATABASE="other")
+    assert result.returncode == 2
+    assert calls == []
+
+
+def test_del_10_postgres_peer_role_and_data_boundaries():
+    service = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]["postgres"]
+    health = service["healthcheck"]["test"][-1]
+    for predicate in (
+        "NOT r.rolsuper",
+        "NOT r.rolcreatedb",
+        "NOT r.rolcreaterole",
+        "NOT r.rolreplication",
+        "NOT r.rolbypassrls",
+        "r.rolcanlogin",
+        "d.datdba=r.oid",
+        "d.datname=current_database()",
+    ):
+        assert predicate in health
+    hba = (ROOT / "docker/postgres/pg_hba.conf").read_text()
+    assert "local all postgres peer" in hba
+    assert "local marketing_agents marketing_agents peer map=marketing_app" in hba
+    assert "local all all reject" in hba
+    assert "host all all 0.0.0.0/0 reject" in hba
+    assert "host all all ::/0 reject" in hba
+    assert (
+        ROOT / "docker/postgres/pg_ident.conf"
+    ).read_text().strip() == "marketing_app marketing marketing_agents"
 
 
 @pytest.mark.parametrize(
@@ -202,13 +254,26 @@ def test_del_05_compose_declares_web_ingress_and_network_none_backends():
         "scheduler-worker",
         "local-secret-init",
         "migrate-seed",
+        "postgres",
     }
-    assert set(config["volumes"]) == {"data", "local-secrets", "api-socket"}
+    assert set(config["volumes"]) == {
+        "postgres-data",
+        "postgres-socket",
+        "postgres-secrets",
+        "api-socket",
+    }
     assert config["networks"]["default"]["internal"] is False
     assert config["networks"]["default"]["driver_opts"] == {
         "com.docker.network.bridge.gateway_mode_ipv4": "nat"
     }
-    for name in ("api", "local-secret-init", "migrate-seed", "run-worker", "scheduler-worker"):
+    for name in (
+        "api",
+        "local-secret-init",
+        "migrate-seed",
+        "run-worker",
+        "scheduler-worker",
+        "postgres",
+    ):
         assert services[name]["network_mode"] == "none"
         assert not services[name].get("networks")
     assert not services["web"].get("network_mode")
@@ -229,6 +294,13 @@ def test_del_05_compose_declares_web_ingress_and_network_none_backends():
             assert service["ports"][0]["host_ip"] == "127.0.0.1"
         else:
             assert not service.get("ports")
+            if name == "postgres":
+                assert service["user"] == "999:10001"
+                assert service["volumes"] == [
+                    "postgres-data:/var/lib/postgresql/data",
+                    "postgres-socket:/var/run/marketing-agents-postgres",
+                ]
+                continue
             assert service["environment"]["ALLOW_EXTERNAL_NETWORK"] == "false"
             assert (
                 service["environment"]["LLM_PROVIDER"]
@@ -236,7 +308,7 @@ def test_del_05_compose_declares_web_ingress_and_network_none_backends():
                 == "mock"
             )
             secrets = next(
-                mount for mount in service["volumes"] if mount.startswith("local-secrets:")
+                mount for mount in service["volumes"] if mount.startswith("postgres-secrets:")
             )
             assert secrets.endswith(":ro") is (name != "local-secret-init")
     assert (

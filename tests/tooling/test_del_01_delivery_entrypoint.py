@@ -259,6 +259,11 @@ def test_del_01_existing_acceptance_keeps_all_twenty_two_gates_and_deadlines():
             ("make", "-j1", f"PYTHON={sys.executable}", "test-del-05-compose-backup"),
             1800,
         ),
+        local.Gate(
+            "acceptance-postgresql-backup",
+            ("make", "-j1", f"PYTHON={sys.executable}", "test-del-10-postgresql-backup"),
+            1800,
+        ),
     )
-    assert len(expected) == 22
+    assert len(expected) == 23
     assert local.gates(coverage, acceptance=True, ref=candidate) == expected

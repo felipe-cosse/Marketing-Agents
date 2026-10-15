@@ -115,12 +115,16 @@ class SQLAlchemyUnitOfWork:
         repository_factories: SQLAlchemyRepositoryFactories,
         *,
         sqlite_write_intent: bool = False,
+        read_only: bool = False,
     ) -> None:
         if type(sqlite_write_intent) is not bool:
             raise ValueError("SQLite write intent must be an exact boolean")
+        if type(read_only) is not bool or (read_only and sqlite_write_intent):
+            raise ValueError("read-only unit of work cannot request write intent")
         self._session_factory = session_factory
         self._repository_factories = repository_factories
         self._sqlite_write_intent = sqlite_write_intent
+        self._read_only = read_only
         self._session: AsyncSession | None = None
         self._repositories: RepositoryBundle | None = None
         self._finished = False
@@ -242,6 +246,13 @@ class SQLAlchemyUnitOfWork:
                     # the physical outer transaction, so releasing it would escape UoW
                     # rollback.
                     await self._session.execute(text("BEGIN DEFERRED"))
+                elif self._session.get_bind().dialect.name == "postgresql" and self._read_only:
+                    # Projection invariants span multiple SELECTs. Configure this
+                    # transaction only: concurrent worker commits cannot mix its
+                    # Run/step/history snapshots, and writable UoWs stay unchanged.
+                    await self._session.execute(
+                        text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+                    )
         except BaseException:
             await self._session.close()
             self._session = None
@@ -265,6 +276,8 @@ class SQLAlchemyUnitOfWork:
 
     async def commit(self) -> None:
         session = self._require_session()
+        if self._read_only:
+            raise SQLAlchemyUnitOfWorkError("read-only unit of work cannot commit")
         if self._finished:
             raise SQLAlchemyUnitOfWorkError("unit of work transaction is already finished")
         await session.commit()
@@ -285,6 +298,17 @@ class SQLAlchemyUnitOfWorkFactory:
 
     def __call__(self) -> SQLAlchemyUnitOfWork:
         return SQLAlchemyUnitOfWork(self.session_factory, self.repository_factories)
+
+
+@dataclass(frozen=True, slots=True)
+class SQLAlchemyReadOnlyUnitOfWorkFactory:
+    """Stable projection snapshots without changing write transaction isolation."""
+
+    session_factory: async_sessionmaker[AsyncSession]
+    repository_factories: SQLAlchemyRepositoryFactories
+
+    def __call__(self) -> SQLAlchemyUnitOfWork:
+        return SQLAlchemyUnitOfWork(self.session_factory, self.repository_factories, read_only=True)
 
 
 @dataclass(frozen=True, slots=True)
