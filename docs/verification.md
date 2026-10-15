@@ -15,7 +15,136 @@ explains a mechanism; only a matching executed gate establishes tested behavior.
 | Assumption | An explicit choice in the [register](assumptions.md), with a revisit trigger rather than an observed external fact. |
 | Residual risk | A known trust boundary, limitation, or incomplete guarantee that remains after the scoped checks. |
 
+## EXEC-08 current verification handoff
+
+### Source and qualification boundary
+
+Record date: **2026-10-15 UTC** (2026-10-14 on the local Pacific calendar).
+Inherited EXEC-07 baseline: main
+`a8e197da4ca9f4a7abbc842af737b1c8fbecb2ef`, feature
+`63df4bb4f39f22d31e9c3638b5e7e6e4049a4650`, identical tree
+`b8eccaaf6cd91a1cb7ac64bbb850187e13e8e93f`.
+The observed results below are **Implemented and verified** only for that
+baseline and its stated environments, not fresh EXEC-08 verification. EXEC-08
+changes reporting contracts and documentation, not application behavior.
+
+The baseline full quality run used macOS, native Python **3.12.12**, uv
+**0.10.7**, Ruff **0.16.3**, mypy **1.20.2**, Node **24.20.0**, pnpm
+**11.24.0** and Corepack **0.35.0**. The clean-state journey used Docker Desktop
+**4.95.0**, Engine **29.8.2**, Compose **5.6.0**, native arm64 images and
+the repository-pinned dependency locks. The host's separate Intel `.venv` was
+preserved; qualification used the native cached environment. Platform-specific
+or live-provider behavior is not inferred from these local results.
+
+### Files changed
+
+- `Makefile`: expose the documentation-only handoff check.
+- `docs/verification.md`: separate this handoff from dated historical records.
+- `docs/assumptions.md`: describe shipped bounded logical retention accurately.
+- `scripts/verify_exec_08_handoff.py`: bounded, read-only curated claim checks.
+- `tests/tooling/test_exec_08_handoff.py`: lightweight independent negative controls.
+- `docs/implementation-plan/16-requirements-traceability-matrix.md`: record EXEC-08 implementation without declaring unrelated work verified.
+- `docs/verification/requirements/EXEC-08.json`: source scope, six gates and restored-base connection witness.
+- `docs/verification/requirements/EXEC-08.md`: qualification procedure and reporting limits.
+
+### Commands and observed baseline results
+
+All rows in this table are inherited observations, not candidate results.
+Failures, errors, skips and subtests are reported separately;
+subtests are not additional test cases.
+
+| Command / observation | Baseline result and boundary |
+| --- | --- |
+| `python -B -m scripts.ac_16_quality run` | All 20 gates passed on the EXEC-07 feature, 2026-10-14 22:31:42–23:09:24 UTC, 2,261.191 seconds total. Backend: 81 catalog tests passed and 4,932 other backend tests passed, 5,013 unique passes total; 33 optional PostgreSQL tests skipped, zero failures/errors. The backend gate used 1,795.860 of its unchanged 1,800 seconds; this is narrow deadline headroom, not permission to extend it. |
+| Safety, frontend and browser components of that aggregate | 17 safety modules reached the required complete statement/branch coverage, with two approved excluded lines; 472 frontend tests in 55 files passed. All 16 browser runners completed unfiltered: 39 product browser cases plus six OBJ-06 browser network-canary controls, with zero skips, including OBJ-06's real-runtime desktop/mobile path. Node controls are counted separately from these Playwright browser cases. The existing large Vite chunk warning was non-failing. |
+| `python -B -m scripts.ac_16_quality audit` | The persisted record matched the source and lock hashes. The approved two-parent merge retained the feature's identical tree; the audit supports this specific feature/merge relationship, not arbitrary same-tree revisions or authenticated execution. All 1,366 captured source files had zero drift. |
+| `make verify-clean REF=HEAD`, via `make -j1 verify-exec-07` | The postmerge clean-state gate passed in 918.924 seconds. Its captured backend log reports 5,013 backend tests passed and 416 subtests passed, with 33 optional PostgreSQL tests skipped and zero failures/errors. Frontend: 472 passes in 55 files. Diagnostic pass-event totals include subtests and must not be substituted for unique test counts. |
+| `make test-del-05-compose-backup`, invoked with `-j1` by the manifest | Paired local backup/restore gate passed in 41.749643 seconds. Successful clean/backup JSON stdout was not retained separately; output hashes alone do not establish new detailed demo or backup counters. No production recovery objective or secure deletion claim follows. |
+| `python -B -m scripts.verify_requirement_evidence branch --id EXEC-07 --base main --run --witness` before merge; `python -B -m scripts.verify_requirement_evidence history --ref main --allow-incomplete --check-branches --run-latest --witness` after merge | All five EXEC-07 gates returned zero and the restored-base connection witness returned one. The latest postmerge attestation was recorded at 2026-10-14 23:56:36 UTC. Owned verification containers, volumes and networks were removed; dependency caches and images were retained. |
+
+The quality record is stored outside Git under
+`/tmp/marketing-agents-ac16/b8eccaaf6cd91a1cb7ac64bbb850187e13e8e93f.json`;
+the baseline requirement attestation is
+`/tmp/marketing-agents-requirement-evidence/EXEC-07-b8eccaaf6cd91a1c.json`.
+These local paths may expire and are not portable release artifacts. Historical
+failed attempts remain failed: checkpoint `900b050` did not qualify, and a later
+metadata-only amendment from `495ab23` caused a source-identity audit failure.
+The final `63df4bb` run above was a complete rerun, not a waiver of either
+failure. Both checkpoint branches remain intact.
+
+### Candidate verification and handoff
+
+Candidate verification is pending **at source-authoring time**. This immutable
+document cannot contain its own final commit identity or a result produced
+after that commit. The final handoff must report the observed outcome and exact
+revision from the external source-bound attestation; until then, this document
+does not establish a candidate pass. Documentation checks do not authenticate
+execution or prove arbitrary prose true.
+
+The first EXEC-08 candidate, `7ce6a8d`, passed all 20 quality gates but
+misclassified six browser canary controls as Node controls in this guide.
+Independent review caught the reporting error. Its subsequent evidence run was
+deliberately interrupted during image acquisition, before the clean-state
+journey completed; it is not a six-gate pass. The candidate is preserved on
+`codex/exec-08-checkpoint-7ce6a8d`. Correcting the wording changes the qualified
+source, so the corrected candidate requires new complete qualification below.
+
+Freeze one primary feature commit, including these verification commands in its
+body, before qualification. With native Python and pinned Node tools on `PATH`,
+use `PYTHONDONTWRITEBYTECODE=1 UV_OFFLINE=1 UV_FROZEN=1 COREPACK_ENABLE_NETWORK=0`.
+Do not inject runner overrides, alter deadlines, lower coverage, filter suites
+or change Docker/network settings. Run `python -B -m scripts.ac_16_quality run`
+for all 20 quality gates, then
+`python -B -m scripts.verify_requirement_evidence branch --id EXEC-08 --base main --run --witness`.
+The manifest runs the handoff check, its regressions plus existing documentation
+and assumption controls, AC-17 claims, the source-quality audit, the complete
+clean-state journey and paired backup/restore. Its connection witness restores
+only the changed verification guide and must fail the documentation gate.
+
+The [requirement record](verification/requirements/EXEC-08.md) and
+[manifest](verification/requirements/EXEC-08.json) define those gates. Report
+every command's actual status, pass/fail/error/skip counts where captured,
+warnings, scope, source identity and cleanup outcome. Do not fill missing
+counters from expected output. If source or commit metadata changes, reassess
+and repeat the required source-bound qualification. Only after the complete
+successful run should the feature be offered for explicit non-fast-forward
+merge approval; no such merge is authorized by this handoff.
+
+### Assumptions and remaining limits
+
+CI remains disabled, not green. Preserve all 16 existing checkpoint branches
+and all retained requirement branches. The baseline inventory has 122 of 124
+requirements merged: DEL-01 remains pending and EXEC-08 is not yet merged.
+This reporting change neither completes DEL-01 nor retroactively verifies
+unrelated matrix rows.
+
+Historical AC-15 evidence is not a fresh four-suite run. Neither the literal
+`make acceptance` aggregate nor a fresh AC-15 kernel-isolation four-suite run
+is claimed here. The full quality and clean-state commands have their own
+declared network boundaries; dependency acquisition can use registry networking,
+and web route-mocked checks are distinct from real-runtime browser checks.
+
+Deterministic mock behavior is not live-provider delivery. PostgreSQL skips
+are not passes. Production authentication, provider credentials, remote
+exactly-once delivery, production recovery objectives and deletion SLAs remain
+unqualified. The [24-entry assumption register](assumptions.md) retains its
+revisit triggers, including provisional local self-approval (ASM-011). ASM-024 now
+reflects the shipped leased logical retention batches; this is not secure-media
+erasure, backup deletion or a production guarantee.
+
+Credentials, raw payloads, databases and secret-bearing backups are not
+verification artifacts. Keep only sanitized status/count/hash evidence outside
+Git; exclude full prompts and personal data. Local hashes and source consistency
+checks do not authenticate who executed a report. Existing historical sections
+below retain their dates, failures, limitations and then-current vocabulary.
+
 ## AC-17 current documentation review
+
+Historical snapshot: this section records the AC-17 review at the dated baseline
+below. Its retained heading and words such as "current", "unverified" and "not
+merged" describe that review, not the latest main or EXEC-08 candidate. Later
+requirement records have their own scope; they do not retroactively turn this
+source review into product reruns.
 
 Review date: **2026-10-12**. Product-source baseline:
 `09a732609f8d871fc5a6495e84f5347e3c939be5` (main after AC-14).
@@ -75,9 +204,11 @@ documentation results is a fresh product or full-suite acceptance result.
 
 ## Source and environment
 
-Historical DEL-06 record: all dates, environments and results in this section and
+Historical DEL-06 snapshot: all dates, environments and results in this section and
 the following **Local DEL-06 checks** section belong to that requirement. They
-are preserved, not refreshed by AC-17. The later DEL-07 and OBJ-03 sections are
+are preserved, not refreshed by AC-17 or EXEC-08. References to the current host
+mean the host at that recorded execution, not the latest verification environment.
+The later DEL-07 and OBJ-03 sections are
 likewise dated historical snapshots, including their then-pending attestations.
 
 Record date: **2026-09-11**. Product-code baseline:
@@ -103,6 +234,9 @@ catalog-sha256-v1:3970f3f23341d3e43a83ff73985e0485addd6c0df7519595f535420c09a9ce
 ```
 
 ## Local DEL-06 checks
+
+Historical snapshot: the commands and outcomes below belong to DEL-06 at its
+stated source and environment. They are not fresh EXEC-08 execution evidence.
 
 Claim: **Implemented and verified** only for the results explicitly marked
 passed below. Documentation validation does not execute all behaviors it describes.
@@ -143,6 +277,11 @@ or that a source link's test has recently run. Independent source review remains
 part of DEL-06.
 
 ## DEL-07 local verification
+
+Historical snapshot: retain these dates, counts, candidate identities, failures
+and then-pending gates exactly within DEL-07's scope. Statements about the
+"current-source" backup and "final amended feature" refer to that requirement,
+not the latest main or a fresh EXEC-08 result.
 
 Claim: **Implemented and verified** — on 2026-09-11, the frozen DEL-07 worktree
 based on `7f9ea62d5489bde73bae4ddcc87eee4dc34b164c` passed all **20 local gates**
@@ -257,6 +396,10 @@ describes the commands and limits.
 
 ## OBJ-03 operational workflows
 
+Historical snapshot: these preflight, failed aggregate and repair results belong
+to OBJ-03 at its stated source. Its then-pending final gates are retained as
+recorded; this section does not report current EXEC-08 qualification or CI state.
+
 Claim: **Implemented and verified** within local mock boundaries — on 2026-09-14,
 the ten application-source [OBJ-03 gate commands](verification/requirements/OBJ-03.json)
 passed preflight before the final replay-fixture repair on the implementation based on
@@ -328,6 +471,15 @@ product baseline**, and no claim is made that those intermittent failures are fi
 Do not re-enable or retry CI merely to produce a green badge while it is paused.
 
 ## Remaining acceptance and risks
+
+Historical snapshot: this closing summary preserves the earlier DEL-06-era
+acceptance position and limitations; it is not the current requirement inventory
+or an assertion that later merged work remains absent. In particular, the
+[EXEC-06 retention implementation](verification/requirements/EXEC-06.md) now
+provides bounded leased logical erasure. Current [assumptions](assumptions.md)
+and [data handling](data-handling.md#recorded-expiry-and-bounded-retention-maintenance)
+still exclude secure-media/backup erasure and a deletion SLA. Historical pending
+statements below neither establish nor invalidate a later matching-source run.
 
 Claim: **Acceptance target not yet verified** — final completion requires every
 matrix ID and its actual gates, not just retained branch counts. DEL-06 does not

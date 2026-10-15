@@ -33,7 +33,7 @@ implemented control. This register is not a production certification. See the
 | ASM-021 | provisional | Bounded browser polling is sufficient for v1 run updates. | Revisit if product requirements require server push or higher concurrency. |
 | ASM-022 | provisional | UI filters distinguish deployment state from recent-run state instead of overloading one status. | Browser tests assert both labels and semantics. |
 | ASM-023 | accepted | Catalog prompts and schemas resolve local references only; remote references and path traversal are invalid. | Catalog compiler tests enforce containment. |
-| ASM-024 | accepted | Field classification, redacted persistence envelopes, configurable TTLs, expiry metadata, and preserved audit skeletons follow ADR-0010. Expiry/projection behavior does not prove physical deletion: no automatic retention sweeper is shipped. | [ADR-0010](adr/0010-data-retention.md) closes the policy; [data handling](data-handling.md) distinguishes implemented controls from unverified physical cleanup. |
+| ASM-024 | accepted | Field classification, redacted persistence envelopes, configurable TTLs, expiry metadata, and preserved audit skeletons follow ADR-0010. The shipped scheduler performs bounded leased logical erasure in UTC-minute batches of at most 50 eligible details; active or recovery-needed work remains protected. This does not securely erase media or backups, establish a deletion SLA, or qualify production retention. | [ADR-0010](adr/0010-data-retention.md) closes the policy; [bounded maintenance](data-handling.md#recorded-expiry-and-bounded-retention-maintenance), its [service](../apps/api/src/marketing_agents/application/services/retention_maintenance.py), and the [scheduler worker](../apps/api/src/marketing_agents/workers/runtime/retention.py) define the local scope. Revisit before changing recovery exclusions, batch limits, or media/backup lifecycle guarantees. |
 
 ## Known local-v1 limitations
 
@@ -42,7 +42,7 @@ implemented control. This register is not a production certification. See the
 - Deterministic mock receipts prove local idempotency behavior, not universal exactly-once delivery for future providers.
 - No production deployment, production SLO, or live-provider behavior is claimed.
 - The source frames do not explain Community duplication or authorize vendor-specific integrations.
-- Claim: **Residual risk** — configured TTLs are not an automatic physical-erasure guarantee; protect database files and secret-bearing backups until a separately verified retention maintenance procedure exists.
+- Claim: **Residual risk** — bounded logical erasure does not securely overwrite SQLite pages, WAL, filesystem snapshots or backups. TTL is an eligibility threshold, not a deletion SLA; a stopped scheduler does not purge. Protect database files and secret-bearing backups independently of logical maintenance. [Local operations](operations.md#backup-and-recovery) and [data handling](data-handling.md#recorded-expiry-and-bounded-retention-maintenance) describe these limits, not a production retention guarantee.
 
 ## Evidence and source precedence
 
