@@ -145,6 +145,7 @@ Allowed status values:
 | DEL-08 | Format/lint/type/test task runner commands. | 01, 14, 15 | Makefile/configs | Static gates | implemented |
 | DEL-09 | History verification accepts only explicitly pinned legacy merge-subject exceptions. | 14, 15 | Evidence verifier/policy | Pinned exception tooling tests | verified |
 | DEL-10 | PostgreSQL is the primary seeded database with explicit SQLite compatibility and preserved local security and recovery boundaries. | 04, 14, 15 | Private PostgreSQL Compose/native startup and paired logical backup | Full quality, live PostgreSQL, clean-state browser, native restart and paired restore gates | implemented |
+| DEL-11 | Public project README presents source-grounded setup, product tours and architecture with bounded local visual assets and explicit mock and verification limits. | 15 | Public README, retained UI captures, architecture diagram and capture provenance | Documentation and visual-asset regressions, connection witness, full quality, four offline suites, clean-state browser and paired recovery gates | implemented |
 
 ## Acceptance criteria matrix
 
