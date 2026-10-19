@@ -66,8 +66,10 @@ All other mainline commits still require the normal requirement protocol.
 
 ## Inventory
 
-The authoritative matrix currently contains 125 IDs, including the user-requested
-DEL-10 PostgreSQL-primary addition:
+The authoritative matrix currently contains 126 IDs, including the user-requested
+DEL-10 PostgreSQL-primary and AC-18 current-collector diagnostics additions.
+AC-18 ports useful troubleshooting tools onto the current collector without
+rewriting the original AC-15 feature, its diagnostics branch or any checkpoint:
 
 ```text
 SRC-01 SRC-02 SRC-03
@@ -83,7 +85,7 @@ WEB-01 WEB-02 WEB-03 WEB-04 WEB-05 WEB-06 WEB-07 WEB-08 WEB-09
 DEMO-01 DEMO-02 DEMO-03 DEMO-04 DEMO-05 DEMO-06
 SAFE-01 SAFE-02 SAFE-03 SAFE-04 SAFE-05 SAFE-06 SAFE-07 SAFE-08 SAFE-09 SAFE-10 SAFE-11
 DEL-01 DEL-02 DEL-03 DEL-04 DEL-05 DEL-06 DEL-07 DEL-08 DEL-09 DEL-10
-AC-01 AC-02 AC-03 AC-04 AC-05 AC-06 AC-07 AC-08 AC-09 AC-10 AC-11 AC-12 AC-13 AC-14 AC-15 AC-16 AC-17
+AC-01 AC-02 AC-03 AC-04 AC-05 AC-06 AC-07 AC-08 AC-09 AC-10 AC-11 AC-12 AC-13 AC-14 AC-15 AC-16 AC-17 AC-18
 EXEC-01 EXEC-02 EXEC-03 EXEC-04 EXEC-05 EXEC-06 EXEC-07 EXEC-08
 ```
 

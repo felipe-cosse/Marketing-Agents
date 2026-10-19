@@ -35,6 +35,7 @@ from scripts.ac_15_kernel_bytecode import (
     COUNTER_NAMES,
     PENDING_MAX_ENTRIES,
     PENDING_VALUE_SIZE,
+    READ_DIAGNOSTIC_NAMES,
     exit_instructions,
     instructions,
 )
@@ -541,7 +542,11 @@ class Collector:
             "recursion_misses": misses,
             "overflow": self.overflow,
             "monotonic": monotonic,
-            "conservation": values["messages"] == sum(values[name] for name in COUNTER_NAMES[5:12]),
+            "conservation": (
+                values["messages"] == sum(values[name] for name in COUNTER_NAMES[5:12])
+                and values["control_read_error"]
+                == sum(values[name] for name in READ_DIAGNOSTIC_NAMES)
+            ),
         }
 
     def detach(self):

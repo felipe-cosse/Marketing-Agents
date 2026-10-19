@@ -1,0 +1,403 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "AC-18",
+  "matrix_statement_sha256": "15973a7260cf0eb7d6beafd44a526a6712e1dd0467478e5ecd33bb1b5f0a40d2",
+  "evidence_class": "acceptance",
+  "scope": {
+    "allowed_path_globs": [
+      "Makefile",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/implementation/requirement-branch-workflow.md",
+      "docs/verification/requirements/AC-18.json",
+      "docs/verification/requirements/AC-18.md",
+      "scripts/ac_15_kernel_bytecode.py",
+      "scripts/ac_15_kernel_client.py",
+      "scripts/ac_15_kernel_collector.py",
+      "scripts/ac_15_vma_diagnostic.py",
+      "tests/tooling/test_ac_15_kernel_bytecode.py",
+      "tests/tooling/test_ac_15_kernel_collector.py",
+      "tests/tooling/test_ac_15_kernel_protocol.py",
+      "tests/tooling/test_ac_15_vma_diagnostic.py"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "journey",
+        "one_of": [
+          "scripts/ac_15_vma_diagnostic.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "scripts/ac_15_kernel_bytecode.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "scripts/ac_15_kernel_client.py"
+        ]
+      },
+      {
+        "kind": "control",
+        "one_of": [
+          "scripts/ac_15_kernel_collector.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_ac_15_kernel_bytecode.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_ac_15_kernel_collector.py",
+          "tests/tooling/test_ac_15_kernel_protocol.py"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_ac_15_vma_diagnostic.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "authoritative-counter-and-rejection-preservation",
+      "type": "negative_control",
+      "statement": "The current 26 authoritative counters, network classification, control rejection, read sizes, typed pending cleanup and full-width native EINVAL VMA qualification remain intact. Appended diagnostic bins neither authorize a failed read nor add a second rejection. The network bytecode remains unchanged.",
+      "test_refs": [
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py"
+      ]
+    },
+    {
+      "id": "bounded-conserved-read-diagnostics",
+      "type": "contract",
+      "statement": "Nine fixed read sites each expose only EFAULT, other nonzero result or pre-helper pointer-wrap counts. Exact signed 64-bit EFAULT classification and conservation against control_read_error are mandatory. Missing, malformed, negative, inconsistent or incompatible counter evidence fails closed.",
+      "test_refs": [
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py"
+      ]
+    },
+    {
+      "id": "current-source-native-vma-diagnostic",
+      "type": "journey",
+      "statement": "A separate native-only runner compares untouched, pre-read and inaccessible owned mappings with the current source-bound collector and live kernel configuration. It selects an already acquired immutable image for clean HEAD, never builds or pulls, and cannot turn completed diagnostics into an acceptance pass.",
+      "test_refs": [
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ]
+    },
+    {
+      "id": "diagnostic-privacy-and-owned-lifecycle",
+      "type": "negative_control",
+      "statement": "Diagnostic output contains bounded categories, counts and source/kernel identities, never user names, labels, addresses, buffer contents, raw helper results or unrestricted exception text. Fresh owned network-none targets retain existing boundaries and cleanup; failures, unsupported execution and incomplete evidence cannot become success.",
+      "test_refs": [
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ]
+    },
+    {
+      "id": "complete-frozen-source-qualification",
+      "type": "contract",
+      "statement": "The exact frozen candidate requires the complete 20-gate quality run and matching audit, all four complete AC-15 offline suites, a separate live diagnostic, committed clean-state production-browser verification and both paired Compose recovery paths. Existing checks, inventories, coverage, deadlines and Docker settings are retained.",
+      "test_refs": [
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "ac-18-python-and-collector-controls",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/network/test_ac_15_python_isolation.py",
+        "tests/network/test_safe_11_network_isolation.py",
+        "tests/acceptance/test_obj_04_native_guard.py",
+        "tests/tooling/test_ac_15_offline.py",
+        "tests/tooling/test_ac_15_browser_transport.py",
+        "tests/tooling/test_ac_15_streaming.py",
+        "tests/tooling/test_ac_15_kernel_boundary.py",
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_ac_15_qemu_control.py",
+        "tests/tooling/test_del_05_offline_diagnostics.py",
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "current-source-native-vma-diagnostic",
+        "diagnostic-privacy-and-owned-lifecycle",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-node-transport-and-inventory-controls",
+      "runner": "argv",
+      "argv": [
+        "node",
+        "--test",
+        "tests/network/browser_network_policy.test.mjs",
+        "tests/network/node_network_guard.test.mjs",
+        "tests/network/obj_06_control_witness.test.mjs",
+        "tests/network/playwright_network_isolation.test.mjs",
+        "tests/network/web_e2e_inventory.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180,
+      "network_requirement": "deny",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-diagnostic-format",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "scripts/ac_15_kernel_bytecode.py",
+        "scripts/ac_15_kernel_client.py",
+        "scripts/ac_15_kernel_collector.py",
+        "scripts/ac_15_vma_diagnostic.py",
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "current-source-native-vma-diagnostic",
+        "diagnostic-privacy-and-owned-lifecycle",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-diagnostic-lint",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "ruff",
+        "check",
+        "scripts/ac_15_kernel_bytecode.py",
+        "scripts/ac_15_kernel_client.py",
+        "scripts/ac_15_kernel_collector.py",
+        "scripts/ac_15_vma_diagnostic.py",
+        "tests/tooling/test_ac_15_kernel_bytecode.py",
+        "tests/tooling/test_ac_15_kernel_collector.py",
+        "tests/tooling/test_ac_15_kernel_protocol.py",
+        "tests/tooling/test_ac_15_vma_diagnostic.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "current-source-native-vma-diagnostic",
+        "diagnostic-privacy-and-owned-lifecycle",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-complete-offline-backend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "backend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-complete-offline-frontend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "frontend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-complete-offline-browser",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "browser"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-complete-offline-native",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "native"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "authoritative-counter-and-rejection-preservation",
+        "bounded-conserved-read-diagnostics",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-live-source-bound-vma-diagnostic",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "scripts.ac_15_vma_diagnostic",
+        "run"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "current-source-native-vma-diagnostic",
+        "diagnostic-privacy-and-owned-lifecycle",
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-exact-source-quality-audit",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "scripts.ac_16_quality",
+        "audit"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-clean-state-production-delivery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-del-01"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-legacy-sqlite-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-05-compose-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "complete-frozen-source-qualification"
+      ]
+    },
+    {
+      "id": "ac-18-postgresql-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-10-postgresql-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "complete-frozen-source-qualification"
+      ]
+    }
+  ],
+  "limitations": [
+    "AC-18 is a new, narrowly scoped user-requested diagnostic port on current main, not a second AC-15 implementation or merge. Original AC-15 evidence, its retained requirement branch, the historical diagnostic branch and all checkpoints remain unchanged. No protected evidence policy, schema or executor changes are authorized.",
+    "Read diagnostics are supplementary telemetry. The existing authoritative counters and rejection rules decide acceptance; detailed bins may only make malformed evidence fail. Counter conservation is not proof that a memory snapshot matches the kernel's later read, and raw helper errno values are not retained.",
+    "The VMA runner is diagnostics-only and native ARM64-only. Completion is distinct from acceptance and does not replace any complete suite. It does not qualify a QEMU-emulated target, enabled or unknown kernel naming configuration, arbitrary memory races or an adversarial Docker administrator.",
+    "Acquisition of the source-bound image is an explicit prior network-enabled step, not a verification fallback. Verification never installs, builds or pulls the AC-15 image. Runtime targets and collector keep their existing capabilities, namespace, network, seccomp, image/source binding and owned cleanup requirements.",
+    "The four original AC-15 suites retain their existing inventory and optional PostgreSQL semantics. Their optional skips do not qualify PostgreSQL. The separate current clean-state journey includes its required PostgreSQL tests, and both Compose recovery gates remain mandatory; no new host-native PostgreSQL qualification is claimed.",
+    "Full observed execution remains pending until the frozen candidate passes every required gate. Historical reports, focused passes, diagnostic completion and the unsigned local source-consistency record are not independently authenticated execution or complete-release acceptance.",
+    "CI stays disabled, not green. No checkpoint, historical branch or main rewrite, publication or main merge is authorized by this manifest. Ask for explicit publication and non-fast-forward merge approval only after full verification. Keep sanitized reports outside Git and never publish backup/key bundles or credentials."
+  ]
+}

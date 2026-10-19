@@ -1,4 +1,7 @@
-"""Fake-only tests: protocol evidence can never start Docker or native probes."""
+"""Fake-only protocol tests, including AC-18 exact diagnostic conservation.
+
+Protocol evidence can never start Docker or native probes.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ from scripts import ac_15_kernel_boundary as boundary
 from scripts import ac_15_kernel_client as client
 from scripts import ac_15_kernel_host as host
 from scripts import ac_15_offline as offline
+from scripts.ac_15_kernel_bytecode import BASE_COUNTER_NAMES, READ_DIAGNOSTIC_NAMES
 from scripts.del_05_clean_state import VerificationFailure
 
 IMAGE = "sha256:" + "a" * 64
@@ -245,6 +249,75 @@ def test_counter_missing_and_regression_fail_closed():
         client.phase_summary(counters(loopback=1), counters())
 
 
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+@pytest.mark.parametrize("value", [-1, True, False, 1.0, "1", None, 2**63])
+def test_ac_18_diagnostic_counters_have_the_same_strict_unsigned_bound(name, value):
+    invalid = counters(control_read_error=1, **{name: value})
+    with pytest.raises(VerificationFailure, match="overflow_or_type"):
+        client.validate_counters(invalid)
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_ac_18_every_fixed_bin_is_required_and_hash_bound_without_double_rejection(name):
+    invalid = counters()
+    del invalid[name]
+    with pytest.raises(VerificationFailure, match="counter_schema"):
+        client.validate_counters(invalid)
+    before = counters(control_read_error=2, **{name: 2})
+    after = counters(control_read_error=5, **{name: 5})
+    summary = client.phase_summary(before, after)
+    assert summary["counters"][name] == summary["counters"]["control_read_error"] == 3
+    assert summary["rejected"] == 3
+    evidence = {key: summary[key] for key in ("schema_version", "observer", "counters")}
+    assert summary["sha256"] == hashlib.sha256(client.canonical(evidence)).hexdigest()
+    with pytest.raises(VerificationFailure, match="counter_regression"):
+        client.phase_summary(after, before)
+    with pytest.raises(VerificationFailure, match="unclassified_or_incomplete"):
+        host.validate_phase(summary, 4, "native")
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_ac_18_read_errors_cannot_lose_or_gain_diagnostic_causes(count):
+    invalid = counters(control_read_error=1, control_read_prctl_args_efault=count)
+    with pytest.raises(VerificationFailure, match="diagnostic_conservation"):
+        client.validate_counters(invalid)
+    with pytest.raises(VerificationFailure, match="diagnostic_conservation"):
+        client.phase_summary(counters(), invalid)
+    with pytest.raises(VerificationFailure, match="diagnostic_conservation"):
+        host.validate_snapshot(snapshot(counters=invalid))
+
+
+@pytest.mark.parametrize("count", [24, 26, 45])
+def test_ac_18_legacy_counter_protocols_never_silently_supply_missing_bins(count):
+    # These model the original checkpoint, final AC-15 and old diagnostics
+    # branch. No schema-version flag can compensate for the exact missing keys.
+    names = (
+        BASE_COUNTER_NAMES[:24] + READ_DIAGNOSTIC_NAMES[:21]
+        if count == 45
+        else BASE_COUNTER_NAMES[:count]
+    )
+    invalid = dict.fromkeys(names, 0)
+    with pytest.raises(VerificationFailure, match="counter_schema"):
+        client.validate_counters(invalid)
+    with pytest.raises(VerificationFailure, match="collector_ready_invalid"):
+        host.validate_ready({**ready(), "counter_names": list(names)}, 123)
+
+
+def test_ac_18_reordered_extra_and_payload_bins_are_rejected():
+    for name in ("control_read_unknown_other", "private-name-or-address", "raw_helper_result"):
+        with pytest.raises(VerificationFailure, match="counter_schema"):
+            client.validate_counters({**counters(), name: 0})
+    names = list(client.counter_names())
+    names[-2:] = names[-2:][::-1]
+    with pytest.raises(VerificationFailure, match="collector_ready_invalid"):
+        host.validate_ready({**ready(), "counter_names": names}, 123)
+    value = counters(
+        control_read_error=2, control_read_prctl_args_efault=1, control_read_exit_result_other=1
+    )
+    client.validate_counters(value)
+    assert client.phase_summary(counters(), value)["rejected"] == 2
+
+
 @pytest.mark.parametrize("field", ["vma_unsupported_started", "vma_unsupported_completed"])
 @pytest.mark.parametrize("value", [-1, True, 1.0, "1", None, 2**63])
 def test_vma_unsupported_counter_requires_exact_bounded_unsigned_value(field, value):
@@ -315,6 +388,7 @@ def test_phase_delta_all_rejections_and_hash_bind_exact_counters():
     )
     for key in rejecting:
         after[key] += 1
+    after["control_read_prctl_args_efault"] = 1
     after["messages"] += 3
     summary = client.phase_summary(before, after)
     assert summary["rejected"] == 9 and summary["unix"] == 0
@@ -492,7 +566,10 @@ def test_expected_fault_canaries_never_leak_to_regular_phases(suite, offset):
     ],
 )
 def test_incomplete_classifier_evidence_is_never_canary_allowance(field):
-    summary = client.phase_summary(counters(), counters(external=1, **{field: 1}))
+    changes = {field: 1}
+    if field == "control_read_error":
+        changes["control_read_prctl_args_efault"] = 1
+    summary = client.phase_summary(counters(), counters(external=1, **changes))
     with pytest.raises(VerificationFailure, match="incomplete_phase"):
         host.validate_phase(summary, 0, "backend")
 
@@ -528,9 +605,12 @@ def test_vma_phase_requires_collector_disabled_proof_and_balanced_counters():
     ],
 )
 def test_balanced_disabled_vma_never_excuses_original_rejections(field):
+    changes = {field: 1}
+    if field == "control_read_error":
+        changes["control_read_vma_exit_result_efault"] = 1
     summary = client.phase_summary(
         counters(),
-        counters(vma_unsupported_started=3, vma_unsupported_completed=3, **{field: 1}),
+        counters(vma_unsupported_started=3, vma_unsupported_completed=3, **changes),
     )
     assert summary["rejected"] == 1
     with pytest.raises(VerificationFailure):
@@ -1731,6 +1811,8 @@ def test_emulation_health_phase_is_additional_and_never_an_ordinary_command_allo
     ],
 )
 def test_emulation_control_never_waives_missed_external_unix_or_error_evidence(changes):
+    if changes.get("control_read_error"):
+        changes = {**changes, "control_read_prctl_args_efault": 1}
     summary = client.phase_summary(counters(), counters(**changes))
     with pytest.raises(VerificationFailure):
         host.validate_phase(summary, 4, "backend", emulation=True)
