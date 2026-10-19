@@ -12,6 +12,7 @@ from marketing_agents.application.orchestration.executable_workflows import (
     ExecutableWorkflowRegistry,
     catalog_role_workflow_id,
 )
+from marketing_agents.application.policies.json_schema import schema_definition_check_scope
 from marketing_agents.domain.enums import TriggerKind, WorkMode
 from marketing_agents.infrastructure.catalog.models import CompiledCatalog
 
@@ -112,6 +113,17 @@ def build_executable_workflow_registry(
     Read handlers produce role-specific artifacts; write-only roles select an
     explicit action workflow. Model output never selects a write capability.
     """
+    # AC-18: only identical successful structural checks are shared. Every
+    # definition and schema is still checked; nothing survives this build.
+    with schema_definition_check_scope():
+        return _build_executable_workflow_registry(catalog, demo_scenarios=demo_scenarios)
+
+
+def _build_executable_workflow_registry(
+    catalog: CompiledCatalog,
+    *,
+    demo_scenarios: Iterable[DemoWorkflowSource],
+) -> ExecutableWorkflowRegistry:
     if type(catalog) is not CompiledCatalog:
         raise ValueError("executable workflow factory requires one compiled catalog")
     templates = {item.id: item for item in catalog.templates}

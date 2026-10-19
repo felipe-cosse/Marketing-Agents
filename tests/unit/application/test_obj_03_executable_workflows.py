@@ -1,8 +1,9 @@
-"""OBJ-03: admission and workers share exact executable identities and schemas."""
+"""OBJ-03 / AC-18: exact executable contracts and build-local schema-check reuse."""
 
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import nullcontext
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +16,7 @@ from marketing_agents.application.orchestration.executable_workflows import (
     ExecutableWorkflowRegistryError,
     catalog_role_workflow_id,
 )
+from marketing_agents.application.policies import json_schema as schema_policy
 from marketing_agents.application.ports.manual_work import ManualAdmissionResolutionError
 from marketing_agents.application.ports.unit_of_work import UnitOfWork
 from marketing_agents.application.services.incoming_work_validation import (
@@ -29,6 +31,7 @@ from marketing_agents.domain.instance_configuration import (
     InstanceConfiguration,
     InstanceTriggerBinding,
 )
+from marketing_agents.infrastructure import executable_workflows as workflow_factory
 from marketing_agents.infrastructure.catalog import compile_catalog
 from marketing_agents.infrastructure.catalog.instance_configuration_seed import (
     catalog_instance_configuration_defaults,
@@ -60,6 +63,107 @@ def configurations(catalog: CompiledCatalog) -> dict[str, InstanceConfiguration]
         item.instance_id: item
         for item in catalog_instance_configuration_defaults(catalog, CroniterRecurrenceCalculator())
     }
+
+
+@pytest.fixture
+def structural_check_calls(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
+    calls: list[bytes] = []
+    original = schema_policy.Draft202012Validator.check_schema
+
+    def check(schema: Any) -> None:
+        calls.append(canonical_json_bytes(schema))
+        original(schema)
+
+    monkeypatch.setattr(schema_policy.Draft202012Validator, "check_schema", check)
+    return calls
+
+
+def test_ac_18_reuse_preserves_every_definition_hash_and_complete_registry_inventory(
+    catalog: CompiledCatalog,
+    structural_check_calls: list[bytes],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cached = build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    unique = {
+        (
+            canonical_json_bytes(getattr(definition, f"{direction}_schema")),
+            getattr(definition, f"{direction}_schema_id"),
+        )
+        for definition in cached.list()
+        for direction in ("input", "output")
+    }
+    assert len(cached.list()) == 76
+    assert len(unique) == len(structural_check_calls) == 82
+    assert schema_policy._SCHEMA_DEFINITION_CHECKS.get() is None
+    structural_check_calls.clear()
+    monkeypatch.setattr(workflow_factory, "schema_definition_check_scope", nullcontext)
+    uncached = build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    assert len(structural_check_calls) == 152
+    assert cached.list() == uncached.list()
+    assert [entry.definition_hash for entry in cached.list()] == [
+        entry.definition_hash for entry in uncached.list()
+    ]
+    assert (
+        len({identifier for entry in cached.list() for identifier in entry.target_instance_ids})
+        == 43
+    )
+    assert len({entry.template_id for entry in cached.list()}) == 36
+
+
+def test_ac_18_each_registry_build_rechecks_and_standalone_definitions_remain_uncached(
+    catalog: CompiledCatalog, structural_check_calls: list[bytes]
+) -> None:
+    first = build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    second = build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    assert len(structural_check_calls) == 164
+    assert first.list() == second.list()
+    structural_check_calls.clear()
+    replace(first.list()[0])
+    replace(first.list()[0])
+    assert len(structural_check_calls) == 4
+
+
+def test_ac_18_failed_registry_does_not_leak_reuse_or_hide_later_content_drift(
+    catalog: CompiledCatalog, structural_check_calls: list[bytes]
+) -> None:
+    build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    schemas = dict(catalog.input_schema_by_template)
+    schemas[_TEMPLATE] = dict(schemas[_TEMPLATE]) | {"type": "invalid-json-type"}
+    changed = replace(catalog, input_schema_by_template=schemas)
+    with pytest.raises(schema_policy.JsonSchemaPolicyError) as failure:
+        build_executable_workflow_registry(changed, demo_scenarios=DEMO_SCENARIOS.list())
+    assert failure.value.code == "schema_invalid"
+    assert schema_policy._SCHEMA_DEFINITION_CHECKS.get() is None
+    structural_check_calls.clear()
+    build_executable_workflow_registry(catalog, demo_scenarios=DEMO_SCENARIOS.list())
+    assert len(structural_check_calls) == 82
+
+
+def test_ac_18_registry_rechecks_mutating_content_within_the_same_build(
+    catalog: CompiledCatalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = next(item for item in catalog.templates if len(item.supported_trigger_types) > 1)
+    schemas = dict(catalog.input_schema_by_template)
+    mutable_schema = dict(schemas[template.id])
+    schemas[template.id] = mutable_schema
+    changed = replace(catalog, input_schema_by_template=schemas)
+    original = workflow_factory.ExecutableWorkflowDefinition
+    selected = 0
+
+    def definition(**kwargs: Any) -> Any:
+        nonlocal selected
+        if kwargs["template_id"] == template.id:
+            selected += 1
+            if selected == 2:
+                mutable_schema["type"] = "invalid-json-type"
+        return original(**kwargs)
+
+    monkeypatch.setattr(workflow_factory, "ExecutableWorkflowDefinition", definition)
+    with pytest.raises(schema_policy.JsonSchemaPolicyError) as failure:
+        build_executable_workflow_registry(changed)
+    assert selected == 2
+    assert failure.value.code == "schema_invalid"
+    assert schema_policy._SCHEMA_DEFINITION_CHECKS.get() is None
 
 
 def test_obj_03_all_36_roles_and_43_instances_have_real_schema_bound_contracts(

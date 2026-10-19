@@ -520,8 +520,8 @@ test-del-05-tooling:
 verify-del-05-offline-backend:
 	python -m scripts.del_05_offline_diagnostics ruff-format-source -- python -m ruff format --check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
 	python -m scripts.del_05_offline_diagnostics ruff-check-source -- python -m ruff check apps/api/src tests/unit tests/integration tests/acceptance tests/catalog
-	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py scripts/ac_15_kernel_*.py scripts/ac_15_qemu_control.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
-	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py scripts/ac_15_kernel_*.py scripts/ac_15_qemu_control.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-format-tooling -- python -m ruff format --check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py scripts/ac_15_kernel_*.py scripts/ac_15_qemu_control.py scripts/ac_15_vma_diagnostic.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
+	python -m scripts.del_05_offline_diagnostics ruff-check-tooling -- python -m ruff check scripts/del_05_*.py scripts/verify_del_05_*.py scripts/dev.py scripts/health_http.py scripts/local_backup.py scripts/ac_01_environment.py scripts/ac_15_offline.py scripts/ac_15_browser_transport.py scripts/ac_15_kernel_*.py scripts/ac_15_qemu_control.py scripts/ac_15_vma_diagnostic.py tests/conftest.py tests/network/*.py tests/tooling/test_del_05_*.py tests/tooling/test_ac_01_*.py tests/tooling/test_ac_15_*.py
 	python -m scripts.del_05_offline_diagnostics mypy -- python -m mypy apps/api/src/marketing_agents
 	python -m scripts.del_05_offline_diagnostics architecture -- python scripts/verify_architecture_boundaries.py
 	python -m scripts.del_05_offline_diagnostics catalog -- python -m marketing_agents.workers.catalog_cli validate --root catalog/v1
@@ -546,3 +546,9 @@ acquire-offline-tests:
 
 verify-offline-tests:
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) scripts/ac_15_offline.py run $(if $(AC15_IMAGE),--image "$(AC15_IMAGE)",) $(if $(AC15_SUITE),--suite "$(AC15_SUITE)",) $(if $(AC15_REPORT),--report "$(AC15_REPORT)",)
+
+# AC-18 diagnostics are not an acceptance suite and cannot replace the four
+# complete AC-15 runs. Source/image validation and collector checks stay strict.
+.PHONY: diagnose-ac-15-vma
+diagnose-ac-15-vma:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m scripts.ac_15_vma_diagnostic run $(if $(AC15_IMAGE),--image "$(AC15_IMAGE)",) $(if $(AC15_REPORT),--report "$(AC15_REPORT)",)

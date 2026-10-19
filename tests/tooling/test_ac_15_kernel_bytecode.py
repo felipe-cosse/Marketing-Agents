@@ -2,6 +2,7 @@
 
 This intentionally interprets the emitted bytes, not a parallel classifier.
 It is not a Linux verifier, ABI qualification or live-hook coverage proof.
+AC-18 preserves authoritative outcomes while classifying bounded read failures.
 """
 
 import hashlib
@@ -10,10 +11,14 @@ import struct
 import unittest
 
 from scripts.ac_15_kernel_bytecode import (
+    BASE_COUNTER_NAMES,
     COUNTER_NAMES,
     NETWORK_COUNTER_NAMES,
     PENDING_OUTPUT_QUERY,
     PENDING_VMA_UNSUPPORTED,
+    READ_DIAGNOSTIC_CAUSES,
+    READ_DIAGNOSTIC_NAMES,
+    READ_DIAGNOSTIC_SITES,
     SECCOMP_ACTIONS,
     SYSCALLS,
     exit_instructions,
@@ -495,6 +500,7 @@ class Machine(NetworkMachine):
         self.pending = {} if pending is None else pending
         self.pid_tgid = pid_tgid
         self.update_error = self.delete_error = False
+        self.read_results = {}
         if phase == "exit":
             self.put(self.kernel, REGS, integer_bytes(result, 8))
 
@@ -505,6 +511,12 @@ class Machine(NetworkMachine):
         return super().load(address, size)
 
     def helper(self, number):
+        if number in (112, 113):
+            key = (number, self.value(3), self.value(2))
+            super().helper(number)
+            if key in self.read_results:
+                self.reg[0] = self.read_results[key] & MASK
+            return
         if number == 14:
             self.events.append(("pid_tgid",))
             result = self.pid_tgid
@@ -622,19 +634,19 @@ class CompleteInstructionTests(unittest.TestCase):
             ),
             (
                 instructions(7, TARGET, pending_map_fd=8),
-                "ede6c14ae5591922b454330d97b1c411f507a5903ab28dcfaad4ba7b825ae920",
+                "201d56a91707f83903fc609c742bce1a912d19ed88bff42c24492cbb5fea6e24",
             ),
             (
                 exit_instructions(7, TARGET, pending_map_fd=8),
-                "909f5b2c8ebdc82fc6e1ecb54bc93aa86e9a483c5fa0d66c3775d799c38c142a",
+                "fde85af4267e9f1b97958be52f36d65563f1c8ba3a1c2663d2c5cbd824fff418",
             ),
             (
                 instructions(7, TARGET, pending_map_fd=8, anon_vma_name_disabled=True),
-                "f5b8cedeb471a34dd6e06b94c02bdf8e2e2af36df14f596a10677e0ac8de9cc9",
+                "6b0493e89eb6443a6c7cadddf61a4b0de1fe14e96f3db7216888fa07b39ed958",
             ),
             (
                 exit_instructions(7, TARGET, pending_map_fd=8, anon_vma_name_disabled=True),
-                "2ddc8bcb4e2649bf8f48a35e2f9139273944800c6ac2899eab8899e009c43d5d",
+                "f15514e95e8052bced220054dfcb0eeec1d3096de6bd12db6fd6ba5cb8f7a627",
             ),
         )
         for bytecode, expected in programs:
@@ -674,6 +686,29 @@ class CompleteInstructionTests(unittest.TestCase):
             instructions(7, TARGET, pending_map_fd=8, anon_vma_name_disabled=True).endswith(frozen)
         )
         self.assertEqual(COUNTER_NAMES[:14], NETWORK_COUNTER_NAMES)
+        self.assertEqual(
+            BASE_COUNTER_NAMES,
+            (
+                *NETWORK_COUNTER_NAMES,
+                "entry_prctl",
+                "entry_seccomp",
+                "control_queries",
+                "safe_prctl",
+                "filter_changes",
+                "control_error",
+                "control_read_error",
+                "control_state_error",
+                "output_queries_started",
+                "output_queries_completed",
+                "vma_unsupported_started",
+                "vma_unsupported_completed",
+            ),
+        )
+        self.assertEqual(COUNTER_NAMES[:26], BASE_COUNTER_NAMES)
+        self.assertEqual(COUNTER_NAMES[26:], READ_DIAGNOSTIC_NAMES)
+        self.assertEqual(READ_DIAGNOSTIC_CAUSES, ("efault", "other", "wrap"))
+        self.assertEqual(len(READ_DIAGNOSTIC_SITES), 9)
+        self.assertEqual(len(set(COUNTER_NAMES)), 53)
         for number in SYSCALLS:
             for family, ip in (
                 (2, "127.1.2.3"),
@@ -727,7 +762,12 @@ class CompleteInstructionTests(unittest.TestCase):
         )
         for args in ((1 << 32, 1, 1, 0x5000), (0, 0, 1, 0x5000), (0, 1, 1, 0)):
             self.expect(Machine(167, (0x53564D41, *args)), entry_prctl=1, control_error=1)
-        self.expect(Machine(167, (0x53564D41, 0, 1, 1, 1)), entry_prctl=1, control_read_error=1)
+        self.expect(
+            Machine(167, (0x53564D41, 0, 1, 1, 1)),
+            entry_prctl=1,
+            control_read_error=1,
+            control_read_vma_name_efault=1,
+        )
 
     def vma_pair(self, *, pointer=1, result=-22, number=167):
         entry = Machine(167, (0x53564D41, 0, 1 << 40, 4096, pointer), anon_vma_name_disabled=True)
@@ -747,7 +787,7 @@ class CompleteInstructionTests(unittest.TestCase):
             entry, final = self.vma_pair(pointer=pointer)
             self.assertEqual(entry.pending, {PID_TGID: (PENDING_VMA_UNSUPPORTED, 0)})
             self.assertEqual(entry.counts[COUNTER_NAMES.index("safe_prctl")], 0)
-            self.assertEqual(entry.counts[-2:], [1, 0])
+            self.assertEqual(entry.counts[24:26], [1, 0])
             self.assertFalse(any(event[0] == "user" for event in entry.events))
             self.expect(
                 final,
@@ -804,6 +844,11 @@ class CompleteInstructionTests(unittest.TestCase):
                 vma_unsupported_started=1,
                 vma_unsupported_completed=1,
                 control_read_error=1,
+                **{
+                    "control_read_vma_exit_"
+                    + ("result" if offset == 0 else "syscall")
+                    + "_efault": 1
+                },
             )
             self.assertFalse(final.pending)
             self.assertFalse(any(event[0] == "user" for event in final.events))
@@ -811,7 +856,7 @@ class CompleteInstructionTests(unittest.TestCase):
     def test_disabled_vma_entry_register_fault_does_not_create_pending(self):
         machine = Machine(167, (0x53564D41, 0, 1, 4096, 1), anon_vma_name_disabled=True)
         machine.kernel_fail_ranges = [(REGS, REGS + 8)]
-        self.expect(machine, entry_prctl=1, control_read_error=1)
+        self.expect(machine, entry_prctl=1, control_read_error=1, control_read_prctl_args_efault=1)
         self.assertFalse(machine.pending)
 
     def test_disabled_vma_wrong_task_exit_and_missing_exit_never_complete(self):
@@ -828,7 +873,7 @@ class CompleteInstructionTests(unittest.TestCase):
         final.kernel.clear()
         self.expect(final)
         self.assertEqual(pending, entry.pending)
-        self.assertEqual(entry.counts[-2:], [1, 0])
+        self.assertEqual(entry.counts[24:26], [1, 0])
         self.assertFalse(
             any(event[0] in ("context_read", "kernel", "user") for event in final.events)
         )
@@ -922,6 +967,7 @@ class CompleteInstructionTests(unittest.TestCase):
             Machine(277, (2, 0, 1), anon_vma_name_disabled=True),
             entry_seccomp=1,
             control_read_error=1,
+            control_read_action_value_efault=1,
         )
         machine = Machine(
             277,
@@ -929,7 +975,12 @@ class CompleteInstructionTests(unittest.TestCase):
             pending={PID_TGID: (PENDING_OUTPUT_QUERY, 0)},
             anon_vma_name_disabled=True,
         )
-        self.expect(machine, output_queries_completed=1, control_read_error=1)
+        self.expect(
+            machine,
+            output_queries_completed=1,
+            control_read_error=1,
+            control_read_notify_sizes_efault=1,
+        )
         self.assertFalse(machine.pending)
 
     def test_all_filter_attempts_and_unknown_controls(self):
@@ -950,7 +1001,12 @@ class CompleteInstructionTests(unittest.TestCase):
             machine.allocate(0x5000, integer_bytes(action, 4))
             self.expect(machine, entry_seccomp=1, control_error=1)
         self.expect(Machine(277, (2, 1, 1)), entry_seccomp=1, control_error=1)
-        self.expect(Machine(277, (2, 0, 1)), entry_seccomp=1, control_read_error=1)
+        self.expect(
+            Machine(277, (2, 0, 1)),
+            entry_seccomp=1,
+            control_read_error=1,
+            control_read_action_value_efault=1,
+        )
 
     def test_notif_entry_never_reads_or_classifies_poison_output(self):
         entry, final = self.paired()
@@ -1006,6 +1062,7 @@ class CompleteInstructionTests(unittest.TestCase):
                 output_queries_started=1,
                 output_queries_completed=1,
                 control_read_error=1,
+                control_read_notify_sizes_efault=1,
             )
             self.assertFalse(final.pending)
 
@@ -1039,7 +1096,10 @@ class CompleteInstructionTests(unittest.TestCase):
             final = Machine(scno, phase="exit", pending={PID_TGID: (PENDING_OUTPUT_QUERY, 0x5000)})
             if scno == 277:
                 final.kernel_fail_ranges = [(REGS, REGS + 8)]
-            self.expect(final, output_queries_completed=1, **{failure: 1})
+            expected = {failure: 1}
+            if scno == 277:
+                expected["control_read_exit_result_efault"] = 1
+            self.expect(final, output_queries_completed=1, **expected)
             self.assertEqual(final.pending, {})
             self.assertFalse(any(event[0] == "user" for event in final.events))
 
@@ -1078,13 +1138,165 @@ class CompleteInstructionTests(unittest.TestCase):
             self.assertEqual(machine.events, [("scope",)])
 
     def test_selected_control_register_failure_and_initial_failure(self):
-        for number, entry_name in ((167, "entry_prctl"), (277, "entry_seccomp")):
+        for number, entry_name, site in (
+            (167, "entry_prctl", "prctl_args"),
+            (277, "entry_seccomp", "seccomp_args"),
+        ):
             machine = Machine(number)
             machine.kernel_fail_ranges = [(REGS, REGS + 8)]
-            self.expect(machine, **{entry_name: 1, "control_read_error": 1})
+            self.expect(
+                machine,
+                **{entry_name: 1, "control_read_error": 1, "control_read_" + site + "_efault": 1},
+            )
         machine = Machine(167)
         machine.kernel_fail_ranges = [(REGS + 64, REGS + 72)]
         self.expect(machine, regs_read_error=1)
+
+    def diagnostic_machine(self, site, pointer=0x5000):
+        """AC-18 exercises emitted bytes using only owned synthetic memory."""
+        if site == "prctl_args":
+            return Machine(167, (15,)), (113, REGS, 40), {"entry_prctl": 1}
+        if site == "seccomp_args":
+            machine = Machine(277, (2, 0, 0x5000))
+            machine.allocate(0x5000, integer_bytes(SECCOMP_ACTIONS[0], 4))
+            return machine, (113, REGS, 24), {"entry_seccomp": 1}
+        if site == "vma_name":
+            machine = Machine(167, (0x53564D41, 0, 1, 1, pointer))
+            machine.allocate(pointer, b"\xff")
+            return machine, (112, pointer, 1), {"entry_prctl": 1}
+        if site == "action_value":
+            machine = Machine(277, (2, 0, pointer))
+            if pointer + 4 <= MASK + 1:
+                machine.allocate(pointer, integer_bytes(SECCOMP_ACTIONS[0], 4))
+            return machine, (112, pointer, 4), {"entry_seccomp": 1}
+        if site.startswith("vma_exit_"):
+            machine = Machine(
+                167,
+                phase="exit",
+                pending={PID_TGID: (PENDING_VMA_UNSUPPORTED, 0)},
+                result=-22,
+                anon_vma_name_disabled=True,
+            )
+            offset = 64 if site == "vma_exit_syscall" else 0
+            return machine, (113, REGS + offset, 8), {"vma_unsupported_completed": 1}
+        machine = Machine(277, phase="exit", pending={PID_TGID: (PENDING_OUTPUT_QUERY, pointer)})
+        if pointer + 6 <= MASK + 1:
+            machine.allocate(pointer, b"\x50\0\x18\0\x40\0")
+        read = {
+            "exit_syscall": (113, REGS + 64, 8),
+            "exit_result": (113, REGS, 8),
+            "notify_sizes": (112, pointer, 6),
+        }[site]
+        return machine, read, {"output_queries_completed": 1}
+
+    def test_ac_18_every_site_keeps_original_failure_and_one_fixed_cause(self):
+        results = (-14, -1, -5, -13, -22, -14 - (1 << 32), 1, 14, 1 << 32, (1 << 32) - 14)
+        for site in READ_DIAGNOSTIC_SITES:
+            for helper_result in results:
+                with self.subTest(site=site, helper_result=helper_result):
+                    machine, read, original = self.diagnostic_machine(site)
+                    machine.read_results[read] = helper_result
+                    cause = "efault" if helper_result == -14 else "other"
+                    expected = {**original, "control_read_error": 1}
+                    observed = self.expect(
+                        machine, **expected, **{"control_read_" + site + "_" + cause: 1}
+                    )
+                    self.assertEqual(
+                        {name: observed[name] for name in BASE_COUNTER_NAMES},
+                        {**dict.fromkeys(BASE_COUNTER_NAMES, 0), **expected},
+                    )
+                    self.assertEqual(sum(observed[name] for name in READ_DIAGNOSTIC_NAMES), 1)
+                    helper, address, size = read
+                    self.assertEqual(
+                        machine.events.count(
+                            ("user" if helper == 112 else "kernel", address, size)
+                        ),
+                        1,
+                    )
+                    if site.startswith(("exit_", "vma_exit_")) or site == "notify_sizes":
+                        self.assertFalse(machine.pending)
+                        self.assertEqual(machine.events.count(("pending_delete", PID_TGID)), 1)
+
+    def test_ac_18_successful_reads_leave_all_diagnostic_bins_zero(self):
+        for site in READ_DIAGNOSTIC_SITES:
+            with self.subTest(site=site):
+                machine, read, original = self.diagnostic_machine(site)
+                machine.read_results[read] = 0
+                category = (
+                    "safe_prctl"
+                    if site in ("prctl_args", "vma_name") or site.startswith("vma_exit_")
+                    else "control_queries"
+                )
+                self.expect(machine, **original, **{category: 1})
+                self.assertFalse(machine.pending)
+
+    def test_ac_18_wrapped_reads_fail_before_helper_and_still_delete_pending(self):
+        for site, size in (("action_value", 4), ("notify_sizes", 6)):
+            for pointer in range(MASK - size + 2, MASK + 1):
+                with self.subTest(site=site, pointer=pointer):
+                    machine, read, original = self.diagnostic_machine(site, pointer)
+                    machine.read_results[read] = 0
+                    self.expect(
+                        machine,
+                        **original,
+                        control_read_error=1,
+                        **{"control_read_" + site + "_wrap": 1},
+                    )
+                    self.assertFalse(any(event[0] == "user" for event in machine.events))
+                    self.assertFalse(machine.pending)
+
+    def test_ac_18_last_nonwrapping_read_does_not_invent_wrap(self):
+        for site, size in (("vma_name", 1), ("action_value", 4), ("notify_sizes", 6)):
+            for helper_result, cause in ((0, None), (-14, "efault"), (1, "other")):
+                with self.subTest(site=site, helper_result=helper_result):
+                    machine, read, original = self.diagnostic_machine(site, MASK - size + 1)
+                    machine.read_results[read] = helper_result
+                    expected = dict(original)
+                    if cause:
+                        expected.update(
+                            control_read_error=1, **{"control_read_" + site + "_" + cause: 1}
+                        )
+                    else:
+                        expected["safe_prctl" if site == "vma_name" else "control_queries"] = 1
+                    self.expect(machine, **expected)
+                    self.assertEqual(
+                        len([event for event in machine.events if event[0] == "user"]), 1
+                    )
+
+    def test_ac_18_diagnostics_do_not_hide_pending_deletion_failure(self):
+        for site in (
+            "exit_syscall",
+            "exit_result",
+            "notify_sizes",
+            "vma_exit_syscall",
+            "vma_exit_result",
+        ):
+            with self.subTest(site=site):
+                machine, read, original = self.diagnostic_machine(site)
+                machine.read_results[read] = -14
+                machine.delete_error = True
+                self.expect(
+                    machine,
+                    **original,
+                    control_read_error=1,
+                    control_state_error=1,
+                    **{"control_read_" + site + "_efault": 1},
+                )
+                self.assertTrue(machine.pending)
+                self.assertEqual(machine.events.count(("pending_delete", PID_TGID)), 1)
+
+    def test_ac_18_read_site_identifiers_must_be_fixed_unique_and_control_only(self):
+        from scripts.ac_15_kernel_bytecode import _Builder
+
+        for site in (None, "private-path-or-payload", "", True):
+            with self.assertRaisesRegex(ValueError, "unique_control_read_site_required"):
+                _Builder(7, 8).read(113, -80, 40, 7, site=site)
+        builder = _Builder(7, 8)
+        builder.read(113, -80, 40, 7, site="prctl_args")
+        with self.assertRaisesRegex(ValueError, "unique_control_read_site_required"):
+            builder.read(113, -80, 40, 7, site="prctl_args")
+        with self.assertRaisesRegex(ValueError, "diagnostic_site_requires_control_read_failure"):
+            _Builder(7, 8).read(113, -24, 8, 7, 64, "regs_read_error", site="prctl_args")
 
     def test_interface_and_helper_whitelist(self):
         for generator in (instructions, exit_instructions):

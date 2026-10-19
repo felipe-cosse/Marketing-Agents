@@ -83,6 +83,8 @@ def validate_kernel_configuration(value: dict) -> None:
 
 
 def validate_counters(value: dict) -> None:
+    from scripts.ac_15_kernel_bytecode import READ_DIAGNOSTIC_NAMES
+
     require(type(value) is dict and set(value) == set(counter_names()), "kernel_counter_schema")
     require(
         all(type(count) is int and 0 <= count < 2**63 for count in value.values()),
@@ -111,6 +113,10 @@ def validate_counters(value: dict) -> None:
     require(
         value["vma_unsupported_started"] == value["vma_unsupported_completed"],
         "kernel_vma_unsupported_incomplete",
+    )
+    require(
+        sum(value[key] for key in READ_DIAGNOSTIC_NAMES) == value["control_read_error"],
+        "kernel_control_read_diagnostic_conservation",
     )
 
 

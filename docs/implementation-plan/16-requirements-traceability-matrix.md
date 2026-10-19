@@ -167,6 +167,7 @@ Allowed status values:
 | AC-15 | No test performs external network call. | 14 | Socket/MSW/Playwright/offline CI evidence | implemented |
 | AC-16 | Backend/frontend tests, formatting, lint, typing pass. | 14 | `make verify` record | implemented |
 | AC-17 | Docs distinguish implementation, mock, targets, assumptions, credentials. | 15 | Thirteen-guide source review, current-scope claim contracts and copied-root negative controls; `docs/verification/requirements/AC-17.md` | verified |
+| AC-18 | Current-collector read diagnostics preserve authoritative rejection checks and source-bound VMA evidence without exposing user data. | 14 | Diagnostic conservation and compatibility regressions, live owned VMA probes, four complete offline suites and full quality/clean-state verification; `docs/verification/requirements/AC-18.md` | implemented |
 
 ## Execution-approach compliance
 
