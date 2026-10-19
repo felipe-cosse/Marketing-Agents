@@ -1,11 +1,172 @@
 # Marketing Agents
 
-A local control surface and deterministic mock runtime for a source-backed
-marketing organization: **5 departments, 12 functions, 36 role templates, and
-43 instances**. Department instance counts are Social media 12, Blog & SEO 6,
-Email 5, Community 14, and Partnerships 6. Community's seven templates each back
-two distinct instances; their duplication has no invented business meaning.
-The Marketing Orchestrator is a separate control plane, not a 44th instance.
+**A local workspace for exploring, running, and auditing a marketing agent organization.**
+
+Marketing Agents brings a versioned agent catalog, controlled workflow execution,
+and a visual operator console into one project. Explore **5 departments**, **12 functions**,
+**36 role templates**, and **43 instances**; run schema-driven demos; review proposed
+writes; and follow each run to its persisted artifacts.
+
+> **Project status:** Runnable, single-operator local foundation with deterministic
+> mock behavior. Model and connector responses are mocked. Real-provider integrations,
+> external delivery, and multi-user production deployment are outside the shipped runtime.
+
+[Quick start](#quick-start) · [Product tour](#product-tour) · [Architecture](#architecture) ·
+[Demo workflows](#demo-workflows) · [Development](#development) · [Documentation](#documentation)
+
+![Marketing Agents organization chart showing all five departments and 43 catalog instances](docs/images/org-chart.png)
+
+*The running application with a freshly seeded catalog. Agent names describe catalog
+roles; their presence does not imply a live integration.*
+
+## What you can do
+
+- **Explore the organization.** Search and filter the agent catalog, zoom through the
+  graph, inspect instance details, or switch to a keyboard-accessible tree.
+- **Run controlled workflows.** Start from typed forms and safe presets, with input
+  validation and explicit dependency graphs.
+- **Review proposed actions.** Inspect immutable action details and approve the exact
+  action before eligible mock execution.
+- **Trace the result.** Follow runs, step timelines, artifacts, provenance, and audit
+  events in persistent local storage.
+- **Extend a versioned foundation.** Work with YAML catalogs, prompts, JSON schemas,
+  typed application ports, and separately composed adapters.
+
+## Quick start
+
+Install **Docker Engine 28+**, **Docker Compose**, and **Make**. From the repository root:
+
+```sh
+make up
+```
+
+Once readiness succeeds, open **[http://127.0.0.1:8080](http://127.0.0.1:8080)**.
+Go to **Demos → Social content draft → Create draft**, then follow **Open accepted run**
+and **Open artifacts** to inspect the result.
+
+No `.env`, provider key, cloud credential, Redis, or separately managed database is
+required. The first build downloads public images and packages; subsequent application
+work uses deterministic mocks and does not call real model or marketing providers.
+
+```sh
+make logs   # Show bounded service diagnostics
+make down   # Stop this installation; preserve database and digest-key volumes
+```
+
+For a separate installation or a conflicting port, use the same settings when starting
+and stopping:
+
+```sh
+COMPOSE_PROJECT_NAME=marketing-agents-demo MARKETING_AGENTS_WEB_PORT=8081 make up
+COMPOSE_PROJECT_NAME=marketing-agents-demo MARKETING_AGENTS_WEB_PORT=8081 make down
+```
+
+PostgreSQL is the default. If startup detects an existing SQLite installation, it stops
+for an explicit choice. Keep that installation with
+`MARKETING_AGENTS_DATABASE=sqlite make up`, or select a different project name for
+PostgreSQL. Do not delete existing database or key volumes to force a switch.
+See [operations](docs/operations.md) for prerequisites, recovery, and troubleshooting.
+
+## Product tour
+
+### Organization and agent details
+
+The organization chart groups agents by department and function. Each instance exposes
+its purpose, configuration, input schema, and execution status. Narrow screens use an
+accessible tree, and desktop users can switch between graph and tree views.
+
+| Department | Instances | Catalog focus |
+| --- | ---: | --- |
+| Social media | 12 | Content drafts, research, tracking, and analysis |
+| Blog & SEO | 6 | Articles, content updates, rankings, and integrations |
+| Email | 5 | Newsletter and customer lifecycle roles |
+| Community | 14 | Events, education, and discussion |
+| Partnerships | 6 | Implementation and integration partner roles |
+
+Community's seven templates each back two distinct instances; the duplication does not
+imply an invented business distinction. The **Marketing Orchestrator** is a separate
+control plane and is not a 44th instance.
+
+### Guided demos
+
+![Social content draft demo with safe preset inputs, workflow choices, and execution boundaries](docs/images/demos.png)
+
+The demo switchboard supplies schema-driven presets and describes each workflow's
+expected state path. Use synthetic data and **Reset safe preset** to restore an example.
+
+### Run history and artifacts
+
+![Persisted Social draft artifact showing draft text, safety notes, and not-published status](docs/images/artifact-output.png)
+
+**Runs & audit** connects accepted work to its execution history and outputs.
+An accepted receipt proves durable intake; inspect the run and artifacts to determine
+what actually completed. **Approvals** is the review queue for proposed mock writes.
+
+*Screenshots show the real local UI with synthetic presets and mock providers.
+[Capture notes](docs/images/README.md) record the source and reproduction steps.*
+
+## Architecture
+
+![Local Compose architecture: browser, web proxy, FastAPI, run worker, scheduler, versioned catalog, and PostgreSQL](docs/images/system-architecture.svg)
+
+The UI is the control surface; the API validates and admits work; the run worker advances
+persisted workflows; and the scheduler admits due occurrences. PostgreSQL coordinates
+these processes, so no external message broker is required.
+
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Web | React 19, TypeScript, Vite, nginx | Catalog, configuration, demos, approvals, runs, and artifacts |
+| API | Python 3.12, FastAPI, Pydantic | Validated intake and application resources |
+| Application and domain | Typed ports and deterministic orchestration | Policies, dependency graphs, artifact contracts, and lifecycle rules |
+| Runtime | Separate run and scheduler workers | Durable execution, claims, recovery, and schedule admission |
+| Persistence | PostgreSQL 17, SQLAlchemy, Alembic | Catalog projection, configuration, work, approvals, and audit state |
+| Catalog | Versioned YAML, prompts, and JSON schemas | Authoritative definitions and repeatable database seeding |
+
+`catalog/v1` is the source of truth for definitions. Seeding builds the database
+projection while preserving instance-level operator configuration. Domain and
+application code depend on typed ports rather than a model SDK. SQLite remains an
+explicit compatibility mode.
+
+In Compose, the web proxy reaches FastAPI through a private Unix socket. API, worker,
+and PostgreSQL containers have no IP network; database access uses a separate private
+Unix socket. Only the static web proxy publishes a loopback port. That proxy retains
+OS-level outbound capability, so the diagram is not a claim of universal egress isolation.
+See [architecture](docs/architecture.md) and [adapter contracts](docs/adapter-contracts.md)
+for the detailed boundaries.
+
+## Demo workflows
+
+| Demo | Input | Result in the local runtime |
+| --- | --- | --- |
+| **Social content draft** | Idea, audience, tone, and key points | A `social_post_draft` artifact; nothing is published |
+| **Blog & SEO content review** | Article excerpt, keywords, and product metadata | A `content_review` with gaps and recommendations; no crawling or CMS updates |
+| **Email signup onboarding** | Synthetic signup and consent | Two separately approved newsletter/CRM mock actions, then an unsent welcome draft |
+| **Community reminder draft** | Event signup, timezone, local time, and offset | A `scheduled_reminder_draft` with recommended UTC time; no send or external schedule |
+| **Partnership application review** | Application, criteria, and evidence | An advisory `partner_review_recommendation`; no automated decision or notification |
+
+The Email demo illustrates the approval barrier:
+
+```mermaid
+flowchart TB
+    Input["Synthetic signup + consent"] --> Plan["Validate and persist plan"]
+    Plan --> Newsletter["Review newsletter action"]
+    Plan --> CRM["Review CRM action"]
+    Newsletter --> Gate{"Both exact-action<br/>approvals valid?"}
+    CRM --> Gate
+    Gate -->|No| Wait["Wait: zero connector calls"]
+    Gate -->|Yes| Mock["One mock call per action"]
+    Mock --> Draft["Persist unsent welcome draft"]
+    classDef input fill:#eff6ff,stroke:#2563eb,color:#172033;
+    classDef review fill:#fff7ed,stroke:#c67a28,color:#172033;
+    classDef output fill:#ecfdf5,stroke:#0f766e,color:#172033;
+    class Input,Plan input;
+    class Newsletter,CRM,Gate,Wait review;
+    class Mock,Draft output;
+```
+
+Zero or one valid approval permits no connector calls. After both valid approvals,
+the worker records the mock actions and draft. An approval alone is not a delivery receipt.
+The [demo walkthroughs](docs/demos.md) document exact inputs, UI steps, outputs, and limits.
 
 ## Current workflow scope
 
@@ -22,125 +183,45 @@ write-role previews and execution require the matching typed operator command,
 not arbitrary prose or generated actions. Catalog visibility does not imply an
 arbitrary workflow or a real integration, and a mock receipt is not external delivery.
 
-Claims in these guides distinguish **deterministic mock behavior**, implemented
-controls with linked verification evidence, acceptance targets, assumptions,
-deferred integrations, and residual risks. Historical test results do not prove
-that your installation or the current GitHub run is healthy. Operational status
-recorded on **2026-09-10**: GitHub CI was paused at the operator's request and live
-execution remains disabled. See the [verification record](docs/verification.md)
-for dated results and unresolved failures; this README does not claim green CI
-or completion of every requirement.
 
-## Start locally
+## Development
 
-Install Docker Engine 28+ with Compose and Make, then run:
-
-```sh
-make up
-```
-
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080) after readiness succeeds. No `.env`, provider key,
-cloud credential, Redis, or separate database is required. The first build needs
-public image/package registries. Subsequent application activity uses deterministic
-mocks; it does not publish, email, query real accounts, or call a model provider.
-
-`make down` stops this project and preserves its paired database/key volumes.
-`make logs` shows bounded service diagnostics. Set `MARKETING_AGENTS_WEB_PORT` for
-a conflicting port and `COMPOSE_PROJECT_NAME=marketing-agents-<name>` to create a
-separate installation; use the same values when stopping it.
-
-Implemented startup and recovery behavior has historical local evidence in
-[DEL-05](docs/verification/requirements/DEL-05.md). Builds may acquire dependencies;
-that is distinct from application/provider execution. Do not enable live adapters
-or resume CI as a prerequisite for trying the local mocks.
-
-## Architecture in brief
-
-The React/TypeScript/Vite UI is the configuration and control surface. FastAPI
-validates intake and exposes catalog, configuration, run, artifact, and approval
-resources. Separate run and scheduler workers share PostgreSQL with the API through
-application services; the scheduler admits work rather than executing it itself.
-
-Version-controlled `catalog/v1` is authoritative for templates, schemas, prompts,
-and the source hierarchy. Migration and repeatable seed create its database
-projection while preserving instance-level operator configuration. Domain and
-application layers depend on typed ports, not a model SDK. Deterministic routing
-constructs explicit dependency graphs and passes typed artifacts. Each external
-action has its own immutable approval and persisted idempotency identity.
-
-Compose initializes a private digest key, migrates/seeds once, then starts the
-API, workers, and web. The web proxy reaches the API through a Unix socket;
-backend containers have no IP network. PostgreSQL 17 is the primary Compose database,
-reached through a separate private Unix socket with no published database port.
-SQLite is retained only as an explicit compatibility mode. See
-[architecture](docs/architecture.md) for boundaries and flow, and
-[adapter contracts](docs/adapter-contracts.md) for deferred real integrations.
-
-## Try the workflows
-
-Open **Demos** in the navigation. Each scenario supplies a schema-driven safe
-preset; use synthetic data and **Reset safe preset** to restore it. These are
-deterministic mock walkthroughs, not live delivery tests:
-
-1. **Social content draft:** keep the supplied idea, audience, tone, and key
-   points; select **Create draft**. Follow **Open accepted run**, then **Open
-   artifacts**, to inspect the `social_post_draft` and provenance. Nothing is
-   published to LinkedIn.
-2. **Blog & SEO content review:** keep the supplied article excerpt, timestamps,
-   keywords, and product metadata; select **Create review**. Inspect the
-   `content_review` for gaps and recommendations. Its canonical URL is a reference,
-   not a page that was fetched; no CMS is updated.
-3. **Email signup onboarding:** keep the synthetic signup and consent; select
-   **Propose onboarding actions**. Follow **Open approval queue**, review each
-   immutable newsletter/CRM action, and confirm **Approve exact action** for
-   each. Zero or one valid approval permits no connector calls. After both valid
-   approvals, the worker records one mock call per action and creates an unsent
-   welcome draft. A recorded approval alone is not a delivery receipt.
-4. **Community reminder draft:** keep the event signup, IANA timezone, local
-   session time, and offset; select **Create reminder draft**. Inspect the
-   `scheduled_reminder_draft` and recommended UTC time. Despite that artifact
-   name, no reminder is sent and no external schedule or enrollment is created.
-5. **Partnership application review:** keep the supplied synthetic application,
-   criteria, and evidence; select **Create advisory review**. Inspect the
-   `partner_review_recommendation`, missing information, and rationale. The
-   preset recommends `needs_information`; no applicant is accepted, rejected,
-   researched online, or notified automatically.
-
-An accepted receipt proves durable intake, not completion or measured call
-counts. Inspect the authoritative run, timeline, and artifacts; scenario cards
-show the expected contract. [Demo walkthroughs](docs/demos.md) give exact inputs,
-approval steps, expected results, limitations, and executable evidence.
-
-The **Org chart** supports search, zoom, instance details, and a keyboard-accessible
-tree on narrow screens. **Approvals** and **Runs & audit** expose recorded work.
-Configuration, work, approvals, artifacts, and audit events persist in PostgreSQL.
-
-## Development and verification
-
-The secondary native workflow uses Python 3.12, Node **24.20.0**, pnpm **11.24.0**,
-and uv **0.10.7**, plus installed PostgreSQL server/client tools. Activate those installed versions before running:
+For native development, install **Python 3.12**, **Node 24.20.0**, **pnpm 11.24.0**,
+and **uv 0.10.7**, plus PostgreSQL 14+ server/client tools with matching major versions
+(`initdb`, `postgres`, `pg_ctl`, and `psql`). Activate the pinned Node and package-manager
+versions before running:
 
 ```sh
 make bootstrap
 make dev
 ```
 
-`make dev` supervises API, workers, scheduler, and Vite at
-[http://127.0.0.1:5173](http://127.0.0.1:5173), using the ignored `data/native`
-installation, including an owned socket-only PostgreSQL process. Ctrl-C stops only
-its child processes and retains database/key state. An existing SQLite installation
-requires explicit `--database sqlite`; startup never silently hides its records. See
-[operations](docs/operations.md) for explicit paths, paired backups, recovery,
-networking, and troubleshooting.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The supervisor owns the API,
+workers, Vite, and a socket-only PostgreSQL process under ignored `data/native`.
+Ctrl-C stops its child processes and retains database/key state. Startup uses installed
+tools, strips inherited credentials and proxy/loader variables, and does not acquire
+missing packages automatically; dependency acquisition belongs to `make bootstrap`.
 
-Startup uses installed tools only, including prerequisite version checks. It
-strips inherited credential, proxy, and loader variables and disables Corepack
-downloads and pnpm updates. If the pinned package manager is not cached, startup
-fails with a bootstrap instruction; it does not fetch it automatically.
-`make verify-native-offline` separately qualifies the installed native stack with
-explicit SQLite compatibility, fresh state, an empty home, five mock demos, and a restart.
-DEL-10 separately requires the PostgreSQL native startup/restart gate. See the
-[OBJ-04 evidence and guard limits](docs/verification/requirements/OBJ-04.md).
+### Repository layout
+
+```text
+apps/
+  api/src/marketing_agents/
+    api/                 FastAPI routes and transport
+    application/         Services, orchestration, policies, and ports
+    domain/              Framework-independent rules and entities
+    infrastructure/      Persistence, catalog compiler, and adapters
+    workers/             API, run, and scheduler entry points
+    observability/       Bounded local diagnostics
+  web/src/               React operator console and API client
+catalog/
+  v1/                    Versioned definitions, prompts, schemas, and release lock
+  schema/                Catalog validation schemas
+docker/                  Container builds and web proxy configuration
+docs/                    Architecture, operations, demos, and verification evidence
+scripts/                 Local lifecycle, catalog, and verification tooling
+tests/                   Backend, catalog, contract, integration, and safety checks
+```
 
 ## Current verification commands
 
@@ -189,44 +270,55 @@ it is not live-stack proof. [DEL-01](docs/verification/requirements/DEL-01.md)
 requires fresh complete source-bound quality, clean-state and paired-backup
 qualification before a merge request. Neither command enables CI or real adapters.
 
-## Local-only safety boundary
+## Operating boundaries
 
-### PostgreSQL primary and SQLite compatibility
+This is a **single-operator local application**. Local identity gives the operator
+administrative and approval privileges, including self-approval. Anyone who can reach
+the loopback UI or control Docker is inside that trust boundary. It does not provide
+production authentication, multi-user isolation, or live-provider delivery guarantees.
 
-Claim: **Implemented but not live-tested** until the exact DEL-10 candidate passes
-its recorded qualification. `make up` owns fresh PostgreSQL data, socket and paired
-key volumes; it does not connect to an unrelated server or migrate SQLite implicitly.
-If the selected project has an existing SQLite data volume, startup stops with an
-explicit choice. Use `MARKETING_AGENTS_DATABASE=sqlite make up` for that preserved
-installation, or choose a separate project for PostgreSQL. Never delete the old
-database or regenerate its key to force a switch. PostgreSQL being the primary
-local database is not production/cloud, HA or live-provider qualification.
+Database and digest-key state form a pair: preserve and back them up together. Use the
+[local operations runbook](docs/local-operations.md) for paired backups and restores,
+and [data handling](docs/data-handling.md) for redaction and retention behavior.
+PostgreSQL being the default local database does not establish production, cloud, or
+high-availability qualification.
 
-This is not a multi-user production deployment. Local identity grants the local
-operator administrative and approval privileges, including self-approval. Anyone
-who can reach the loopback UI or access Docker is inside that trust boundary.
+The [verification record](docs/verification.md) distinguishes scoped results,
+historical evidence, pending acceptance, and residual risks. CI was paused at the
+operator's request in the recorded operational status; this README does not claim a
+current green CI run or completed release acceptance. Local mocks do not require
+enabling CI or live adapters.
 
-API and worker containers have **no IP network**; the web proxy reaches the API
-through a private Unix socket. Docker Desktop does not publish ports on the
-tested internal-network configurations, so only the credential-free static web
-proxy uses a normal ingress bridge with a loopback-published port. That container
-retains outbound network capability at the OS level; its committed nginx config
-uses only static files and the fixed socket, with no external upstream or DNS
-resolver. Do not interpret mock success as verified real-provider behavior,
-production security, delivery guarantees, or a production backup strategy.
+## Documentation
 
-## Documentation map
+| Guide | What you will find |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Components, ownership, storage, and execution flow |
+| [Demo walkthroughs](docs/demos.md) | Five guided local scenarios and expected outcomes |
+| [Operations](docs/operations.md) | Setup, native development, recovery, and troubleshooting |
+| [Local operations runbook](docs/local-operations.md) | Paired storage, backup, and restore commands |
+| [Catalog authoring](docs/catalog-authoring.md) | Source-backed template and instance changes |
+| [Adapter contracts](docs/adapter-contracts.md) | Mock contracts and deferred real integrations |
+| [Security](docs/security.md) | Trust boundaries, controls, and remaining risks |
+| [Identity and authorization](docs/identity-and-authorization.md) | Local actor, self-approval, and HTTP permissions |
+| [Data handling](docs/data-handling.md) | Redaction, retention, keys, and backups |
+| [Testing](docs/testing.md) | Verification commands, coverage, and gate boundaries |
+| [Verification record](docs/verification.md) | Dated evidence and outstanding qualification |
+| [Assumptions](docs/assumptions.md) | Source precedence and explicit design decisions |
+| [Observability](docs/observability.md) | Local diagnostic and health projections |
 
-- [Architecture](docs/architecture.md): components, ownership, workflows, storage.
-- [Assumptions](docs/assumptions.md): source precedence and explicit decisions.
-- [Security](docs/security.md): trust boundaries, controls, and residual risks.
-- [Identity and authorization](docs/identity-and-authorization.md): local actor,
-  self-approval, and HTTP authorization boundaries.
-- [Data handling](docs/data-handling.md): redaction, retention, keys, and backups.
-- [Adapter contracts](docs/adapter-contracts.md): mocks and real-adapter boundaries.
-- [Catalog authoring](docs/catalog-authoring.md): source-backed template/instance changes.
-- [Testing](docs/testing.md): exact commands, coverage, and known gate gaps.
-- [Operations](docs/operations.md): setup, stopping, recovery, and troubleshooting.
-- [Local operations runbook](docs/local-operations.md): paired storage and exact backup commands.
-- [Demos](docs/demos.md): all five local walkthroughs and expected mock outcomes.
-- [Verification record](docs/verification.md): dated evidence and unverified work.
+## Contributing
+
+Start with the [architecture](docs/architecture.md), [catalog authoring guide](docs/catalog-authoring.md),
+and [requirement branch workflow](docs/implementation/requirement-branch-workflow.md).
+Keep contributions scoped, preserve the mock execution boundary, and document behavior
+changes with their applicable verification evidence. Use synthetic inputs in examples
+and screenshots; do not commit credentials, local databases, or secret-bearing backups.
+
+## License and source material
+
+No `LICENSE` file is currently included; a project license has not yet been declared.
+The catalog's source hierarchy and provenance are recorded in
+[the assumptions register](docs/assumptions.md) and
+[source evidence](catalog/source-evidence.json). Screenshots in this README are captures
+of this application's interface; the architecture diagram is maintained in this repository.
