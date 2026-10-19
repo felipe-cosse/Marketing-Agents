@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1000" viewBox="0 0 1440 1000" role="img" aria-labelledby="diagram-title diagram-description">
+  <title id="diagram-title">Marketing Agents local system architecture</title>
+  <desc id="diagram-description">Local Compose deployment using deterministic mocks. A browser connects over loopback HTTP to nginx, which serves the React application and proxies API requests over a private Unix socket to FastAPI. The API, run worker, and scheduler worker coordinate through PostgreSQL 17 using a separate private Unix socket. Versioned catalog files are validated and compiled by the one-shot migration and seed service. Backend and setup containers have no IP network. Only the web proxy retains an IP network and outbound route. Models and connectors are local mocks; no real providers are used.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="#46706d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-15%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#102a43" flood-opacity="0.05"/>
+    </filter>
+    <style>
+      text { font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; }
+      .heading { fill: #142b43; font-weight: 650; font-size: 40px; letter-spacing: -1px; }
+      .subtitle { fill: #5a6c7b; font-size: 22px; }
+      .label { fill: #142b43; font-weight: 650; font-size: 25px; letter-spacing: -.35px; }
+      .body { fill: #506473; font-size: 20px; }
+      .small { fill: #506473; font-size: 18px; }
+      .eyebrow { fill: #52706d; font-size: 17px; font-weight: 700; letter-spacing: 1.7px; }
+      .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-size: 18px; fill: #36576a; }
+      .flow { fill: none; stroke: #46706d; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .icon { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .card { fill: #fff; stroke: #dce4e8; stroke-width: 1.5; filter: url(#shadow); }
+    </style>
+  </defs>
+
+  <rect width="1440" height="1000" fill="#fafbf9"/>
+  <rect x="60" y="50" width="6" height="61" rx="3" fill="#1f7b70"/>
+  <text class="heading" x="85" y="83">A local platform, with durable coordination.</text>
+  <text class="subtitle" x="85" y="119">Local Compose deployment &#8226; deterministic mocks</text>
+
+  <!-- Browser and the only network-attached application container. -->
+  <rect class="card" x="60" y="180" width="300" height="120" rx="16"/>
+  <rect x="82" y="202" width="44" height="44" rx="11" fill="#edf2f7"/>
+  <g class="icon" stroke="#45627f">
+    <rect x="92" y="214" width="24" height="17" rx="2"/>
+    <path d="M99 237h10m-5-6v6"/>
+  </g>
+  <text class="label" x="141" y="231">Local browser</text>
+  <text class="mono" x="83" y="274">127.0.0.1:8080</text>
+
+  <path class="flow" d="M361 240H448" marker-end="url(#arrow)"/>
+  <text class="small" x="405" y="222" text-anchor="middle">HTTP</text>
+
+  <rect class="card" x="450" y="180" width="300" height="120" rx="16"/>
+  <rect x="472" y="202" width="44" height="44" rx="11" fill="#e5f1ed"/>
+  <g class="icon" stroke="#287567">
+    <rect x="482" y="212" width="24" height="23" rx="3"/>
+    <path d="M482 218h24m-18-3h1m4 0h1m-5 10-3 3 3 3m10-6 3 3-3 3"/>
+  </g>
+  <text class="label" x="531" y="231">Web / nginx</text>
+  <text class="body" x="473" y="274">React UI + API proxy</text>
+
+  <rect x="800" y="185" width="540" height="110" rx="12" fill="#f1f4f2"/>
+  <circle cx="828" cy="215" r="5" fill="#7b8f89"/>
+  <text class="body" x="845" y="222">Only the web proxy joins an IP network.</text>
+  <text class="small" x="824" y="254">Host port is loopback-only; the web container</text>
+  <text class="small" x="824" y="278">still has an outbound route.</text>
+
+  <!-- Persistent backend processes have no IP network. -->
+  <rect x="410" y="352" width="970" height="573" rx="22" fill="#f0f5f3" stroke="#c7dcd6" stroke-width="1.5"/>
+  <text class="eyebrow" x="620" y="389">BACKEND CONTAINERS</text>
+  <rect x="1075" y="370" width="276" height="30" rx="15" fill="#deebe6"/>
+  <text class="mono" x="1213" y="391" text-anchor="middle">network_mode: none</text>
+
+  <path class="flow" d="M575 301V426" marker-end="url(#arrow)"/>
+  <rect x="593" y="315" width="309" height="29" rx="5" fill="#fafbf9"/>
+  <text class="small" x="605" y="337">Private API Unix socket &#183; api.sock</text>
+
+  <rect class="card" x="450" y="430" width="250" height="139" rx="15"/>
+  <rect x="450" y="430" width="250" height="5" rx="2.5" fill="#397d9b"/>
+  <text class="label" x="474" y="473">FastAPI</text>
+  <text class="body" x="474" y="509">Work + approvals</text>
+  <text class="small" x="474" y="541">Read and command API</text>
+
+  <rect class="card" x="750" y="430" width="290" height="139" rx="15"/>
+  <rect x="750" y="430" width="290" height="5" rx="2.5" fill="#258474"/>
+  <text class="label" x="774" y="473">Run worker</text>
+  <text class="body" x="774" y="509">Claim + advance DAGs</text>
+  <text class="small" x="774" y="541">Mock models + connectors</text>
+
+  <rect class="card" x="1090" y="430" width="250" height="139" rx="15"/>
+  <rect x="1090" y="430" width="250" height="5" rx="2.5" fill="#9480b2"/>
+  <text class="label" x="1114" y="473">Scheduler</text>
+  <text class="body" x="1114" y="509">Admit due dry runs</text>
+  <text class="small" x="1114" y="541">Retention maintenance</text>
+
+  <!-- Shared SQL transport, not a process-to-process queue. -->
+  <path class="flow" d="M575 575V650H1215V575" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path class="flow" d="M895 575V650" marker-start="url(#arrow)"/>
+  <circle cx="895" cy="650" r="5" fill="#46706d"/>
+  <path class="flow" d="M895 650V756" marker-end="url(#arrow)"/>
+  <rect x="663" y="677" width="464" height="34" rx="8" fill="#f0f5f3"/>
+  <text class="body" x="895" y="701" text-anchor="middle">Separate private PostgreSQL Unix socket</text>
+
+  <rect class="card" x="645" y="760" width="500" height="115" rx="16"/>
+  <rect x="669" y="787" width="60" height="60" rx="14" fill="#edf2f7"/>
+  <g class="icon" stroke="#45627f">
+    <ellipse cx="699" cy="803" rx="15" ry="6"/>
+    <path d="M684 803v27c0 3.3 6.7 6 15 6s15-2.7 15-6v-27m-30 13c0 3.3 6.7 6 15 6s15-2.7 15-6"/>
+  </g>
+  <text class="label" x="750" y="801">PostgreSQL 17</text>
+  <text class="body" x="750" y="831">Durable state + worker coordination</text>
+  <text class="small" x="750" y="858">Runs &#183; artifacts &#183; approvals &#183; receipts</text>
+  <text class="small" x="895" y="906" text-anchor="middle">No required external broker &#183; no real model or connector providers</text>
+
+  <!-- Versioned source and one-shot bootstrap. -->
+  <rect class="card" x="60" y="430" width="300" height="139" rx="15"/>
+  <rect x="60" y="430" width="300" height="5" rx="2.5" fill="#c7a260"/>
+  <text class="label" x="84" y="473">Versioned catalog</text>
+  <text class="mono" x="84" y="509">catalog/v1</text>
+  <text class="small" x="84" y="541">YAML &#183; prompts &#183; JSON Schema</text>
+
+  <path class="flow" d="M210 570V713" marker-end="url(#arrow)"/>
+  <rect x="89" y="620" width="242" height="34" rx="8" fill="#fafbf9"/>
+  <text class="body" x="210" y="644" text-anchor="middle">Validate + compile</text>
+
+  <rect class="card" x="60" y="717" width="300" height="143" rx="15"/>
+  <text class="label" x="84" y="760">Migrate + seed</text>
+  <text class="body" x="84" y="796">One-shot bootstrap</text>
+  <text class="mono" x="84" y="831">network_mode: none</text>
+  <path class="flow" d="M361 814H641" marker-end="url(#arrow)"/>
+  <rect x="414" y="785" width="177" height="25" rx="5" fill="#f0f5f3"/>
+  <text class="small" x="502" y="804" text-anchor="middle">Schema + catalog</text>
+
+  <path d="M60 952H1380" stroke="#dee5e5"/>
+  <text class="small" x="60" y="980">Startup: private digest-key initialization &#8594; migrations + seed &#8594; healthy services</text>
+  <text class="small" x="1380" y="980" text-anchor="end">Implemented local topology</text>
+</svg>

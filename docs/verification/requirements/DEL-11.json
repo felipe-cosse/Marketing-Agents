@@ -1,0 +1,310 @@
+{
+  "$schema": "../schema/requirement-evidence.schema.json",
+  "schema_version": 1,
+  "requirement_id": "DEL-11",
+  "matrix_statement_sha256": "5e35ba5a894dfc7e7451c7a7b7d9773e027ab1085ea59ded758f05dd60cc2013",
+  "evidence_class": "product",
+  "scope": {
+    "allowed_path_globs": [
+      "README.md",
+      "docs/images/README.md",
+      "docs/images/org-chart.png",
+      "docs/images/demos.png",
+      "docs/images/artifact-output.png",
+      "docs/images/system-architecture.svg",
+      "tests/tooling/test_del_11_public_readme.py",
+      "docs/implementation-plan/16-requirements-traceability-matrix.md",
+      "docs/implementation/requirement-branch-workflow.md",
+      "docs/verification/requirements/DEL-11.json",
+      "docs/verification/requirements/DEL-11.md"
+    ],
+    "required_path_groups": [
+      {
+        "kind": "implementation",
+        "one_of": [
+          "README.md"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "docs/images/README.md"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "docs/images/org-chart.png",
+          "docs/images/demos.png",
+          "docs/images/artifact-output.png"
+        ]
+      },
+      {
+        "kind": "implementation",
+        "one_of": [
+          "docs/images/system-architecture.svg"
+        ]
+      },
+      {
+        "kind": "test",
+        "one_of": [
+          "tests/tooling/test_del_11_public_readme.py"
+        ]
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "public-entrypoint-and-source-grounded-guidance",
+      "type": "documentation",
+      "statement": "The public README retains source-pinned catalog and toolchain facts, usable local setup, product tours, current workflow and approval boundaries, verification distinctions and navigation. Native prerequisites explicitly include Corepack and preserving an existing SQLite installation requires the native database/state selectors.",
+      "test_refs": [
+        "tests/tooling/test_del_11_public_readme.py"
+      ]
+    },
+    {
+      "id": "preserved-local-visual-assets-and-provenance",
+      "type": "contract",
+      "statement": "The three reviewed screenshots and architecture SVG remain bounded local assets with descriptive README references. Screenshot bytes and dimensions match the preserved capture, whose source, synthetic mock data, native environment and reproduction steps are recorded separately from fresh verification evidence.",
+      "test_refs": [
+        "tests/tooling/test_del_11_public_readme.py"
+      ]
+    },
+    {
+      "id": "bounded-passive-architecture-asset",
+      "type": "negative_control",
+      "statement": "The reviewed SVG is accessible and self-contained. Missing, changed, escaped or non-regular visual assets, missing provenance, and active or externally referenced SVG content fail the documentation controls. The diagram discloses the web proxy outbound route instead of claiming universal egress isolation.",
+      "test_refs": [
+        "tests/tooling/test_del_11_public_readme.py"
+      ]
+    },
+    {
+      "id": "source-bound-complete-qualification",
+      "type": "contract",
+      "statement": "The frozen README candidate requires the unchanged complete 20-gate quality run, all four complete offline suites, the exact-source quality audit, committed clean-state PostgreSQL-backed production-browser verification and both Compose recovery paths. A connection witness must fail when only README is restored to the base.",
+      "test_refs": [
+        "tests/tooling/test_del_11_public_readme.py"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "del-11-public-readme-controls",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/tooling/test_del_11_public_readme.py",
+        "tests/tooling/test_del_06_product_docs.py",
+        "tests/tooling/test_exec_06_demo_docs.py",
+        "tests/tooling/test_ac_17_claim_taxonomy.py",
+        "tests/tooling/test_exec_08_handoff.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "public-entrypoint-and-source-grounded-guidance",
+        "preserved-local-visual-assets-and-provenance",
+        "bounded-passive-architecture-asset",
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-documentation-format",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "tests/tooling/test_del_11_public_readme.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-entrypoint-and-source-grounded-guidance",
+        "preserved-local-visual-assets-and-provenance",
+        "bounded-passive-architecture-asset",
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-documentation-lint",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "ruff",
+        "check",
+        "tests/tooling/test_del_11_public_readme.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 60,
+      "network_requirement": "not_required",
+      "covers": [
+        "public-entrypoint-and-source-grounded-guidance",
+        "preserved-local-visual-assets-and-provenance",
+        "bounded-passive-architecture-asset",
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-complete-offline-backend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "backend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-complete-offline-frontend",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "frontend"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-complete-offline-browser",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "browser"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-complete-offline-native",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "scripts/ac_15_offline.py",
+        "run",
+        "--suite",
+        "native"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "loopback_only",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-exact-source-quality-audit",
+      "runner": "argv",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "scripts.ac_16_quality",
+        "audit"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120,
+      "network_requirement": "not_required",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-clean-state-production-delivery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "verify-del-01"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-legacy-sqlite-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-05-compose-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    },
+    {
+      "id": "del-11-postgresql-recovery",
+      "runner": "argv",
+      "argv": [
+        "make",
+        "-j1",
+        "test-del-10-postgresql-backup"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800,
+      "network_requirement": "not_enforced",
+      "covers": [
+        "source-bound-complete-qualification"
+      ]
+    }
+  ],
+  "connection_witness": {
+    "implementation_path_globs": [
+      "README.md"
+    ],
+    "gate_id": "del-11-public-readme-controls"
+  },
+  "limitations": [
+    "DEL-11 continues preserved README checkpoint 5b3b228 on updated main 3ce52a8. It does not rewrite DEL-06, AC-17, AC-18, any checkpoint, or main. Application, Compose, database, network, collector and protected verification policy/schema/executor behavior are unchanged.",
+    "The PNGs are historical captures from source 691a03d with synthetic mock data, not newly captured DEL-11 executions or evidence of real provider delivery. Exact reviewed bytes and dimensions bind the assets; human review supplies visual and privacy context. No arbitrary image safety or semantic correctness guarantee is claimed.",
+    "Mechanical documentation checks catch the declared asset, link, provenance and passive-SVG contracts, not arbitrary prose errors or future source drift. External links and documentation examples are inspected without fetching destinations or executing the examples. Existing 13-guide DEL-06 and claim-taxonomy checks remain intact.",
+    "The four offline suites retain their existing inventory and optional PostgreSQL semantics; optional skips do not qualify PostgreSQL. The committed clean-state journey separately requires live PostgreSQL verification, and both Compose recovery paths are mandatory. No additional host-native PostgreSQL or standalone VMA diagnostic result is claimed.",
+    "Source-bound image acquisition is explicit and separate from runtime verification. Existing 1800-second suite/recovery bounds and 1620/120-second clean-state execution/cleanup limits, all network checks, test inventories and coverage rules remain unchanged.",
+    "The connection witness restores only README to the base while retaining tests and visual assets. It must fail through the missing public-tour/image-reference contract, not an import error, missing dependency or deadline. The normal candidate gate and complete frozen-source qualification must pass first.",
+    "Full verification remains pending until this exact frozen candidate passes the complete 20-gate quality run and all 11 manifest gates plus the connection witness. Historical evidence and unsigned local consistency records do not authenticate execution or establish production qualification.",
+    "CI remains disabled, not green. Every checkpoint is preserved. Publication and non-fast-forward merge require explicit user approval after successful full verification. Keep execution evidence outside Git and never include credentials, database files or backup/key bundles."
+  ]
+}
