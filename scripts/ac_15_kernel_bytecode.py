@@ -289,7 +289,7 @@ def network_instructions(map_fd, target_cgroup, regs_offset=64):
 
 
 # Strict control mapping, preserving network counters 0..13 and bytecode.
-COUNTER_NAMES = (
+BASE_COUNTER_NAMES = (
     *NETWORK_COUNTER_NAMES,
     "entry_prctl",
     "entry_seccomp",
@@ -304,6 +304,26 @@ COUNTER_NAMES = (
     "vma_unsupported_started",
     "vma_unsupported_completed",
 )
+# Preserve every authoritative index. Fixed diagnostic bins contain no user
+# data and partition control_read_error; they never add a second rejection.
+READ_DIAGNOSTIC_SITES = (
+    "prctl_args",
+    "seccomp_args",
+    "vma_name",
+    "action_value",
+    "exit_syscall",
+    "exit_result",
+    "notify_sizes",
+    "vma_exit_syscall",
+    "vma_exit_result",
+)
+READ_DIAGNOSTIC_CAUSES = ("efault", "other", "wrap")
+READ_DIAGNOSTIC_NAMES = tuple(
+    "control_read_" + site + "_" + cause
+    for site in READ_DIAGNOSTIC_SITES
+    for cause in READ_DIAGNOSTIC_CAUSES
+)
+COUNTER_NAMES = BASE_COUNTER_NAMES + READ_DIAGNOSTIC_NAMES
 PENDING_MAX_ENTRIES = 4096
 PENDING_VALUE_SIZE = 16
 PENDING_OUTPUT_QUERY = 1
@@ -324,6 +344,7 @@ class _Builder:
     def __init__(self, map_fd, pending_map_fd):
         self.map_fd, self.pending_map_fd = map_fd, pending_map_fd
         self.code, self.labels, self.jumps = [], {}, []
+        self.read_sites = []
 
     def op(self, value, dst=0, src=0, off=0, imm=0):
         self.code.append([value, src << 4 | dst, off, imm & 0xFFFFFFFF])
@@ -354,18 +375,55 @@ class _Builder:
         self.op(0xB7, 1, imm=1)
         self.op(0xDB, 0, 1)
 
-    def read(self, helper, destination, size, pointer, delta=0, failure="control_read_error"):
+    def read(
+        self,
+        helper,
+        destination,
+        size,
+        pointer,
+        delta=0,
+        failure="control_read_error",
+        *,
+        site=None,
+    ):
+        if failure == "control_read_error":
+            if site not in READ_DIAGNOSTIC_SITES or any(site == old[0] for old in self.read_sites):
+                raise ValueError("unique_control_read_site_required")
+            self.read_sites.append((site, helper == 112))
+        elif site is not None:
+            raise ValueError("diagnostic_site_requires_control_read_failure")
+        helper_failure = "diagnostic_" + site if site is not None else failure
+        wrap_failure = helper_failure + "_wrap" if site is not None else failure
         self.op(0xBF, 3, pointer)
         if helper == 112:
             self.op(0xBF, 0, pointer)
             self.op(0x07, 0, imm=delta + size - 1)
-            self.jump(0xAD, failure, dst=0, src=pointer)
+            self.jump(0xAD, wrap_failure, dst=0, src=pointer)
         if delta:
             self.op(0x07, 3, imm=delta)
         self.pointer(1, destination)
         self.op(0xB7, 2, imm=size)
         self.op(0x85, imm=helper)
-        self.jump(0x55, failure, dst=0, imm=0)
+        self.jump(0x55, helper_failure, dst=0, imm=0)
+
+    def read_diagnostics(self):
+        for site, user_read in self.read_sites:
+            label = "diagnostic_" + site
+            self.label(label)
+            # Classify full-width R0 before a counter helper clobbers it. All
+            # nonzero results, including unexpected positive ones, remain fatal.
+            self.jump(0x15, label + "_efault", dst=0, imm=-14)
+            self.increment("control_read_" + site + "_other")
+            self.jump(0x05, "control_read_error")
+            self.label(label + "_efault")
+            self.increment("control_read_" + site + "_efault")
+            self.jump(0x05, "control_read_error")
+            if user_read:
+                # Reject pointer wrap before reading. Never classify the
+                # arithmetic result as an errno or retain its value.
+                self.label(label + "_wrap")
+                self.increment("control_read_" + site + "_wrap")
+                self.jump(0x05, "control_read_error")
 
     def scope_and_key(self, target):
         self.op(0xBF, 6, 1)  # Preserve original fentry/fexit context.
@@ -436,7 +494,7 @@ def instructions(
 
     b.label("prctl")
     b.increment("entry_prctl")
-    b.read(113, -80, 40, 7)
+    b.read(113, -80, 40, 7, site="prctl_args")
     b.op(0x61, 0, 10, off=-80)
     b.jump(0x15, "filter_changes", dst=0, imm=22)
     for option in (3, 21, 51, 64, 16):
@@ -478,12 +536,12 @@ def instructions(
         b.op(0xB7, 8, imm=0)
         b.pending_insert(PENDING_VMA_UNSUPPORTED, 8)
     else:
-        b.read(112, -96, 1, 8)
+        b.read(112, -96, 1, 8, site="vma_name")
         b.jump(0x05, "safe_prctl")
 
     b.label("seccomp")
     b.increment("entry_seccomp")
-    b.read(113, -80, 24, 7)
+    b.read(113, -80, 24, 7, site="seccomp_args")
     b.op(0x61, 0, 10, off=-80)
     b.jump(0x15, "filter_changes", dst=0, imm=0)
     b.jump(0x15, "filter_changes", dst=0, imm=1)
@@ -495,7 +553,7 @@ def instructions(
 
     b.label("action_query")
     b.op(0x79, 8, 10, off=-64)
-    b.read(112, -96, 4, 8)
+    b.read(112, -96, 4, 8, site="action_value")
     b.op(0x61, 0, 10, off=-96)
     for action in SECCOMP_ACTIONS:
         # Use wide constants: a BPF_JMP64 immediate >=2**31 sign-extends.
@@ -510,6 +568,7 @@ def instructions(
     b.op(0x79, 8, 10, off=-64)  # x2 saved before helpers clobber registers.
     b.pending_insert(PENDING_OUTPUT_QUERY, 8)
 
+    b.read_diagnostics()
     for name in (
         "control_queries",
         "safe_prctl",
@@ -551,13 +610,13 @@ def exit_instructions(
     b.label("output_query")
     b.increment("output_queries_completed")
     b.op(0x79, 7, 6)
-    b.read(113, -24, 8, 7, regs_offset)
+    b.read(113, -24, 8, 7, regs_offset, site="exit_syscall")
     b.op(0x61, 0, 10, off=-24)
     b.jump(0x55, "control_state_error", dst=0, imm=277)
-    b.read(113, -24, 8, 7)
+    b.read(113, -24, 8, 7, site="exit_result")
     b.op(0x79, 0, 10, off=-24)
     b.jump(0x55, "control_error", dst=0, imm=0)
-    b.read(112, -96, 6, 8)
+    b.read(112, -96, 6, 8, site="notify_sizes")
     b.increment("control_queries")
     b.jump(0x05, "delete_pending")
     if anon_vma_name_disabled:
@@ -565,15 +624,16 @@ def exit_instructions(
         b.increment("vma_unsupported_completed")
         b.jump(0x55, "control_state_error", dst=8, imm=0)
         b.op(0x79, 7, 6)
-        b.read(113, -24, 8, 7, regs_offset)
+        b.read(113, -24, 8, 7, regs_offset, site="vma_exit_syscall")
         b.op(0x61, 0, 10, off=-24)
         b.jump(0x55, "control_state_error", dst=0, imm=167)
-        b.read(113, -24, 8, 7)
+        b.read(113, -24, 8, 7, site="vma_exit_result")
         b.op(0x79, 0, 10, off=-24)
         # JMP64 sign-extends the immediate: low32 -22 alone does not qualify.
         b.jump(0x55, "control_error", dst=0, imm=-22)
         b.increment("safe_prctl")
         b.jump(0x05, "delete_pending")
+    b.read_diagnostics()
     for name in ("control_error", "control_read_error", "control_state_error"):
         b.label(name)
         b.increment(name)

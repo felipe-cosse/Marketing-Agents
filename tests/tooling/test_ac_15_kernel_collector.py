@@ -1,4 +1,7 @@
-"""Pure collector ABI/protocol tests: never open a BPF object or use Docker."""
+"""Pure collector ABI/protocol and AC-18 read-diagnostic accounting tests.
+
+Never open a BPF object or use Docker.
+"""
 
 import ctypes
 import gzip
@@ -12,7 +15,12 @@ import pytest
 from _pytest.python import IdMaker
 
 from scripts import ac_15_kernel_collector as collector
-from scripts.ac_15_kernel_bytecode import COUNTER_NAMES, exit_instructions, instructions
+from scripts.ac_15_kernel_bytecode import (
+    COUNTER_NAMES,
+    READ_DIAGNOSTIC_NAMES,
+    exit_instructions,
+    instructions,
+)
 
 
 def configuration():
@@ -461,6 +469,32 @@ def test_counter_high_half_or_decrease_marks_overflow_sticky():
     api.counts[0] = 0
     second = instance.snapshot()
     assert second["overflow"] and not second["monotonic"]
+    assert instance.snapshot()["overflow"]
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_ac_18_snapshot_partitions_control_read_errors_without_reset_or_payload(name):
+    instance, api, _ = attached()
+    api.counts[COUNTER_NAMES.index("control_read_error")] = 2
+    api.counts[COUNTER_NAMES.index(name)] = 2
+    value = instance.snapshot()
+    assert value["conservation"] and not value["overflow"]
+    assert set(value["counters"]) == set(COUNTER_NAMES)
+    assert value["counters"][name] == value["counters"]["control_read_error"] == 2
+    api.counts[COUNTER_NAMES.index(name)] += 1
+    assert not instance.snapshot()["conservation"]
+    assert api.counts[COUNTER_NAMES.index(name)] == 3
+
+
+@pytest.mark.parametrize("name", READ_DIAGNOSTIC_NAMES)
+def test_ac_18_diagnostic_counter_overflow_or_regression_stays_sticky(name):
+    instance, api, _ = attached()
+    index = COUNTER_NAMES.index(name)
+    api.counts[index] = collector.COUNTER_LIMIT
+    assert instance.snapshot()["overflow"]
+    api.counts[index] = 0
+    value = instance.snapshot()
+    assert value["overflow"] and not value["monotonic"]
     assert instance.snapshot()["overflow"]
 
 

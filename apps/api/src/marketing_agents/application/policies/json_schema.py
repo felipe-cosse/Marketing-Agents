@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from asyncio import current_task
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from threading import get_ident
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
@@ -28,6 +32,69 @@ _RFC3339_DATE_TIME = re.compile(
     r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]"
     r"(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
 )
+
+_SCHEMA_CHECK_MAX_ENTRIES = 128
+_SCHEMA_CHECK_MAX_BYTES = 1_048_576
+_SchemaCheckKey = tuple[bytes, str | None]
+
+
+def _current_task_identity() -> object | None:
+    try:
+        return current_task()
+    except RuntimeError:
+        return None
+
+
+@dataclass(slots=True)
+class _SchemaDefinitionChecks:
+    owner_thread: int = field(default_factory=get_ident)
+    owner_task: object | None = field(default_factory=_current_task_identity)
+    successful: set[_SchemaCheckKey] = field(default_factory=set)
+    retained_bytes: int = 0
+    active: bool = True
+
+    def belongs_to_current_call(self) -> bool:
+        return (
+            self.active
+            and self.owner_thread == get_ident()
+            and self.owner_task is _current_task_identity()
+        )
+
+    def remember(self, key: _SchemaCheckKey) -> None:
+        size = len(key[0]) + (0 if key[1] is None else len(key[1].encode("utf-8")))
+        if (
+            self.belongs_to_current_call()
+            and key not in self.successful
+            and len(self.successful) < _SCHEMA_CHECK_MAX_ENTRIES
+            and size <= _SCHEMA_CHECK_MAX_BYTES - self.retained_bytes
+        ):
+            self.successful.add(key)
+            self.retained_bytes += size
+
+
+_SCHEMA_DEFINITION_CHECKS: ContextVar[_SchemaDefinitionChecks | None] = ContextVar(
+    "schema_definition_checks", default=None
+)
+
+
+@contextmanager
+def schema_definition_check_scope() -> Iterator[None]:
+    """AC-18: reuse successful structural checks only inside one owned build.
+
+    Every compile still reads/canonicalizes its supplied mapping and checks its
+    identity, dialect and references, then creates a fresh validator. No failed
+    compilation is retained. Nested builds and inherited concurrent contexts
+    cannot reuse another build's checks; escaped contexts expire on exit.
+    """
+    checks = _SchemaDefinitionChecks()
+    token = _SCHEMA_DEFINITION_CHECKS.set(checks)
+    try:
+        yield
+    finally:
+        checks.active = False
+        checks.successful.clear()
+        checks.retained_bytes = 0
+        _SCHEMA_DEFINITION_CHECKS.reset(token)
 
 
 class JsonSchemaPolicyError(ValueError):
@@ -313,9 +380,11 @@ def compile_json_schema(
     if not isinstance(schema, Mapping):
         raise _schema_policy_error("schema_invalid", "JSON Schema must be an object")
     canonical_schema: Any = None
+    canonical_bytes = b""
     schema_canonicalization_failed = False
     try:
-        canonical_schema = json.loads(canonical_json_bytes(schema))
+        canonical_bytes = canonical_json_bytes(schema)
+        canonical_schema = json.loads(canonical_bytes)
     except Exception:
         schema_canonicalization_failed = True
     if schema_canonicalization_failed:
@@ -329,11 +398,21 @@ def compile_json_schema(
             "schema_dialect_unsupported", "JSON Schema dialect is unsupported"
         )
     embedded_schema_id = _validate_schema_identity(canonical_schema, expected_schema_id)
+    checks = _SCHEMA_DEFINITION_CHECKS.get()
+    if checks is not None and (
+        not checks.belongs_to_current_call()
+        or (expected_schema_id is not None and type(expected_schema_id) is not str)
+    ):
+        # Preserve accepted string-subclass behavior without invoking custom
+        # hashing/encoding methods for an optional optimization.
+        checks = None
+    check_key = (canonical_bytes, expected_schema_id)
 
     validator: Draft202012Validator | None = None
     schema_definition_invalid = False
     try:
-        Draft202012Validator.check_schema(canonical_schema)
+        if checks is None or check_key not in checks.successful:
+            Draft202012Validator.check_schema(canonical_schema)
         validator = Draft202012Validator(canonical_schema, format_checker=_format_checker())
     except (SchemaError, TypeError, ValueError):
         schema_definition_invalid = True
@@ -341,11 +420,14 @@ def compile_json_schema(
         raise _schema_policy_error("schema_invalid", "JSON Schema definition is invalid")
     _validate_local_references(canonical_schema)
 
-    return CompiledJsonSchema(
+    compiled = CompiledJsonSchema(
         schema=frozen_json_mapping(canonical_schema, "JSON Schema"),
         schema_id=embedded_schema_id,
         _validator=validator,
     )
+    if checks is not None:
+        checks.remember(check_key)
+    return compiled
 
 
 __all__ = [
@@ -353,4 +435,5 @@ __all__ = [
     "CompiledJsonSchema",
     "JsonSchemaPolicyError",
     "compile_json_schema",
+    "schema_definition_check_scope",
 ]
